@@ -42,6 +42,9 @@ export function apply(ctx: Context, config: Ros2Config): void {
     display: config.display,
     screenshotDir: config.screenshotDir,
     screenshotCommand: config.screenshotCommand,
+    // GUI processes also need the log-dir override (rviz2 aborts when
+    // ~/.ros/log is not writable; the same override runCommand applies).
+    env: config.rosLogDir.length > 0 ? { ROS_LOG_DIR: config.rosLogDir } : undefined,
   })
   let vision: VisionProvider | undefined
   try {

@@ -15,10 +15,22 @@ All notable changes to **dsh-ros2** are documented here. Format follows
   `click` / `drag` / `key`），默认走 `xdotool`（15s 超时，ENOENT 给出安装提示），全走测试 fake。
 - **测试**：新增 13 个交互用例（管理器原语 + 工具层），共 62 个 vitest 用例全绿。
 
+### Fixed
+
+- **wmctrl `-lG` 解析字段顺序错误**（真机冒烟发现）：真实列序为 `id desktop x y w h host title`
+  （几何在 host 之前，desktop 可为 -1、字段间空白不定），旧正则按 `id desktop host x y w h title`
+  解析导致本机枚举 0 窗口——「窗口级截图/交互优雅降级」的真正根因；已修复并补真实输出回归用例，
+  窗口级截图与本机窗口匹配随之恢复可用。
+- **GUI 进程未透传 `rosLogDir`**：`GuiManager.start` 只注入 `DISPLAY`，`~/.ros/log` 不可写时
+  rviz2 因 spdlog 致命错误直接 Abort；新增 `GuiManager env` 注入缝隙，入口将 `rosLogDir` 映射为
+  `ROS_LOG_DIR` 传给 GUI 进程。
+- **`mousemove_relative` 负坐标被 xdotool 当选项**：负增量需 `--` 分隔（`mousemove_relative -- -3 -6`），
+  拖拽步进已加 `--`。
+
 ### Changed
 
 - 工具总数 30 → 33；`docs/architecture.md` / `docs/compatibility.md` / `README.md` 同步更新
-  （交互依赖 `xdotool`，wmctrl 枚举不到窗口时退回绝对坐标）。
+  （交互依赖 `xdotool`；rviz2 需要 GLX 上下文的环境注意；wmctrl 解析修复后窗口匹配可用）。
 
 ## [0.1.0] - 2025-08-17
 

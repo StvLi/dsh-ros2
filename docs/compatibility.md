@@ -17,4 +17,6 @@
 - `ros2 doctor` 做联网版本检查，默认超时已放宽至 60s
 - `ros2 topic echo --once` 在无发布者时会超时（返回 `TIMEOUT` finding，非错误）
 - FastDDS SHM stderr 噪音默认丢弃（`includeStderr=true` 可打开）
-- `~/.ros/log` 不可写时设 `rosLogDir`（如 `$TMPDIR`）
+- `~/.ros/log` 不可写时设 `rosLogDir`（如 `$TMPDIR`）；该覆盖同样作用于 GUI 启动进程
+- RViz2 需要可用的 GLX 上下文：在无 GLX 的显示（如 Xvfb/远程转发）上启动后不会出窗口，属环境限制；
+  可改用 `rqt_graph`/`rqt`（纯 Qt 无 GL 需求）或换 GL 可用的显示/驱动

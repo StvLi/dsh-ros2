@@ -21,9 +21,16 @@ function fakeSpawn(recorder: Array<{ bin: string; args: string[]; env: Record<st
   }
 }
 
+// Real `wmctrl -lG` output format: <id> <desktop> <x> <y> <w> <h> <host> <title>.
 const WMCTRL_OUTPUT = [
-  '0x03a00007  0 host 10 20 800 600 rviz2 - RViz',
-  '0x04b00008  0 host 900 100 400 300 rqt_graph',
+  '0x03a00007  0 10 20 800 600 stvli-desktop rviz2 - RViz',
+  '0x04b00008  0 900 100 400 300 stvli-desktop rqt_graph',
+].join('\n')
+
+// Real-world lines: sticky window (desktop -1) with variable whitespace.
+const WMCTRL_REAL_OUTPUT = [
+  '0x03c00008 -1 8000 0    1440 2560 stvli-desktop-ubuntu-2404 Desktop Icons 1',
+  '0x00c00466  0 3012 1112 2494 1408 stvli-desktop-ubuntu-2404 具身Agent插件开发计划 — DeepSeek Harness — Mozilla Firefox',
 ].join('\n')
 
 function fakeWindowCmd(): WindowCmdFn {
@@ -80,6 +87,14 @@ describe('GuiManager', () => {
     expect(spawnLog[0]?.env.DISPLAY).toBe(':99')
   })
 
+  it('merges extra env (e.g. ROS_LOG_DIR) into the spawned env', () => {
+    const spawnLog: Array<{ bin: string; args: string[]; env: Record<string, string> }> = []
+    const manager = new GuiManager({ spawn: fakeSpawn(spawnLog), env: { ROS_LOG_DIR: '/tmp/roslog' } })
+    manager.start({ label: 'rv', bin: 'x', args: [] })
+    expect(spawnLog[0]?.env.ROS_LOG_DIR).toBe('/tmp/roslog')
+    expect(spawnLog[0]?.env.PATH).toBeDefined()
+  })
+
   it('rejects a duplicate label', () => {
     const { manager } = makeManager()
     manager.start({ label: 'rviz2', bin: 'ros2', args: [] })
@@ -103,6 +118,17 @@ describe('GuiManager', () => {
     expect(windows[0]).toMatchObject({ id: '0x03a00007', x: 10, y: 20, width: 800, height: 600 })
     const found = await manager.findWindow('rviz')
     expect(found?.title).toContain('rviz2 - RViz')
+  })
+
+  it('parses real wmctrl -lG lines (geometry before host, variable whitespace)', async () => {
+    const manager = new GuiManager({ windowCmd: async () => ({ ok: true, stdout: WMCTRL_REAL_OUTPUT }) })
+    const windows = await manager.listWindows()
+    expect(windows).toHaveLength(2)
+    expect(windows[0]).toMatchObject({ id: '0x03c00008', x: 8000, y: 0, width: 1440, height: 2560, title: 'Desktop Icons 1' })
+    expect(windows[1]).toMatchObject({ x: 3012, y: 1112, width: 2494, height: 1408 })
+    expect(windows[1]?.title).toContain('Mozilla Firefox')
+    const found = await manager.findWindow('firefox')
+    expect(found?.id).toBe('0x00c00466')
   })
 
   it('captures via the injected screenshot fn', async () => {
@@ -152,8 +178,8 @@ describe('GuiManager', () => {
     expect(interactLog[1]?.args).toEqual([
       'mousemove', '--window', '0x03a00007', '400', '300',
       'mousedown', '1',
-      'mousemove_relative', '-100', '-75', 'sleep', '0.02',
-      'mousemove_relative', '-100', '-75', 'sleep', '0.02',
+      'mousemove_relative', '--', '-100', '-75', 'sleep', '0.02',
+      'mousemove_relative', '--', '-100', '-75', 'sleep', '0.02',
       'mouseup', '1',
     ])
   })
@@ -170,7 +196,7 @@ describe('GuiManager', () => {
     const result = await manager.drag({ toX: 100, toY: 100, steps: 1 })
     expect(result.ok).toBe(true)
     expect(calls[0]?.args).toEqual(['getmouselocation'])
-    expect(calls[1]?.args).toEqual(['mousemove', '500', '600', 'mousedown', '1', 'mousemove_relative', '-400', '-500', 'sleep', '0.02', 'mouseup', '1'])
+    expect(calls[1]?.args).toEqual(['mousemove', '500', '600', 'mousedown', '1', 'mousemove_relative', '--', '-400', '-500', 'sleep', '0.02', 'mouseup', '1'])
   })
 
   it('sends key combos and types text', async () => {

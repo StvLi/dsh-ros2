@@ -64,7 +64,7 @@ GUI lifecycle + screenshot + multimodal vision ("先能看，再谈动", P8) and
 | `ros2_gui_drag` | xdotool press-drag-release: RViz2 viewpoint control (left-drag orbit, middle-drag pan, right-drag zoom) |
 | `ros2_gui_key` | xdotool keyboard: key combos (e.g. `ctrl+shift+r` reloads the RViz2 display config) or typed text |
 
-Interaction recipes (model-facing): orbit the RViz2 view with `ros2_gui_drag {windowTitle: "rviz2", button: 1, toX: <dx>, toY: <dy>}`, zoom with `button: 3`, reload a display config with `ros2_gui_key {keys: "ctrl+shift+r"}`. When `wmctrl` cannot enumerate windows (known XAUTHORITY limitation), window-relative interaction reports "未找到窗口" — fall back to absolute screen coordinates. Interaction is local to the host session (no approval, same as other L3 tools).
+Interaction recipes (model-facing): orbit the RViz2 view with `ros2_gui_drag {windowTitle: "rviz2", button: 1, toX: <dx>, toY: <dy>}`, zoom with `button: 3`, reload a display config with `ros2_gui_key {keys: "ctrl+shift+r"}`. When `wmctrl` cannot enumerate windows (e.g. no window manager on the display), window-relative interaction reports "未找到窗口" — fall back to absolute screen coordinates. Interaction is local to the host session (no approval, same as other L3 tools).
 
 ## Skill
 

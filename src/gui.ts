@@ -46,6 +46,8 @@ export interface GuiManagerOptions {
   interact?: InteractFn
   kill?: (pid: number, signal: string) => boolean
   display?: string
+  /** Extra env vars merged into every spawned GUI process (e.g. ROS_LOG_DIR). */
+  env?: Record<string, string>
   screenshotDir?: string
   screenshotCommand?: string
 }
@@ -124,6 +126,7 @@ export class GuiManager {
     const env: Record<string, string> = {
       ...process.env,
       ...(this.options.display ? { DISPLAY: this.options.display } : {}),
+      ...this.options.env,
       ...spec.env,
     }
     const spawnFn = this.options.spawn ?? defaultSpawn
@@ -286,7 +289,9 @@ export class GuiManager {
     for (let i = 1; i <= steps; i++) {
       const cx = Math.round(fromX + (dx * i) / steps)
       const cy = Math.round(fromY + (dy * i) / steps)
-      args.push('mousemove_relative', String(cx - prevX), String(cy - prevY), ...pause)
+      // `--` terminates option parsing: xdotool treats a leading negative
+      // coordinate as an option otherwise (mousemove_relative -3 -6 fails).
+      args.push('mousemove_relative', '--', String(cx - prevX), String(cy - prevY), ...pause)
       prevX = cx
       prevY = cy
     }
@@ -382,17 +387,22 @@ async function defaultInteract(args: string[], opts: { display?: string } = {}):
   }
 }
 
-/** Parse one `wmctrl -lG` line: id desktop host x y w h title... */
+/**
+ * Parse one `wmctrl -lG` line. Real output columns (wmctrl 1.07):
+ * <window_id> <desktop> <x> <y> <width> <height> <host> <title...>
+ * (geometry comes BEFORE the host/machine column; desktop may be -1 for
+ * sticky windows, and fields are separated by variable whitespace).
+ */
 function parseWindowLine(line: string): WindowInfo | null {
-  const match = line.match(/^(0x[0-9a-f]+)\s+\S+\s+\S+\s+(-?\d+)\s+(-?\d+)\s+(\d+)\s+(\d+)\s+(.*)$/)
+  const match = line.match(/^(0x[0-9a-f]+)\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+(\d+)\s+(\d+)\s+\S+\s+(.*)$/)
   if (!match) return null
   return {
     id: match[1]!,
-    x: Number(match[2]),
-    y: Number(match[3]),
-    width: Number(match[4]),
-    height: Number(match[5]),
-    title: (match[6] ?? '').trim(),
+    x: Number(match[3]),
+    y: Number(match[4]),
+    width: Number(match[5]),
+    height: Number(match[6]),
+    title: (match[7] ?? '').trim(),
   }
 }
 
