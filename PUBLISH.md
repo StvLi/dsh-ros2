@@ -25,23 +25,64 @@ npm view dsh-ros2                      # 验证
 > 前置：`package.json` 的 `name: dsh-ros2` 需在 npm 上未被占用（`npm view dsh-ros2` 返回 404 即可发）。
 > 版本管理：后续用 `pnpm version patch/minor/major` 打 tag，GitHub 建 Release 指向 v0.1.0。
 
-## 3. 社区目录收录（各一个 PR/Issue）
+## 3. 社区目录收录（已具备条件：`dsh.bundle` manifest ✅ / `dsh-plugin` topic ✅）
 
-### awesome-dsh-plugin（https://github.com/awesome-dsh-plugin/awesome-dsh-plugin）
+### 3.1 awesome-dsh-plugin（首选目录，https://github.com/awesome-dsh-plugin/awesome-dsh-plugin）
 
-在插件列表追加一行：
+**收录硬性要求（CI 自动检查）**：
+- ✅ `package.json` 声明 `dsh.bundle`（已加：`"dsh": { "bundle": { "patch": "./cordis.patch.yml" } }`）
+- ✅ 真实代码、MIT、`dsh-plugin` topic（已加）
+- ⚠️ **仓库创建满 1 天 + 提交数 ≥ 10**（当前提交数未达，继续迭代即可；未达标提交会被自动检查拦下，重提不受影响）
 
-```markdown
-| [dsh-ros2](https://github.com/StvLi/dsh-ros2) | ROS2 调试工具集与诊断 skill：节点/话题/服务/动作/参数/接口枚举、topic 采样、TF、图拓扑 JSON、rosdep 依赖检查、ros2doctor；审批门控的 colcon build（后台任务）/rosdep install/自定义消息骨架/param set/bag record；X11 截图 + 可插拔多模态视觉（Gemini/OpenAI）观察 RViz2/rqt_graph |
+**投稿方式**（PR，只加一个文件）：
+
+```bash
+# fork https://github.com/awesome-dsh-plugin/awesome-dsh-plugin
+git clone git@github.com:<你>/awesome-dsh-plugin.git && cd awesome-dsh-plugin
+git checkout -b add-dsh-ros2
 ```
 
-### dsh-suite（https://github.com/whyihaveyou/dsh-suite）
+创建 `data/plugins/StvLi__dsh-ros2.yml`：
 
-按其 README 的提交格式提供：`dsh-ros2`、npm 包名、GitHub 地址、简介一句话、兼容基线（DSH `0.1.0-rc.6`、Node `^22.19 || >=24`）。
+```yaml
+url: https://github.com/StvLi/dsh-ros2
+name: StvLi/dsh-ros2
+category: tools
+description:
+  en: "ROS2 debugging toolset for DeepSeek Harness: node/topic/service/interface/TF enumeration, graph JSON, rosdep checks, approval-gated builds and message scaffolding, plus GUI screenshot and multimodal vision observation."
+  zh: "面向 DeepSeek Harness 的 ROS2 调试工具集：节点/话题/服务/接口/TF 枚举、拓扑图 JSON、依赖检查，审批门控的构建与消息骨架生成，以及 GUI 截图与多模态视觉观察。"
+```
 
-### dsh-community-plugins / dshmarket（https://github.com/HubaKing/dsh-community-plugins）
+重新生成 README 后提交 PR：
 
-注册 `dsh-community-plugins` skill 后按插件市场格式提交：`name: dsh-ros2`、`repo: https://github.com/StvLi/dsh-ros2`、`desc: ROS2 调试工具集（诊断 + 审批管理 + GUI 视觉观察）`。
+```bash
+npm ci && node scripts/generate-readme.mjs
+git add -A && git commit -m "add dsh-ros2" && git push -u origin add-dsh-ros2
+# 打开 PR（描述简述功能 + 附 CI 通过的仓库 Actions 链接）
+```
+
+### 3.2 dsh-market（应用内插件市场，https://github.com/dsh-market/dsh-market）
+
+npm 发布后即可在应用内市场搜索安装（`dsh plugin --profile web add dshmarket`）。市场数据源覆盖 awesome 列表与 npm，通常自动出现；若需手动登记按该仓库 README 提交。
+
+### 3.3 dsh-suite（https://github.com/whyihaveyou/dsh-suite）
+
+插件活目录（每小时刷新、每日兼容实测）。npm 发布 + GitHub 有 `dsh-plugin` topic 后大概率自动收录；如需主动登记，按其 README 的提交格式（npm 包名 + 仓库地址 + 简介）开 PR/issue。
+
+### 3.4 dsh-community-plugins / Oh-My-DSH（可选）
+
+- `dsh-community-plugins`：装它只是让 Agent 学会发现插件的 skill，不是收录渠道本身
+- Oh-My-DSH（`data/plugins.json`）：按其仓库格式追加条目并 PR
+
+### 3.5 一次性执行（仓库侧已就绪）
+
+```bash
+# ① 发布 npm（一切的前提）
+npm login
+pnpm publish --access public
+# ② 确认 topic（已加）
+gh repo edit StvLi/dsh-ros2 --add-topic dsh-plugin
+```
 
 ## 4. 发布前自检
 
