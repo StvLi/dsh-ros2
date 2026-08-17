@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { GuiManager, type ScreenshotFn, type SpawnedProcess, type SpawnFn, type WindowCmdFn } from '../src/gui.js'
+import { GuiManager, type InteractFn, type ScreenshotFn, type SpawnedProcess, type SpawnFn, type WindowCmdFn } from '../src/gui.js'
 import { MockVisionProvider, createVisionProvider } from '../src/vision.js'
 import { createRos2Tools, type ToolDeps, type ToolResult } from '../src/tools.js'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
@@ -37,18 +37,27 @@ function fakeScreenshot(recorder: Array<{ output: string; opts: unknown }>): Scr
   }
 }
 
-function makeManager(overrides: { spawn?: SpawnFn; windowCmd?: WindowCmdFn; screenshot?: ScreenshotFn; kill?: (pid: number, s: string) => boolean } = {}) {
+function fakeInteract(recorder: Array<{ args: string[]; display?: string }>): InteractFn {
+  return async (args, opts) => {
+    recorder.push({ args, ...(opts?.display ? { display: opts.display } : {}) })
+    return { ok: true, stdout: '' }
+  }
+}
+
+function makeManager(overrides: { spawn?: SpawnFn; windowCmd?: WindowCmdFn; screenshot?: ScreenshotFn; interact?: InteractFn; kill?: (pid: number, s: string) => boolean } = {}) {
   const spawnLog: Array<{ bin: string; args: string[]; env: Record<string, string> }> = []
   const shotLog: Array<{ output: string; opts: unknown }> = []
+  const interactLog: Array<{ args: string[]; display?: string }> = []
   const killed: Array<{ pid: number; signal: string }> = []
   const manager = new GuiManager({
     spawn: overrides.spawn ?? fakeSpawn(spawnLog),
     windowCmd: overrides.windowCmd ?? fakeWindowCmd(),
     screenshot: overrides.screenshot ?? fakeScreenshot(shotLog),
+    interact: overrides.interact ?? fakeInteract(interactLog),
     kill: overrides.kill ?? ((pid, signal) => { killed.push({ pid, signal }); return true }),
     screenshotDir: '/tmp/dsh-ros2-test',
   })
-  return { manager, spawnLog, shotLog, killed }
+  return { manager, spawnLog, shotLog, interactLog, killed }
 }
 
 // ── GuiManager ───────────────────────────────────────────────────────────
@@ -102,6 +111,87 @@ describe('GuiManager', () => {
     if (!result.ok) throw new Error(result.error)
     expect(result.path).toMatch(/screen_\d+\.png$/)
     expect(shotLog[0]).toMatchObject({ opts: { windowTitle: 'rviz2' } })
+  })
+
+  // ── xdotool interaction (P4) ───────────────────────────────────────────
+
+  it('clicks at absolute coordinates', async () => {
+    const { manager, interactLog } = makeManager()
+    const result = await manager.click({ x: 100, y: 200, button: 1 })
+    expect(result.ok).toBe(true)
+    expect(interactLog[0]?.args).toEqual(['mousemove', '100', '200', 'click', '1'])
+  })
+
+  it('clicks at a window center after activating it', async () => {
+    const { manager, interactLog } = makeManager()
+    const result = await manager.click({ windowTitle: 'rviz2' })
+    expect(result.ok).toBe(true)
+    expect(interactLog[0]?.args).toEqual(['windowactivate', '0x03a00007'])
+    expect(interactLog[1]?.args).toEqual(['mousemove', '--window', '0x03a00007', '400', '300', 'click', '1'])
+  })
+
+  it('repeats a scroll click with --repeat', async () => {
+    const { manager, interactLog } = makeManager()
+    const result = await manager.click({ button: 4, count: 5 })
+    expect(result.ok).toBe(true)
+    expect(interactLog[0]?.args).toEqual(['click', '--repeat', '5', '--delay', '100', '4'])
+  })
+
+  it('reports a missing window for window-relative clicks', async () => {
+    const { manager } = makeManager()
+    const result = await manager.click({ windowTitle: 'nope' })
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error).toContain('未找到窗口')
+  })
+
+  it('drags from the window center to an offset in steps', async () => {
+    const { manager, interactLog } = makeManager()
+    const result = await manager.drag({ windowTitle: 'rviz2', toX: 200, toY: 150, steps: 2 })
+    expect(result.ok).toBe(true)
+    expect(interactLog[0]?.args).toEqual(['windowactivate', '0x03a00007'])
+    expect(interactLog[1]?.args).toEqual([
+      'mousemove', '--window', '0x03a00007', '400', '300',
+      'mousedown', '1',
+      'mousemove_relative', '-100', '-75', 'sleep', '0.02',
+      'mousemove_relative', '-100', '-75', 'sleep', '0.02',
+      'mouseup', '1',
+    ])
+  })
+
+  it('defaults the drag start to the current pointer when absolute', async () => {
+    const calls: Array<{ args: string[]; display?: string }> = []
+    const interact: InteractFn = async (args) => {
+      calls.push({ args })
+      return args[0] === 'getmouselocation'
+        ? { ok: true, stdout: 'x:500 y:600 screen:0 window:123' }
+        : { ok: true, stdout: '' }
+    }
+    const manager = new GuiManager({ interact, screenshotDir: '/tmp/dsh-ros2-test' })
+    const result = await manager.drag({ toX: 100, toY: 100, steps: 1 })
+    expect(result.ok).toBe(true)
+    expect(calls[0]?.args).toEqual(['getmouselocation'])
+    expect(calls[1]?.args).toEqual(['mousemove', '500', '600', 'mousedown', '1', 'mousemove_relative', '-400', '-500', 'sleep', '0.02', 'mouseup', '1'])
+  })
+
+  it('sends key combos and types text', async () => {
+    const { manager, interactLog } = makeManager()
+    const combo = await manager.key({ keys: 'ctrl+shift+r' })
+    expect(combo.ok).toBe(true)
+    expect(interactLog[0]?.args).toEqual(['key', 'ctrl+shift+r'])
+    const typed = await manager.key({ text: 'hello world', delayMs: 50 })
+    expect(typed.ok).toBe(true)
+    expect(interactLog[1]?.args).toEqual(['type', '--delay', '50', 'hello world'])
+    const focused = await manager.key({ windowTitle: 'rqt_graph', keys: 'Return' })
+    expect(focused.ok).toBe(true)
+    expect(interactLog[2]?.args).toEqual(['windowactivate', '0x04b00008'])
+    expect(interactLog[3]?.args).toEqual(['key', 'Return'])
+  })
+
+  it('rejects key() with neither keys nor text', async () => {
+    const { manager } = makeManager()
+    const result = await manager.key({})
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error).toContain('keys 或 text')
   })
 })
 
