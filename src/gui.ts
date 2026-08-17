@@ -45,6 +45,8 @@ export interface GuiManagerOptions {
   screenshot?: ScreenshotFn
   interact?: InteractFn
   kill?: (pid: number, signal: string) => boolean
+  /** Whether any process remains in the group led by `pid` (close() polling). */
+  groupAlive?: (pid: number) => boolean
   display?: string
   /** Extra env vars merged into every spawned GUI process (e.g. ROS_LOG_DIR). */
   env?: Record<string, string>
@@ -154,11 +156,26 @@ export class GuiManager {
     return [...this.sessions.values()]
   }
 
-  close(label: string): boolean {
+  /**
+   * Close a session: SIGTERM the whole process group (a `ros2 run` wrapper
+   * spawns the real GUI child, so the pid alone is not enough), wait up to
+   * graceMs for the group to exit, then SIGKILL it (some Qt apps — e.g.
+   * rqt_graph — ignore SIGTERM). Returns whether a session existed.
+   */
+  async close(label: string, opts: { graceMs?: number } = {}): Promise<boolean> {
     const session = this.sessions.get(label)
     if (!session) return false
     const kill = this.options.kill ?? defaultKill
-    kill(session.pid, 'SIGTERM')
+    const groupAlive = this.options.groupAlive ?? processGroupAlive
+    const groupId = -session.pid
+    kill(groupId, 'SIGTERM')
+    const graceMs = Math.max(0, opts.graceMs ?? 3000)
+    const deadline = Date.now() + graceMs
+    while (Date.now() < deadline) {
+      if (!groupAlive(session.pid)) break
+      await sleep(200)
+    }
+    if (groupAlive(session.pid)) kill(groupId, 'SIGKILL')
     this.sessions.delete(label)
     return true
   }
@@ -357,11 +374,27 @@ function defaultSpawn(bin: string, args: string[], opts: { env: Record<string, s
 
 function defaultKill(pid: number, signal: string): boolean {
   try {
+    // Negative pid = signal the whole process group (spawn uses detached:true,
+    // so GUI children share the group led by the spawned process).
     process.kill(pid, signal as NodeJS.Signals)
     return true
   } catch {
     return false
   }
+}
+
+/** True while any process remains in the group led by `pid`. */
+function processGroupAlive(pid: number): boolean {
+  try {
+    process.kill(-pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 /** `wmctrl -lG` via the host PATH (which usually includes ~/.local/bin). */

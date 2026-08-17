@@ -102,13 +102,35 @@ describe('GuiManager', () => {
     expect(second.ok).toBe(false)
   })
 
-  it('closes a session with SIGTERM', () => {
+  it('closes a session via process-group SIGTERM', async () => {
     const { manager, killed } = makeManager()
     manager.start({ label: 'rviz2', bin: 'ros2', args: [] })
     const session = manager.list()[0]
-    expect(manager.close('rviz2')).toBe(true)
-    expect(killed).toContainEqual({ pid: session?.pid, signal: 'SIGTERM' })
-    expect(manager.close('rviz2')).toBe(false)
+    await expect(manager.close('rviz2')).resolves.toBe(true)
+    // Fake pid does not exist, so the group is already gone — SIGTERM only.
+    expect(killed).toContainEqual({ pid: -(session?.pid ?? 0), signal: 'SIGTERM' })
+    await expect(manager.close('rviz2')).resolves.toBe(false)
+  })
+
+  it('escalates to SIGKILL when the group ignores SIGTERM', async () => {
+    const pid = 4242
+    const killed: Array<{ pid: number; signal: string }> = []
+    // Fake group stays alive until SIGKILL so close() escalates.
+    let groupAlive = true
+    const manager = new GuiManager({
+      spawn: () => ({ pid, unref() {}, on() {}, kill() { return true } }),
+      kill: (target, signal) => {
+        killed.push({ pid: target, signal })
+        if (signal === 'SIGKILL') groupAlive = false
+        return true
+      },
+      groupAlive: () => groupAlive,
+    })
+    manager.start({ label: 'stubborn', bin: 'app', args: [] })
+    await manager.close('stubborn', { graceMs: 50 })
+    expect(killed).toContainEqual({ pid: -pid, signal: 'SIGTERM' })
+    expect(killed).toContainEqual({ pid: -pid, signal: 'SIGKILL' })
+    expect(manager.list()).toHaveLength(0)
   })
 
   it('lists and finds X11 windows', async () => {

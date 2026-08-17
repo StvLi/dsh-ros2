@@ -26,6 +26,10 @@ All notable changes to **dsh-ros2** are documented here. Format follows
   `ROS_LOG_DIR` 传给 GUI 进程。
 - **`mousemove_relative` 负坐标被 xdotool 当选项**：负增量需 `--` 分隔（`mousemove_relative -- -3 -6`），
   拖拽步进已加 `--`。
+- **`ros2_gui_close` 关不掉通过 `ros2 run` 启动的 GUI**（真机验收发现）：SIGTERM 只发给包装进程，
+  rqt_graph 等派生的 python/Qt 进程残留、窗口仍在；且 PyQt 应用会忽略 SIGTERM。现改为
+  **进程组 SIGTERM → 轮询等待（默认 3s）→ 进程组 SIGKILL**（`close` 变异步，`groupAlive` 可注入），
+  真机验证窗口彻底关闭、无残留进程。
 
 ### Changed
 

@@ -949,11 +949,11 @@ function makeGuiListTool(deps: ToolDeps) {
   })
 }
 
-/** L3: close a tracked GUI session (SIGTERM). */
+/** L3: close a tracked GUI session (process-group SIGTERM, SIGKILL fallback). */
 function makeGuiCloseTool(deps: ToolDeps) {
   return defineTool({
     name: 'ros2_gui_close',
-    description: 'Close a tracked GUI session by label (SIGTERM). List labels with ros2_gui_list.',
+    description: 'Close a tracked GUI session by label (SIGTERM to the whole process group, SIGKILL fallback after a grace period — some Qt apps ignore SIGTERM). List labels with ros2_gui_list.',
     parameters: {
       label: { type: 'string', required: true, description: 'Session label, e.g. rviz2.' },
     },
@@ -963,7 +963,7 @@ function makeGuiCloseTool(deps: ToolDeps) {
       const label = String(params.label)
       const command = `gui close ${label}`
       if (!deps.gui) return toolError('ros2_gui_close', command, 'GUI_UNAVAILABLE', 'GUI 管理器未启用')
-      const closed = deps.gui.close(label)
+      const closed = await deps.gui.close(label)
       const value: ToolResult = { ok: true, tool: 'ros2_gui_close', command, data: { closed, label } }
       return value
     },
