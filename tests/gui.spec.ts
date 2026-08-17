@@ -62,7 +62,13 @@ describe('GuiManager', () => {
     expect(result.session.pid).toBeGreaterThan(0)
     expect(manager.list()).toHaveLength(1)
     expect(spawnLog[0]).toMatchObject({ bin: 'ros2', args: ['run', 'rviz2', 'rviz2'] })
-    expect(spawnLog[0]?.env.DISPLAY).toBeDefined()
+  })
+
+  it('injects the configured DISPLAY into the spawned env', () => {
+    const spawnLog: Array<{ bin: string; args: string[]; env: Record<string, string> }> = []
+    const manager = new GuiManager({ spawn: fakeSpawn(spawnLog), display: ':99' })
+    manager.start({ label: 'rv', bin: 'x', args: [] })
+    expect(spawnLog[0]?.env.DISPLAY).toBe(':99')
   })
 
   it('rejects a duplicate label', () => {
