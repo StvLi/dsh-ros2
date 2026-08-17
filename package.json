@@ -1,7 +1,7 @@
 {
   "name": "dsh-ros2",
   "version": "0.1.0",
-  "description": "ROS2 debugging tools and diagnostics skills for DeepSeek Harness (DSH): package/workspace/dependency inspection, node/topic/service/action/param/interface enumeration, topic sampling, TF tree, graph topology JSON, ros2doctor and bag info.",
+  "description": "ROS2 debugging tools and diagnostics skills for DeepSeek Harness (DSH): package/workspace/dependency inspection, node/topic/service/action/param/interface enumeration, topic sampling, TF tree, graph topology JSON, approval-gated builds and message scaffolding, GUI screenshot and multimodal vision observation.",
   "type": "module",
   "main": "./lib/index.js",
   "types": "./lib/types/index.d.ts",
@@ -28,6 +28,7 @@
   },
   "keywords": [
     "dsh",
+    "dsh-plugin",
     "deepseek-harness",
     "ros2",
     "robot",
@@ -35,8 +36,21 @@
     "plugin"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/StvLi/dsh-ros2.git"
+  },
+  "homepage": "https://github.com/StvLi/dsh-ros2",
+  "bugs": {
+    "url": "https://github.com/StvLi/dsh-ros2/issues"
+  },
   "publishConfig": {
     "access": "public"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
   },
   "dependencies": {
     "@deepseek-ai/dsh-tools": "0.1.0-rc.6",
