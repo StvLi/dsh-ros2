@@ -424,6 +424,10 @@ export function createRos2Tools(deps: ToolDeps) {
   tools.push(makeScreenshotTool(deps))
   tools.push(makeVisionDescribeTool(deps))
   tools.push(makeGuiObserveTool(deps))
+  // L3 interaction tools (P4: xdotool click/drag/key on the host display).
+  tools.push(makeGuiClickTool(deps))
+  tools.push(makeGuiDragTool(deps))
+  tools.push(makeGuiKeyTool(deps))
   return tools
 }
 
@@ -509,6 +513,23 @@ function strOrUndefined(value: unknown): string | undefined {
 
 function numOrUndefined(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+/** Recursively keep only JSON-safe values, dropping undefined. */
+function jsonOf(value: unknown): JsonValue {
+  if (value === undefined) return null
+  if (value === null || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return value as JsonValue
+  }
+  if (Array.isArray(value)) return value.map(jsonOf)
+  if (typeof value === 'object') {
+    const out: Record<string, JsonValue> = {}
+    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+      if (entry !== undefined) out[key] = jsonOf(entry)
+    }
+    return out
+  }
+  return String(value)
 }
 
 /** L2: `colcon build` as an approval-gated background job. */
@@ -1052,6 +1073,117 @@ function makeGuiObserveTool(deps: ToolDeps) {
         }
         return value
       }
+    },
+  })
+}
+
+/** L3: xdotool click / scroll (P4 interaction). */
+function makeGuiClickTool(deps: ToolDeps) {
+  return defineTool({
+    name: 'ros2_gui_click',
+    description: 'Send a mouse click or scroll via xdotool on the host display. With windowTitle the pointer moves to (x, y) relative to that window (default: its center); without it, (x, y) are absolute screen coordinates. button: 1 left, 2 middle, 3 right, 4 scroll up, 5 scroll down. count repeats the click (scroll notches for 4/5). Requires xdotool.',
+    parameters: {
+      windowTitle: { type: 'string', default: '', description: 'Optional window title substring; activates it first and makes x/y window-relative.' },
+      x: { type: 'number', default: 0, description: 'X coordinate (window-relative when windowTitle set, else absolute). Empty = window center.' },
+      y: { type: 'number', default: 0, description: 'Y coordinate (see x).' },
+      button: { type: 'number', default: 1, description: 'Mouse button: 1 left, 2 middle, 3 right, 4 scroll up, 5 scroll down.' },
+      count: { type: 'number', default: 1, description: 'Click repeat count (scroll notches for buttons 4/5).' },
+    },
+    output: { schema: resultSchema, render: renderResult },
+    async execute(args) {
+      const params = args as Record<string, unknown>
+      const button = numOrUndefined(params.button) ?? 1
+      const command = `xdotool click ${button}`
+      if (!deps.gui) return toolError('ros2_gui_click', command, 'GUI_UNAVAILABLE', 'GUI 管理器未启用')
+      const result = await deps.gui.click({
+        windowTitle: strOrUndefined(params.windowTitle),
+        x: numOrUndefined(params.x),
+        y: numOrUndefined(params.y),
+        button,
+        count: numOrUndefined(params.count) ?? 1,
+      })
+      if (!result.ok) return toolError('ros2_gui_click', command, 'INTERACT_FAILED', result.error)
+      const value: ToolResult = { ok: true, tool: 'ros2_gui_click', command, data: jsonOf(result.data) }
+      return value
+    },
+  })
+}
+
+/** L3: xdotool press-drag-release (P4 interaction, e.g. RViz2 viewpoint). */
+function makeGuiDragTool(deps: ToolDeps) {
+  return defineTool({
+    name: 'ros2_gui_drag',
+    description: 'Press-drag-release via xdotool (e.g. RViz2 view control: left-drag orbit, middle-drag pan, right-drag zoom). With windowTitle the coordinates are relative to that window (start defaults to its center); without it they are absolute (start defaults to the current pointer via getmouselocation). Requires xdotool.',
+    parameters: {
+      windowTitle: { type: 'string', default: '', description: 'Optional window title substring; activates it first and makes coordinates window-relative.' },
+      fromX: { type: 'number', default: 0, description: 'Start X (default: window center / current pointer).' },
+      fromY: { type: 'number', default: 0, description: 'Start Y.' },
+      toX: { type: 'number', required: true, description: 'End X (window-relative or absolute, matching fromX).' },
+      toY: { type: 'number', required: true, description: 'End Y.' },
+      steps: { type: 'number', default: 10, description: 'Number of intermediate moves (default 10).' },
+      button: { type: 'number', default: 1, description: '1 left (orbit), 2 middle (pan), 3 right (zoom).' },
+      pauseMs: { type: 'number', default: 20, description: 'Pause between steps in ms (default 20).' },
+    },
+    output: { schema: resultSchema, render: renderResult },
+    async execute(args) {
+      const params = args as Record<string, unknown>
+      const toX = numOrUndefined(params.toX)
+      const toY = numOrUndefined(params.toY)
+      const command = 'xdotool drag'
+      if (toX === undefined || toY === undefined) {
+        return toolError('ros2_gui_drag', command, 'INVALID_INPUT', '需要 toX/toY 终点坐标')
+      }
+      if (!deps.gui) return toolError('ros2_gui_drag', command, 'GUI_UNAVAILABLE', 'GUI 管理器未启用')
+      const result = await deps.gui.drag({
+        windowTitle: strOrUndefined(params.windowTitle),
+        fromX: numOrUndefined(params.fromX),
+        fromY: numOrUndefined(params.fromY),
+        toX,
+        toY,
+        steps: numOrUndefined(params.steps),
+        button: numOrUndefined(params.button),
+        pauseMs: numOrUndefined(params.pauseMs),
+      })
+      if (!result.ok) return toolError('ros2_gui_drag', command, 'INTERACT_FAILED', result.error)
+      const value: ToolResult = { ok: true, tool: 'ros2_gui_drag', command, data: jsonOf(result.data) }
+      return value
+    },
+  })
+}
+
+/** L3: xdotool key combos / typed text (P4 interaction). */
+function makeGuiKeyTool(deps: ToolDeps) {
+  return defineTool({
+    name: 'ros2_gui_key',
+    description: 'Send keyboard input via xdotool to the focused window (optionally activating one by title first): key combos like "ctrl+shift+r" (RViz2 display config reload) or literal text with type. Exactly one of keys/text required. Requires xdotool.',
+    parameters: {
+      windowTitle: { type: 'string', default: '', description: 'Optional window title substring to activate first.' },
+      keys: { type: 'string', default: '', description: 'Key or combo, e.g. ctrl+shift+r; multiple combos space-separated.' },
+      text: { type: 'string', default: '', description: 'Literal text to type (mutually exclusive with keys).' },
+      delayMs: { type: 'number', default: 0, description: 'Delay between keys in ms (default 0).' },
+    },
+    output: { schema: resultSchema, render: renderResult },
+    async execute(args) {
+      const params = args as Record<string, unknown>
+      const keys = strOrUndefined(params.keys)
+      const text = typeof params.text === 'string' && params.text.length > 0 ? params.text : undefined
+      const command = keys ? `xdotool key ${keys}` : text !== undefined ? `xdotool type ${text}` : 'xdotool key/type'
+      if (keys && text !== undefined) {
+        return toolError('ros2_gui_key', command, 'INVALID_INPUT', 'keys 与 text 只能二选一')
+      }
+      if (!keys && text === undefined) {
+        return toolError('ros2_gui_key', command, 'INVALID_INPUT', '需要 keys 或 text')
+      }
+      if (!deps.gui) return toolError('ros2_gui_key', command, 'GUI_UNAVAILABLE', 'GUI 管理器未启用')
+      const result = await deps.gui.key({
+        windowTitle: strOrUndefined(params.windowTitle),
+        keys,
+        text,
+        delayMs: numOrUndefined(params.delayMs),
+      })
+      if (!result.ok) return toolError('ros2_gui_key', command, 'INTERACT_FAILED', result.error)
+      const value: ToolResult = { ok: true, tool: 'ros2_gui_key', command, data: jsonOf(result.data) }
+      return value
     },
   })
 }

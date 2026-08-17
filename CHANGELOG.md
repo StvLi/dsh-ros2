@@ -4,6 +4,22 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [SemVer](https://semver.org/).
 
+## [0.2.0] - 2026-08-17
+
+### Added
+
+- **L3 交互（P4「能看也能动」，3 个工具）**：`ros2_gui_click`（xdotool 点击/滚动，窗口激活 + 坐标移动 + `--repeat`）、
+  `ros2_gui_drag`（按下-拖动-释放，RViz2 视点操控：左键旋转/中键平移/右键缩放，支持窗口相对坐标与步进插值）、
+  `ros2_gui_key`（按键组合如 `ctrl+shift+r` 重载显示配置 / 文本输入，可先激活窗口）。
+- **`GuiManager` 交互原语**：新增可注入 `InteractFn` 缝隙（`activateWindow` 含 `windowfocus` 回退、
+  `click` / `drag` / `key`），默认走 `xdotool`（15s 超时，ENOENT 给出安装提示），全走测试 fake。
+- **测试**：新增 13 个交互用例（管理器原语 + 工具层），共 62 个 vitest 用例全绿。
+
+### Changed
+
+- 工具总数 30 → 33；`docs/architecture.md` / `docs/compatibility.md` / `README.md` 同步更新
+  （交互依赖 `xdotool`，wmctrl 枚举不到窗口时退回绝对坐标）。
+
 ## [0.1.0] - 2025-08-17
 
 ### Added
@@ -26,4 +42,5 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 - **文档**：README（L1/L2/L3 工具表、配置）、`docs/architecture.md`、`docs/compatibility.md`、
   CI 工作流（Node 22/24）、`cordis.patch.yml` 补丁层、MIT License。
 
+[0.2.0]: https://github.com/StvLi/dsh-ros2/releases/tag/v0.2.0
 [0.1.0]: https://github.com/StvLi/dsh-ros2/releases/tag/v0.1.0

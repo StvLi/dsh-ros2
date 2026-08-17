@@ -9,6 +9,7 @@
 | 显示服务 | **X11**（L3 GUI/截图必需） | Pillow ImageGrab 走 X11；Wayland 需配置 `screenshotCommand`（如 grim） |
 | 截图依赖 | python3 + Pillow（`pip install pillow`） | 本机已装；可用 `screenshotCommand`（scrot/import）替代 |
 | 窗口管理（L3） | `wmctrl`（可选，窗口级截图/枚举） | 缺失时窗口匹配优雅降级为全屏 |
+| 交互（L3 P4） | `xdotool`（`sudo apt install xdotool`） | 点击/拖拽/键鼠；wmctrl 枚举不到窗口时退回绝对坐标 |
 | 多模态（L3） | Gemini / OpenAI API（用户自备 key） | `vision.provider=mock` 免 key；`none` 则禁用 |
 
 ## 已知环境注意

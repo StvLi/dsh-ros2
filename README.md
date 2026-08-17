@@ -50,7 +50,7 @@ Every L2 tool runs a **write operation** and asks for user approval first (via t
 
 ## Tools (L3 visualization)
 
-GUI lifecycle + screenshot + multimodal vision ("先能看，再谈动", P8). Screenshots use Pillow ImageGrab on X11 (no extra CLI install); vision providers are pluggable (P7).
+GUI lifecycle + screenshot + multimodal vision ("先能看，再谈动", P8) and xdotool-level interaction (P4: "能看也能动"). Screenshots use Pillow ImageGrab on X11 (no extra CLI install); vision providers are pluggable (P7); interaction requires `xdotool` (`sudo apt install xdotool`).
 
 | Tool | Purpose |
 | --- | --- |
@@ -60,6 +60,11 @@ GUI lifecycle + screenshot + multimodal vision ("先能看，再谈动", P8). Sc
 | `ros2_screenshot` | Capture the screen or one window to a PNG |
 | `ros2_vision_describe` | Describe an image with the configured multimodal model (Gemini / OpenAI / mock) |
 | `ros2_gui_observe` | Ensure a GUI is running → screenshot → return the multimodal description (the "see it" workflow) |
+| `ros2_gui_click` | xdotool click / scroll: activate a window, move to (x, y) (window-relative or absolute), click (`button` 4/5 = scroll, `count` = notches) |
+| `ros2_gui_drag` | xdotool press-drag-release: RViz2 viewpoint control (left-drag orbit, middle-drag pan, right-drag zoom) |
+| `ros2_gui_key` | xdotool keyboard: key combos (e.g. `ctrl+shift+r` reloads the RViz2 display config) or typed text |
+
+Interaction recipes (model-facing): orbit the RViz2 view with `ros2_gui_drag {windowTitle: "rviz2", button: 1, toX: <dx>, toY: <dy>}`, zoom with `button: 3`, reload a display config with `ros2_gui_key {keys: "ctrl+shift+r"}`. When `wmctrl` cannot enumerate windows (known XAUTHORITY limitation), window-relative interaction reports "未找到窗口" — fall back to absolute screen coordinates. Interaction is local to the host session (no approval, same as other L3 tools).
 
 ## Skill
 
