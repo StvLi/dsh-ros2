@@ -1,0 +1,7 @@
+# dsh-ros2 bundle patch (production form).
+# The row `name` is the INSTALLED package name; a later layer may override
+# `config` wholesale (config is whole-object replacement, never deep merge).
+- insert:
+    - id: dsh-ros2
+      name: dsh-ros2
+      config: {}
