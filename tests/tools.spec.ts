@@ -106,13 +106,18 @@ describe('ros2_rosdep_check', () => {
 describe('ros2_image_snapshot', () => {
   it('builds the ros2 run command and parses the snapshot JSON', async () => {
     const run = makeRun(() => ({ stdout: JSON.stringify({ ok: true, path: '/tmp/dsh-ros2/f.jpg', width: 500, height: 500, bytes: 5418 }) }))
-    const out = await call('ros2_image_snapshot', run, { topic: '/turtle1/render', output: '/tmp/f.jpg', timeoutMs: 3000 })
+    const out = await call('ros2_image_snapshot', run, { topic: '/camera/image', output: '/tmp/f.jpg', timeoutMs: 3000 })
     expect(out.ok).toBe(true)
     expect(out.command).toContain('ros2 run dsh_ros2_vlm image_snapshot --ros-args')
-    expect(out.command).toContain('topic:=/turtle1/render')
+    expect(out.command).toContain('topic:=/camera/image')
     expect(out.command).toContain('output:=/tmp/f.jpg')
     expect(out.command).toContain('timeout_ms:=3000')
     expect(out.data).toMatchObject({ ok: true, path: '/tmp/dsh-ros2/f.jpg', width: 500 })
+  })
+  it('defaults the topic to /camera/image', async () => {
+    const run = makeRun(() => ({ stdout: '{"ok": true, "path": "/tmp/f.jpg", "width": 1, "height": 1}' }))
+    const out = await call('ros2_image_snapshot', run, {})
+    expect(out.command).toContain('topic:=/camera/image')
   })
 })
 

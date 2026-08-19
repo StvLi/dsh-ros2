@@ -12,7 +12,6 @@ find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(builtin_interfaces REQUIRED)
-find_package(turtlesim REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/VlmDescribe.srv"
@@ -24,7 +23,6 @@ rosidl_generate_interfaces(${PROJECT_NAME}
 # interface modules from the dsh_ros2_vlm package).
 install(PROGRAMS
   scripts/vlm_node
-  scripts/turtle_render_node
   scripts/image_snapshot
   scripts/vlm_call
   DESTINATION lib/${PROJECT_NAME}

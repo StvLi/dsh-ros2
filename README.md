@@ -72,15 +72,13 @@ Realtime perception that matches the robot-control stack: the VLM runs in a **se
 
 | Tool | Purpose |
 | --- | --- |
-| `ros2_image_snapshot` | Grab the latest frame from an image topic (e.g. `/turtle1/render`, camera) and save as JPEG |
+| `ros2_image_snapshot` | Grab the latest frame from an image topic (e.g. `/camera/image`, `/rviz/scene`) and save as JPEG |
 | `ros2_vlm_analyze` | Analyze an image via the parallel VLM node (`/vlm/describe`); latest result cached on `/vlm/description` |
 
 ```bash
-# build + launch (turtlesim demo; on a real robot just point at the camera topic)
+# build + launch (point image_snapshot at any camera/render topic)
 mkdir -p /tmp/vlm_ws/src && ln -s <repo>/vlm /tmp/vlm_ws/src/dsh_ros2_vlm
 cd /tmp/vlm_ws && colcon build --symlink-install && source install/setup.bash
-ros2 run turtlesim turtlesim_node &
-ros2 run dsh_ros2_vlm turtle_render_node &        # headless renderer: pose -> /turtle1/render
 VLM_API_KEY=... ros2 run dsh_ros2_vlm vlm_node &  # parallel VLM process
 ```
 

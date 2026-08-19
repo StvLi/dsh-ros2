@@ -1199,15 +1199,15 @@ function makeGuiKeyTool(deps: ToolDeps) {
 function makeImageSnapshotTool(deps: ToolDeps) {
   return ros2Tool(deps, {
     name: 'ros2_image_snapshot',
-    description: 'Grab the latest frame from a sensor_msgs/Image topic (e.g. /turtle1/render or a camera) and save it as JPEG. Headless image acquisition — no X11/screenshots. Requires the dsh_ros2_vlm ROS2 package. Returns the image path for ros2_vlm_analyze.',
+    description: 'Grab the latest frame from a sensor_msgs/Image topic (e.g. /camera/image or /rviz/scene) and save it as JPEG. Headless image acquisition — no X11/screenshots. Requires the dsh_ros2_vlm ROS2 package. Returns the image path for ros2_vlm_analyze.',
     parameters: {
-      topic: { type: 'string', default: '/turtle1/render', description: 'Image topic to subscribe (sensor_msgs/Image).' },
+      topic: { type: 'string', default: '/camera/image', description: 'Image topic to subscribe (sensor_msgs/Image).' },
       output: { type: 'string', default: '', description: 'Output JPEG path (default: $TMPDIR/dsh-ros2/snapshot_<ts>.jpg).' },
       timeoutMs: { type: 'number', default: 5000, description: 'How long to wait for a frame (ms).' },
     },
     buildArgs: (params) => [
       'run', 'dsh_ros2_vlm', 'image_snapshot', '--ros-args',
-      '-p', `topic:=${strOrUndefined(params.topic) ?? '/turtle1/render'}`,
+      '-p', `topic:=${strOrUndefined(params.topic) ?? '/camera/image'}`,
       '-p', `output:=${strOrUndefined(params.output) ?? ''}`,
       '-p', `timeout_ms:=${numOrUndefined(params.timeoutMs) ?? 5000}`,
     ],

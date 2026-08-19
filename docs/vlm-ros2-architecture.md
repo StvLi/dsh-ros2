@@ -1,6 +1,6 @@
 # dsh-ros2 实时视觉：并行 VLM 节点 + 无头图像通道（L4）
 
-> 版本 0.3.0 · 2026-08-19 · 动机：具身 agent 的实时性与无头部署
+> 版本 0.4.0 · 2026-08-19 · 动机：具身 agent 的实时性与无头部署
 > 配套：`docs/turtlesim-test-report.md`（旧截图链路基线）· `vlm/`（ROS2 包）
 
 ---
@@ -16,7 +16,7 @@
 | **无头不可用** | 机器人必然是无头计算机，不存在屏幕可截 |
 
 本迭代目标：**VLM 分析进独立进程，用 ROS2 管理多进程通信（与机器人控制系统一致）；图像一律来自
-ROS2 图像话题，彻底摆脱截图通道。**
+ROS2 图像话题（相机话题 / RViz2 离屏渲染话题），彻底摆脱截图通道。**
 
 ---
 
@@ -25,12 +25,10 @@ ROS2 图像话题，彻底摆脱截图通道。**
 ```
 ┌─ ROS2 图（多进程，与机器人控制系统无缝衔接）─────────────────────────┐
 │                                                                      │
-│  /turtle1/pose (turtlesim)      /camera/image (真机相机/仿真)        │
-│       │                                                             │
-│       ▼                                                             │
-│  [turtle_render_node]  (无头渲染器，OpenCV，无 X11)                   │
-│       │  /turtle1/render (sensor_msgs/Image, 10 Hz)                 │
-│       ▼                                                             │
+│  /camera/image (相机/仿真)   /rviz/scene (RViz2 离屏渲染, 可选)        │
+│              │                │                                      │
+│              └──────┬─────────┘                                      │
+│                     ▼                                                │
 │  [vlm_node]  (独立 Python 进程，常驻，MultiThreadedExecutor)          │
 │       ├─ service  /vlm/describe   (VlmDescribe.srv: 图像+prompt→描述)│
 │       └─ topic    /vlm/description (VlmDescription.msg,              │
@@ -48,8 +46,8 @@ ROS2 图像话题，彻底摆脱截图通道。**
 3. 分析在独立进程并行执行，agent 可订阅话题轮询而不阻塞主流程；
 4. 图像字节/路径经 ROS2 传输，不经磁盘截图链路。
 
-**无头收益**：图像唯一来源是 `sensor_msgs/Image` 话题（真机上即相机话题），
-`turtle_render_node` 只是无头仿真渲染示例——同一套通道直接对接 Gazebo/相机。
+**无头收益**：图像唯一来源是 `sensor_msgs/Image` 话题（真机上即相机话题，
+或 `dsh_ros2_rviz_offscreen` 发布的 RViz2 场景渲染话题）。
 
 ---
 
@@ -58,7 +56,6 @@ ROS2 图像话题，彻底摆脱截图通道。**
 | 脚本 | 角色 | 接口 |
 | --- | --- | --- |
 | `vlm_node` | VLM 并行进程 | service `/vlm/describe` + topic `/vlm/description` |
-| `turtle_render_node` | 无头渲染器（demo） | `/turtle1/pose` → `/turtle1/render` (rgb8, 10Hz) |
 | `image_snapshot` | 话题取帧（一次性 CLI） | 订阅图像话题 → JPEG 文件 + JSON |
 | `vlm_call` | service 客户端（一次性 CLI） | 调 `/vlm/describe` → JSON |
 
@@ -100,13 +97,11 @@ API key 经参数或 `VLM_API_KEY` 环境变量注入，不落盘明文。
 mkdir -p /tmp/vlm_ws/src && ln -s <repo>/vlm /tmp/vlm_ws/src/dsh_ros2_vlm
 cd /tmp/vlm_ws && colcon build --symlink-install && source install/setup.bash
 
-# 启动三个进程（turtlesim 演示；真机则为相机话题）
-ros2 run turtlesim turtlesim_node &
-ros2 run dsh_ros2_vlm turtle_render_node &
+# 启动 VLM 并行进程
 VLM_API_KEY=sk-... ros2 run dsh_ros2_vlm vlm_node &
 
 # 无头取帧 + 分析（即插件 ros2_image_snapshot / ros2_vlm_analyze 的后端）
-ros2 run dsh_ros2_vlm image_snapshot --ros-args -p topic:=/turtle1/render -p output:=/tmp/f.jpg
+ros2 run dsh_ros2_vlm image_snapshot --ros-args -p topic:=/camera/image -p output:=/tmp/f.jpg
 ros2 run dsh_ros2_vlm vlm_call --ros-args -p image_path:=/tmp/f.jpg -p prompt:='Describe this'
 ```
 
@@ -127,24 +122,10 @@ ros2 run dsh_ros2_vlm vlm_call --ros-args -p image_path:=/tmp/f.jpg -p prompt:='
 
 ---
 
-## 6. 端到端验证（turtlesim，图像全程走话题、无 X11）
-
-| 帧 | 注入 | pose 实测 | VLM 反馈（gemini-2.5-flash） | 对照 |
-| --- | --- | --- | --- | --- |
-| A | 直线 v=2.0 ×2s | (7.560, 5.544, 0.0) | 位置：画面右侧；方向：头朝右；轨迹：水平直线 | ✅ 一致 |
-| B | 圆弧 v=1.5, ω=1.0 ×3s | (8.823, 6.254, 1.008) | 右侧偏中；头朝右上；左侧水平直线右转弧线 | ✅ 一致 |
-
-![直线帧（话题取帧）](images/e2e_A.jpg)
-![圆弧帧（话题取帧）](images/e2e_B.jpg)
-
-实测 service 单次分析 **1.6~2.0s**（HTTP 往返），latest 缓存 topic 新订阅者秒读。
-
----
-
 ## 7. 与机器人控制系统的关系
 
 - 通信协议全部是 ROS2 标准形态（service / topic / sensor_msgs），与机器人控制栈一致；
-- 真机部署：`/turtle1/render` 换成相机话题即可，agent 侧工具零改动；
+- 真机部署：图像话题（相机 / RViz2 离屏渲染）即数据源，agent 侧工具零改动；
 - 后续可将 VLM 分析做成订阅式（topic 节流持续分析）或 action（长任务），
   与 MoveIt/导航等控制 action 体系同构。
 
@@ -156,7 +137,7 @@ ros2 run dsh_ros2_vlm vlm_call --ros-args -p image_path:=/tmp/f.jpg -p prompt:='
 
 ### 为什么
 
-早期 `turtle_render_node` 是插件自己用 OpenCV **重画**一张简化图——这不符合真实需求。
+早期方案曾用插件自绘简化图验证通道——这不符合真实需求。
 用户要的是 **RViz2 渲染出的真实场景**（TF 树 / Grid / URDF / 点云 / Marker），且**不借助
 物理显示器与窗口层级**（无头机器人）。rviz2 官方无无头模式，但它的渲染内核是 OGRE，
 可以**离屏渲染**。

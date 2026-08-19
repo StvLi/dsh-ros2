@@ -27,6 +27,13 @@ All notable changes to **dsh-ros2** are documented here. Format follows
   `ros2_image_snapshot` 从话题取帧（更直接，已实测）；
 - 每帧经 PNG 编解码，5Hz 足够 VLM；高帧率可改直接 readPixels。
 
+### Removed
+
+- **移除 `turtle_render_node`（自绘简化图渲染器）及其产物**：早期用于验证通道的
+  OpenCV 自绘渲染不符合真实需求（图像应来自真实数据源：相机话题 / RViz2 离屏渲染），
+  已删除代码、`docs/images/e2e_*.jpg` 与相关文档段落；
+  `ros2_image_snapshot` 默认 topic 改为 `/camera/image`。
+
 ## [0.3.0] - 2026-08-19
 
 ### Added
