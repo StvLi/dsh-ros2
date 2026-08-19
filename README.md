@@ -68,18 +68,21 @@ Interaction recipes (model-facing): orbit the RViz2 view with `ros2_gui_drag {wi
 
 ## Tools (L4 realtime vision — parallel VLM over ROS2, headless image topics)
 
-Realtime perception that matches the robot-control stack: the VLM runs in a **separate ROS2 process** (`vlm_node`, service `/vlm/describe` + cached topic `/vlm/description`), and images come from **`sensor_msgs/Image` topics, never X11 screenshots** — headless-ready. Requires the `dsh_ros2_vlm` ROS2 package (`vlm/`); see `docs/vlm-ros2-architecture.md` for build/run.
+Realtime perception that matches the robot-control stack: the VLM runs in a **separate ROS2 process** (`vlm_node`, service `/vlm/describe` + cached topic `/vlm/description`), and images come from **`sensor_msgs/Image` topics, never X11 screenshots** — headless-ready. Requires the `dsh_ros2_vlm` ROS2 package (`vlm/`); see `docs/architecture.md` §4 for build/run.
 
 | Tool | Purpose |
 | --- | --- |
-| `ros2_image_snapshot` | Grab the latest frame from an image topic (e.g. `/camera/image`, `/rviz/scene`) and save as JPEG |
-| `ros2_vlm_analyze` | Analyze an image via the parallel VLM node (`/vlm/describe`); latest result cached on `/vlm/description` |
+| `ros2_image_snapshot` | Grab the latest frame from an image topic (raw / compressed) and save as JPEG |
+| `ros2_vlm_analyze` | Analyze an image file or the bridge's latest frame (`useBridge`) via the parallel VLM |
+| `ros2_vision_topics` | List live image topics with their auto bridge service names |
+| `ros2_vision_analyze` | Analyze any topic's latest frame via its auto bridge (`ros2_vision_analyze {topic, prompt}`) |
 
 ```bash
-# build + launch (point image_snapshot at any camera/render topic)
+# build + launch the vision pipeline (auto bridge per image topic)
 mkdir -p /tmp/vlm_ws/src && ln -s <repo>/vlm /tmp/vlm_ws/src/dsh_ros2_vlm
 cd /tmp/vlm_ws && colcon build --symlink-install && source install/setup.bash
-VLM_API_KEY=... ros2 run dsh_ros2_vlm vlm_node &  # parallel VLM process
+VLM_API_KEY=... ros2 run dsh_ros2_vlm vlm_node &       # parallel VLM process
+ros2 run dsh_ros2_vlm vision_bringup &                 # discover topics, one bridge each
 ```
 
 ## Skill
