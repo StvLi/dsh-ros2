@@ -34,6 +34,14 @@ All notable changes to **dsh-ros2** are documented here. Format follows
   已删除代码、`docs/images/e2e_*.jpg` 与相关文档段落；
   `ros2_image_snapshot` 默认 topic 改为 `/camera/image`。
 
+### Changed
+
+- **`ros2_image_snapshot` 支持 `CompressedImage` 话题**（真机相机常见 `image_raw/compressed`）：
+  新增 `compressed` 参数，脚本端 `cv2.imdecode` 解码 jpeg/png；
+  实测对机器人三路相机（head/wrist_left/wrist_right，1280×720）取帧 + VLM 分析全部成功。
+- **配置提示**：web profile 的 dsh-ros2 配置新增 `rosSetup: source /tmp/vlm_ws/install/setup.bash &&`
+  （让插件工具直接找到 `dsh_ros2_vlm` 包；本机演示用，真机按实际 workspace 调整）。
+
 ## [0.3.0] - 2026-08-19
 
 ### Added

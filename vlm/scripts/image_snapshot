@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Take the latest frame from a sensor_msgs/Image topic and save it as JPEG.
+"""Take the latest frame from an image topic and save it as JPEG.
 
-Headless image acquisition for dsh-ros2: agents read image *topics*, never
-X11 screenshots. Usage:
+Headless image acquisition for dsh-ros2: agents read image *topics* (raw
+sensor_msgs/Image or sensor_msgs/CompressedImage), never X11 screenshots.
+Usage:
 
     ros2 run dsh_ros2_vlm image_snapshot --ros-args \
-        -p topic:=/turtle1/render -p output:=/tmp/frame.jpg -p timeout_ms:=5000
+        -p topic:=/camera/image -p output:=/tmp/frame.jpg \
+        -p timeout_ms:=5000 -p compressed:=false
 
 Prints a JSON line on success/failure for easy tool parsing.
 """
@@ -19,24 +21,31 @@ import numpy as np
 import rclpy
 from rclpy.node import Node
 
-from sensor_msgs.msg import Image
+from sensor_msgs.msg import CompressedImage, Image
 
 
 class ImageSnapshot(Node):
     def __init__(self):
         super().__init__("image_snapshot")
-        self.declare_parameter("topic", "/turtle1/render")
+        self.declare_parameter("topic", "/camera/image")
         self.declare_parameter("output", "")
         self.declare_parameter("timeout_ms", 5000)
+        self.declare_parameter("compressed", False)
         self._topic = str(self.get_parameter("topic").value)
         self._output = str(self.get_parameter("output").value)
         self._timeout_ms = int(self.get_parameter("timeout_ms").value)
+        self._compressed = bool(self.get_parameter("compressed").value)
         if not self._output:
             self._output = f"/tmp/dsh-ros2/snapshot_{int(self.get_clock().now().nanoseconds / 1_000_000)}.jpg"
         os.makedirs(os.path.dirname(self._output) or ".", exist_ok=True)
         self._latest = None
-        self.create_subscription(Image, self._topic, self._cb, 1)
-        self.get_logger().info(f"image_snapshot: subscribing {self._topic} (timeout {self._timeout_ms}ms)")
+        if self._compressed:
+            self.create_subscription(CompressedImage, self._topic, self._cb_compressed, 1)
+        else:
+            self.create_subscription(Image, self._topic, self._cb, 1)
+        self.get_logger().info(
+            f"image_snapshot: subscribing {self._topic} "
+            f"({'compressed' if self._compressed else 'raw'}, timeout {self._timeout_ms}ms)")
 
     def _cb(self, msg: Image):
         if msg.encoding == "rgb8":
@@ -49,6 +58,13 @@ class ImageSnapshot(Node):
             self.get_logger().error(f"unsupported encoding: {msg.encoding}")
             return
         self._latest = frame
+
+    def _cb_compressed(self, msg: CompressedImage):
+        frame = cv2.imdecode(np.frombuffer(bytes(msg.data), np.uint8), cv2.IMREAD_COLOR)
+        if frame is not None:
+            self._latest = frame
+        else:
+            self.get_logger().error(f"failed to decode compressed frame (format={msg.format})")
 
     def run(self) -> int:
         deadline = self.get_clock().now().nanoseconds / 1_000_000 + self._timeout_ms

@@ -112,12 +112,16 @@ describe('ros2_image_snapshot', () => {
     expect(out.command).toContain('topic:=/camera/image')
     expect(out.command).toContain('output:=/tmp/f.jpg')
     expect(out.command).toContain('timeout_ms:=3000')
+    expect(out.command).toContain('compressed:=false')
     expect(out.data).toMatchObject({ ok: true, path: '/tmp/dsh-ros2/f.jpg', width: 500 })
   })
-  it('defaults the topic to /camera/image', async () => {
+  it('defaults the topic to /camera/image and supports compressed topics', async () => {
     const run = makeRun(() => ({ stdout: '{"ok": true, "path": "/tmp/f.jpg", "width": 1, "height": 1}' }))
-    const out = await call('ros2_image_snapshot', run, {})
-    expect(out.command).toContain('topic:=/camera/image')
+    const plain = await call('ros2_image_snapshot', run, {})
+    expect(plain.command).toContain('topic:=/camera/image')
+    const compressed = await call('ros2_image_snapshot', run, { topic: '/cam/image_raw/compressed', compressed: true })
+    expect(compressed.command).toContain('topic:=/cam/image_raw/compressed')
+    expect(compressed.command).toContain('compressed:=true')
   })
 })
 
