@@ -1,0 +1,13 @@
+# VLM image analysis request/response.
+# Either image_path (host-local file, read by the node) or image_bytes
+# (base64-encoded) may be provided; image_path is the common path.
+
+string image_path        # path to a JPEG/PNG/WebP on the host
+string image_bytes_b64   # optional inline image (base64); wins over image_path
+string prompt            # instruction for the vision model
+string model             # optional model override (empty = node default)
+---
+bool success
+string description
+float32 elapsed_ms
+string error

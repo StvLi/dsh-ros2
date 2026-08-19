@@ -4,6 +4,26 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [SemVer](https://semver.org/).
 
+## [0.3.0] - 2026-08-19
+
+### Added
+
+- **L4 实时视觉（并行 VLM + 无头图像通道）**：
+  - **ROS2 包 `dsh_ros2_vlm`（`vlm/`）**：`vlm_node`（独立进程的 VLM 分析节点：
+    service `/vlm/describe` + transient-local 缓存 topic `/vlm/description`，MultiThreadedExecutor
+    并行处理，API key 走参数/`VLM_API_KEY`）、`turtle_render_node`（无头渲染器：`/turtle1/pose`
+    → `/turtle1/render` 图像话题，OpenCV，无 X11）、`image_snapshot`（话题取最新帧存 JPEG）、
+    `vlm_call`（service 客户端，输出 JSON）。接口 `VlmDescribe.srv` / `VlmDescription.msg`。
+  - **插件新工具（35 个）**：`ros2_image_snapshot`（从 `sensor_msgs/Image` 话题取帧，彻底替代
+    X11 截图通道）、`ros2_vlm_analyze`（调 `/vlm/describe`，最新结果缓存秒读）。
+  - **`runCommand` 自动 ROS_LOG_DIR 回退**：`~/.ros/log` 不可写时自动用 `/tmp/ros-log-<uid>`，
+    锁定的无头主机开箱即用（ROS2 Python CLI 不再因日志目录崩溃）。
+- **文档**：`docs/vlm-ros2-architecture.md`（架构/组件/启动/实时性对比/端到端验证）；
+  turtlesim 端到端闭环实测：直线/圆弧两帧经话题取帧 + VLM 解读与 pose 数据逐项互证，
+  service 单次分析 1.6~2.0s，latest 缓存 0 等待。
+- **测试**：71 个 vitest 用例（新增 `ros2_image_snapshot` / `ros2_vlm_analyze` 命令构造与解析、
+  `ensureWritableRosLogDir` 三分支）。
+
 ## [0.2.0] - 2026-08-17
 
 ### Added

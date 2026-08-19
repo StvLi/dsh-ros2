@@ -66,6 +66,24 @@ GUI lifecycle + screenshot + multimodal vision ("先能看，再谈动", P8) and
 
 Interaction recipes (model-facing): orbit the RViz2 view with `ros2_gui_drag {windowTitle: "rviz2", button: 1, toX: <dx>, toY: <dy>}`, zoom with `button: 3`, reload a display config with `ros2_gui_key {keys: "ctrl+shift+r"}`. When `wmctrl` cannot enumerate windows (e.g. no window manager on the display), window-relative interaction reports "未找到窗口" — fall back to absolute screen coordinates. Interaction is local to the host session (no approval, same as other L3 tools).
 
+## Tools (L4 realtime vision — parallel VLM over ROS2, headless image topics)
+
+Realtime perception that matches the robot-control stack: the VLM runs in a **separate ROS2 process** (`vlm_node`, service `/vlm/describe` + cached topic `/vlm/description`), and images come from **`sensor_msgs/Image` topics, never X11 screenshots** — headless-ready. Requires the `dsh_ros2_vlm` ROS2 package (`vlm/`); see `docs/vlm-ros2-architecture.md` for build/run.
+
+| Tool | Purpose |
+| --- | --- |
+| `ros2_image_snapshot` | Grab the latest frame from an image topic (e.g. `/turtle1/render`, camera) and save as JPEG |
+| `ros2_vlm_analyze` | Analyze an image via the parallel VLM node (`/vlm/describe`); latest result cached on `/vlm/description` |
+
+```bash
+# build + launch (turtlesim demo; on a real robot just point at the camera topic)
+mkdir -p /tmp/vlm_ws/src && ln -s <repo>/vlm /tmp/vlm_ws/src/dsh_ros2_vlm
+cd /tmp/vlm_ws && colcon build --symlink-install && source install/setup.bash
+ros2 run turtlesim turtlesim_node &
+ros2 run dsh_ros2_vlm turtle_render_node &        # headless renderer: pose -> /turtle1/render
+VLM_API_KEY=... ros2 run dsh_ros2_vlm vlm_node &  # parallel VLM process
+```
+
 ## Skill
 
 The plugin registers the `ros2-diagnostics` skill: it teaches the model when to use each tool, how to start broad and narrow down, and how to debug "topic has no data" / message-mismatch / TF problems.
@@ -86,6 +104,9 @@ The plugin registers the `ros2-diagnostics` skill: it teaches the model when to 
 | `vision.apiKey` | string | `''` | Your API key (user-supplied; never logged) |
 | `vision.model` | string | `''` | Model override (e.g. `gemini-2.5-flash`, `gpt-4o-mini`) |
 | `vision.baseUrl` | string | `''` | API base URL override (OpenAI-compatible endpoints) |
+
+> `rosLogDir` also covers ROS2 Python CLIs spawned by tools (`topic echo/pub`, `ros2 run`);
+> additionally `runCommand` auto-falls back to a writable dir when `~/.ros/log` is not writable.
 
 Example patch config:
 

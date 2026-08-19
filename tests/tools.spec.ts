@@ -103,6 +103,37 @@ describe('ros2_rosdep_check', () => {
   })
 })
 
+describe('ros2_image_snapshot', () => {
+  it('builds the ros2 run command and parses the snapshot JSON', async () => {
+    const run = makeRun(() => ({ stdout: JSON.stringify({ ok: true, path: '/tmp/dsh-ros2/f.jpg', width: 500, height: 500, bytes: 5418 }) }))
+    const out = await call('ros2_image_snapshot', run, { topic: '/turtle1/render', output: '/tmp/f.jpg', timeoutMs: 3000 })
+    expect(out.ok).toBe(true)
+    expect(out.command).toContain('ros2 run dsh_ros2_vlm image_snapshot --ros-args')
+    expect(out.command).toContain('topic:=/turtle1/render')
+    expect(out.command).toContain('output:=/tmp/f.jpg')
+    expect(out.command).toContain('timeout_ms:=3000')
+    expect(out.data).toMatchObject({ ok: true, path: '/tmp/dsh-ros2/f.jpg', width: 500 })
+  })
+})
+
+describe('ros2_vlm_analyze', () => {
+  it('calls the vlm service client and returns the description', async () => {
+    const run = makeRun(() => ({ stdout: JSON.stringify({ ok: true, description: '乌龟在画面右侧', elapsed_ms: 1600.2 }) }))
+    const out = await call('ros2_vlm_analyze', run, { imagePath: '/tmp/f.jpg', prompt: 'describe' })
+    expect(out.ok).toBe(true)
+    expect(out.command).toContain('ros2 run dsh_ros2_vlm vlm_call --ros-args')
+    expect(out.command).toContain('image_path:=/tmp/f.jpg')
+    expect(out.command).toContain('prompt:=describe')
+    expect(out.data).toMatchObject({ ok: true, description: '乌龟在画面右侧', elapsed_ms: 1600.2 })
+  })
+  it('omits prompt/model args when not given', async () => {
+    const run = makeRun(() => ({ stdout: '{"ok": true, "description": "x", "elapsed_ms": 1}' }))
+    const out = await call('ros2_vlm_analyze', run, { imagePath: '/tmp/f.jpg' })
+    expect(out.command).not.toContain('prompt:=')
+    expect(out.command).not.toContain('model:=')
+  })
+})
+
 describe('command failures', () => {
   it('returns ok:false with an error code on non-zero exit', async () => {
     const run = makeRun(() => ({ ok: false, exitCode: 2, stderr: 'boom' }))
@@ -181,6 +212,9 @@ describe('tool inventory', () => {
     expect(names).toContain('ros2_gui_click')
     expect(names).toContain('ros2_gui_drag')
     expect(names).toContain('ros2_gui_key')
-    expect(names).toHaveLength(33)
+    // L4 headless perception tools
+    expect(names).toContain('ros2_image_snapshot')
+    expect(names).toContain('ros2_vlm_analyze')
+    expect(names).toHaveLength(35)
   })
 })

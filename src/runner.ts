@@ -60,6 +60,7 @@ export async function runCommand(bin: string, args: string[], opts: RunOptions =
     ...(opts.rosLogDir ? { ROS_LOG_DIR: opts.rosLogDir } : {}),
     ...opts.env,
   }
+  ensureWritableRosLogDir(env)
   const baseOptions: ExecFileOptions = {
     timeout: timeoutMs,
     killSignal: 'SIGKILL',
@@ -92,6 +93,53 @@ export async function runCommand(bin: string, args: string[], opts: RunOptions =
 /** Convenience for `ros2 ...` subcommands. */
 export function runRos2(args: string[], opts: RunOptions = {}): Promise<RosResult> {
   return runCommand('ros2', args, opts)
+}
+
+// ── writable ROS log dir fallback ──────────────────────────────────────
+// ROS2 Python CLIs (topic echo/pub, ros2 run) abort at startup when
+// ~/.ros/log is not writable. When no explicit ROS_LOG_DIR is configured,
+// probe once and transparently fall back to a writable per-user dir so the
+// plugin works on locked-down/headless hosts out of the box.
+
+let rosLogProbed = false
+let rosLogFallback: string | undefined
+
+function probeRosLogFallback(): string | undefined {
+  if (rosLogProbed) return rosLogFallback
+  rosLogProbed = true
+  const home = process.env.HOME
+  if (home) {
+    const target = `${home}/.ros/log`
+    try {
+      const { mkdirSync, writeFileSync, rmSync } = require('node:fs')
+      mkdirSync(target, { recursive: true })
+      const probe = `${target}/.dsh-writable-probe`
+      writeFileSync(probe, 'ok')
+      rmSync(probe)
+      return undefined // writable — no fallback needed
+    } catch {
+      // fall through to /tmp
+    }
+  }
+  const uid = typeof process.getuid === 'function' ? process.getuid() : 0
+  rosLogFallback = `/tmp/ros-log-${uid}`
+  try {
+    require('node:fs').mkdirSync(rosLogFallback, { recursive: true })
+  } catch {
+    rosLogFallback = undefined
+  }
+  return rosLogFallback
+}
+
+/** Set ROS_LOG_DIR in `env` to a writable dir when the default would fail. */
+export function ensureWritableRosLogDir(env: Record<string, string>): void {
+  if (env.ROS_LOG_DIR) return
+  if (process.env.ROS_LOG_DIR) {
+    env.ROS_LOG_DIR = process.env.ROS_LOG_DIR
+    return
+  }
+  const fallback = probeRosLogFallback()
+  if (fallback) env.ROS_LOG_DIR = fallback
 }
 
 /** Keep the last N lines of a stream, bounded. */

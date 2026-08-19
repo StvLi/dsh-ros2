@@ -1,0 +1,176 @@
+#!/usr/bin/env python3
+"""VLM analysis ROS2 node for dsh-ros2.
+
+Runs multimodal vision inference in a *separate process* so the agent's
+turn loop never blocks on the HTTP round-trip, and communicates over ROS2
+like any other robot-control component:
+
+  * service  /vlm/describe     (VlmDescribe.srv)  — request-response analysis
+  * topic    /vlm/description  (VlmDescription.msg) — latest result, cached
+    with transient-local QoS so a late subscriber instantly gets the newest
+    description without asking again.
+
+The vision backend is the OpenAI-compatible chat/completions endpoint
+(verified against the local "666 - AI API Gateway" running gemini models).
+API key comes from parameters or the VLM_API_KEY env var, never logged.
+"""
+
+import base64
+import json
+import mimetypes
+import os
+import sys
+import time
+import urllib.request
+
+import rclpy
+from rclpy.executors import MultiThreadedExecutor
+from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
+
+from dsh_ros2_vlm.srv import VlmDescribe
+from dsh_ros2_vlm.msg import VlmDescription
+
+DEFAULT_BASE_URL = "http://121.9.219.138:8888/v1"
+DEFAULT_MODEL = "gemini-2.5-flash"
+HTTP_TIMEOUT_S = 60.0
+
+# Transient-local: a late subscriber instantly receives the latest result.
+LATEST_QOS = QoSProfile(
+    depth=1,
+    reliability=ReliabilityPolicy.RELIABLE,
+    durability=DurabilityPolicy.TRANSIENT_LOCAL,
+    history=HistoryPolicy.KEEP_LAST,
+)
+
+
+def image_mime(path: str) -> str:
+    guess, _ = mimetypes.guess_type(path)
+    return guess if guess and guess.startswith("image/") else "image/png"
+
+
+def call_vlm(base_url: str, api_key: str, model: str, image_bytes: bytes, mime: str, prompt: str) -> str:
+    """One OpenAI-compatible multimodal completion. Returns the text."""
+    body = {
+        "model": model,
+        "messages": [{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": prompt},
+                {"type": "image_url", "image_url": {
+                    "url": f"data:{mime};base64,{base64.b64encode(image_bytes).decode()}"
+                }},
+            ],
+        }],
+        "max_tokens": 512,
+    }
+    req = urllib.request.Request(
+        f"{base_url.rstrip('/')}/chat/completions",
+        data=json.dumps(body).encode("utf-8"),
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_S) as resp:
+        payload = json.loads(resp.read().decode("utf-8"))
+    choices = payload.get("choices") or []
+    text = (choices[0].get("message") or {}).get("content") or ""
+    if not text.strip():
+        raise RuntimeError("VLM returned an empty response")
+    return text.strip()
+
+
+class VlmNode(Node):
+    def __init__(self):
+        super().__init__("vlm_node")
+        self.declare_parameter("base_url", os.environ.get("VLM_BASE_URL", DEFAULT_BASE_URL))
+        self.declare_parameter("api_key", os.environ.get("VLM_API_KEY", ""))
+        self.declare_parameter("model", os.environ.get("VLM_MODEL", DEFAULT_MODEL))
+        self._base_url = str(self.get_parameter("base_url").value)
+        self._api_key = str(self.get_parameter("api_key").value)
+        self._model = str(self.get_parameter("model").value)
+        if not self._api_key:
+            self.get_logger().error("VLM_API_KEY is not set (declare api_key param or export VLM_API_KEY)")
+        # Latest-result cache: a late /vlm/description subscriber gets it at once.
+        self._latest = VlmDescription()
+        self._latest_pub = self.create_publisher(
+            VlmDescription, "/vlm/description", LATEST_QOS
+        )
+        self.create_service(VlmDescribe, "/vlm/describe", self._handle_describe)
+        self.get_logger().info(
+            f"vlm_node ready: base={self._base_url} model={self._model} "
+            f"service=/vlm/describe topic=/vlm/description"
+        )
+
+    def _handle_describe(self, request, response):
+        started = time.perf_counter()
+        try:
+            if request.image_bytes_b64:
+                image = base64.b64decode(request.image_bytes_b64)
+                mime = "image/png"
+                source = "(inline)"
+            elif request.image_path:
+                image_path = request.image_path
+                with open(image_path, "rb") as fh:
+                    image = fh.read()
+                mime = image_mime(image_path)
+                source = image_path
+            else:
+                raise ValueError("provide image_path or image_bytes_b64")
+            model = request.model or self._model
+            description = call_vlm(self._base_url, self._api_key, model, image, mime, request.prompt)
+            elapsed_ms = (time.perf_counter() - started) * 1000.0
+            response.success = True
+            response.description = description
+            response.elapsed_ms = elapsed_ms
+            response.error = ""
+            # cache + broadcast latest
+            self._latest.stamp = self.get_clock().now().to_msg()
+            self._latest.source = source
+            self._latest.prompt = request.prompt
+            self._latest.description = description
+            self._latest.elapsed_ms = elapsed_ms
+            self._latest_pub.publish(self._latest)
+            self.get_logger().info(f"analyzed {source} ({model}) in {elapsed_ms:.0f}ms")
+        except Exception as exc:  # noqa: BLE001 — report any failure to the caller
+            response.success = False
+            response.description = ""
+            response.error = f"{type(exc).__name__}: {exc}"
+            self.get_logger().error(f"vlm describe failed: {response.error}")
+        return response
+
+
+def _ensure_ros_log_dir() -> None:
+    """rclpy aborts when ~/.ros/log is not writable; fall back to a writable dir."""
+    if os.environ.get("ROS_LOG_DIR"):
+        return
+    target = os.path.expanduser("~/.ros/log")
+    try:
+        os.makedirs(target, exist_ok=True)
+        probe = os.path.join(target, ".dsh-vlm-probe")
+        with open(probe, "w", encoding="utf-8"):
+            pass
+        os.remove(probe)
+    except OSError:
+        fallback = f"/tmp/ros-log-{os.getuid()}"
+        os.makedirs(fallback, exist_ok=True)
+        os.environ["ROS_LOG_DIR"] = fallback
+
+
+def main():
+    _ensure_ros_log_dir()
+    rclpy.init(args=sys.argv[1:] if len(sys.argv) > 1 else None)
+    node = VlmNode()
+    executor = MultiThreadedExecutor(num_threads=4)
+    executor.add_node(node)
+    try:
+        executor.spin()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        executor.shutdown()
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+if __name__ == "__main__":
+    main()

@@ -428,6 +428,9 @@ export function createRos2Tools(deps: ToolDeps) {
   tools.push(makeGuiClickTool(deps))
   tools.push(makeGuiDragTool(deps))
   tools.push(makeGuiKeyTool(deps))
+  // L4 headless perception (parallel VLM node + image-topic acquisition).
+  tools.push(makeImageSnapshotTool(deps))
+  tools.push(makeVlmAnalyzeTool(deps))
   return tools
 }
 
@@ -1185,6 +1188,52 @@ function makeGuiKeyTool(deps: ToolDeps) {
       const value: ToolResult = { ok: true, tool: 'ros2_gui_key', command, data: jsonOf(result.data) }
       return value
     },
+  })
+}
+
+/**
+ * L4: grab the latest frame from a sensor_msgs/Image topic and save it as
+ * JPEG — headless image acquisition (no X11 / screenshots). Backed by the
+ * `dsh_ros2_vlm` ROS2 package (`image_snapshot` script).
+ */
+function makeImageSnapshotTool(deps: ToolDeps) {
+  return ros2Tool(deps, {
+    name: 'ros2_image_snapshot',
+    description: 'Grab the latest frame from a sensor_msgs/Image topic (e.g. /turtle1/render or a camera) and save it as JPEG. Headless image acquisition — no X11/screenshots. Requires the dsh_ros2_vlm ROS2 package. Returns the image path for ros2_vlm_analyze.',
+    parameters: {
+      topic: { type: 'string', default: '/turtle1/render', description: 'Image topic to subscribe (sensor_msgs/Image).' },
+      output: { type: 'string', default: '', description: 'Output JPEG path (default: $TMPDIR/dsh-ros2/snapshot_<ts>.jpg).' },
+      timeoutMs: { type: 'number', default: 5000, description: 'How long to wait for a frame (ms).' },
+    },
+    buildArgs: (params) => [
+      'run', 'dsh_ros2_vlm', 'image_snapshot', '--ros-args',
+      '-p', `topic:=${strOrUndefined(params.topic) ?? '/turtle1/render'}`,
+      '-p', `output:=${strOrUndefined(params.output) ?? ''}`,
+      '-p', `timeout_ms:=${numOrUndefined(params.timeoutMs) ?? 5000}`,
+    ],
+    parse: (res) => parseJsonOrRaw(res.stdout),
+  })
+}
+
+/** L4: analyze an image via the parallel VLM node (ROS2 service). */
+function makeVlmAnalyzeTool(deps: ToolDeps) {
+  return ros2Tool(deps, {
+    name: 'ros2_vlm_analyze',
+    description: 'Analyze an image file with the parallel VLM ROS2 node (`/vlm/describe` service, OpenAI-compatible gateway). The VLM runs in its own process; results are cached on /vlm/description. Requires the dsh_ros2_vlm package and a running vlm_node.',
+    parameters: {
+      imagePath: { type: 'string', required: true, description: 'Path to a JPEG/PNG image (e.g. from ros2_image_snapshot).' },
+      prompt: { type: 'string', default: '', description: 'Optional instruction for the vision model.' },
+      model: { type: 'string', default: '', description: 'Optional model override (default: vlm_node model).' },
+    },
+    buildArgs: (params) => [
+      'run', 'dsh_ros2_vlm', 'vlm_call', '--ros-args',
+      '-p', `image_path:=${String(params.imagePath)}`,
+      ...(strOrUndefined(params.prompt) ? ['-p', `prompt:=${strOrUndefined(params.prompt)}`] : []),
+      ...(strOrUndefined(params.model) ? ['-p', `model:=${strOrUndefined(params.model)}`] : []),
+    ],
+    // The VLM HTTP call can take up to 60s server-side; give it room.
+    runOpts: () => ({ timeoutMs: 90000 }),
+    parse: (res) => parseJsonOrRaw(res.stdout),
   })
 }
 

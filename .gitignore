@@ -10,3 +10,8 @@ lib/
 # local env / secrets
 *.env
 .env
+
+# colcon build artifacts (vlm/ ROS2 package; builds normally live outside the repo)
+build/
+install/
+log/
