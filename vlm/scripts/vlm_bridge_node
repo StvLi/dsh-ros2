@@ -1,0 +1,222 @@
+#!/usr/bin/env python3
+"""Persistent image-to-VLM bridge node for dsh-ros2.
+
+Always-on node that subscribes one image topic (raw Image or
+CompressedImage) and *only reacts when asked*: while no request arrives it
+just holds the latest frame bytes — zero work, zero process spawns per
+request. On demand it forwards the cached frame to the parallel VLM node
+(vlm_node, /vlm/describe) over the service, in memory (image_bytes_b64, no
+disk, no re-encode when the topic is already jpeg).
+
+  * service /vlm_bridge/analyze_latest  (VlmBridgeAnalyze.srv) — sync request
+  * topic    /vlm_bridge/trigger  (std_msgs/String, JSON {"prompt","model"})
+    — async: publishes the result to /vlm_bridge/result (VlmDescription.msg)
+
+Concurrency design (the key to no deadlock): a *dedicated spin thread*
+services the VLM client node (this is the proven pattern — a callback thread
+of an executor can never wait on its own client response, and rclpy's
+coroutine callbacks did not deliver in this setup). Service/trigger callbacks
+only wait on the client future; the spin thread delivers the response.
+
+Requires vlm_node to be running (the actual VLM service provider).
+"""
+
+import base64
+import json
+import threading
+import time
+
+import cv2
+import numpy as np
+import rclpy
+from rclpy.executors import MultiThreadedExecutor
+from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
+from std_msgs.msg import String
+
+from dsh_ros2_vlm.srv import VlmBridgeAnalyze, VlmDescribe
+from dsh_ros2_vlm.msg import VlmDescription
+
+LATEST_QOS = QoSProfile(
+    depth=1,
+    reliability=ReliabilityPolicy.RELIABLE,
+    durability=DurabilityPolicy.TRANSIENT_LOCAL,
+    history=HistoryPolicy.KEEP_LAST,
+)
+
+
+class VlmBridgeNode(Node):
+    def __init__(self):
+        super().__init__("vlm_bridge_node")
+        self.declare_parameter("image_topic", "/camera/image")
+        self.declare_parameter("compressed", False)
+        self.declare_parameter("wait_for_service_s", 10.0)
+        self._topic = str(self.get_parameter("image_topic").value)
+        self._compressed = bool(self.get_parameter("compressed").value)
+        self._wait_service = float(self.get_parameter("wait_for_service_s").value)
+
+        self._latest_jpeg: bytes | None = None
+
+        if self._compressed:
+            from sensor_msgs.msg import CompressedImage
+            self.create_subscription(CompressedImage, self._topic, self._cb_compressed, 1)
+        else:
+            from sensor_msgs.msg import Image
+            self.create_subscription(Image, self._topic, self._cb_raw, 1)
+
+        # Dedicated client node + spin thread (never spin inside a callback).
+        self._client = Node("vlm_bridge_client")
+        self._client._vlm = self._client.create_client(VlmDescribe, "/vlm/describe")
+        self._client._wait_service = self._wait_service
+        self._spin_stop = threading.Event()
+        self._spin_thread = threading.Thread(target=self._spin_loop, daemon=True)
+        self._spin_thread.start()
+
+        self.create_service(VlmBridgeAnalyze, "/vlm_bridge/analyze_latest", self._handle_service)
+        self.create_subscription(String, "/vlm_bridge/trigger", self._handle_trigger, 10)
+        self._result_pub = self.create_publisher(VlmDescription, "/vlm_bridge/result", LATEST_QOS)
+
+        self.get_logger().info(
+            f"vlm_bridge_node ready: watching {self._topic} "
+            f"({'compressed' if self._compressed else 'raw'}), "
+            f"service=/vlm_bridge/analyze_latest trigger=/vlm_bridge/trigger")
+
+    def _spin_loop(self):
+        while rclpy.ok() and not self._spin_stop.is_set():
+            rclpy.spin_once(self._client, timeout_sec=0.05)
+
+    # ── frame caching (only stores bytes; no work until asked) ────────────
+
+    def _cb_raw(self, msg):
+        try:
+            if msg.encoding == "rgb8":
+                frame = cv2.cvtColor(
+                    np.frombuffer(bytes(msg.data), np.uint8).reshape(msg.height, msg.width, 3),
+                    cv2.COLOR_RGB2BGR)
+            elif msg.encoding == "bgr8":
+                frame = np.frombuffer(bytes(msg.data), np.uint8).reshape(msg.height, msg.width, 3)
+            elif msg.encoding == "mono8":
+                frame = np.frombuffer(bytes(msg.data), np.uint8).reshape(msg.height, msg.width)
+            else:
+                return
+            ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
+            if ok:
+                self._latest_jpeg = buf.tobytes()
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _cb_compressed(self, msg):
+        try:
+            if str(msg.format).lower().startswith("jpeg"):
+                data = bytes(msg.data)  # already jpeg: keep raw bytes, no re-encode
+            else:
+                frame = cv2.imdecode(np.frombuffer(bytes(msg.data), np.uint8), cv2.IMREAD_COLOR)
+                ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
+                if not ok:
+                    return
+                data = buf.tobytes()
+            self._latest_jpeg = data
+        except Exception:  # noqa: BLE001
+            pass
+
+    # ── analysis path ─────────────────────────────────────────────────────
+
+    def _analyze(self, prompt: str, model: str, override_b64: str = ""):
+        if override_b64:
+            source = "(inline)"
+        else:
+            if self._latest_jpeg is None:
+                raise RuntimeError(f"no frame on {self._topic} yet")
+            override_b64 = base64.b64encode(self._latest_jpeg).decode()
+            source = self._topic
+        if not self._client._vlm.wait_for_service(timeout_sec=self._client._wait_service):
+            raise RuntimeError("/vlm/describe not available (start vlm_node)")
+        req = VlmDescribe.Request()
+        req.image_bytes_b64 = override_b64
+        req.prompt = prompt
+        req.model = model
+        future = self._client._vlm.call_async(req)
+        # The dedicated spin thread delivers the response; we only wait.
+        deadline = time.monotonic() + 90.0
+        while not future.done() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        if not future.done():
+            raise RuntimeError("vlm call timed out")
+        try:
+            resp = future.result()
+        except Exception as exc:  # noqa: BLE001
+            raise RuntimeError(f"vlm call failed: {exc}") from exc
+        return resp, source
+
+    def _handle_service(self, request, response: VlmBridgeAnalyze.Response):
+        try:
+            resp, source = self._analyze(request.prompt, request.model, request.image_bytes_b64)
+            response.success = resp.success
+            response.description = resp.description
+            response.elapsed_ms = resp.elapsed_ms
+            response.source = source
+            response.error = resp.error
+        except Exception as exc:  # noqa: BLE001
+            response.success = False
+            response.description = ""
+            response.error = f"{type(exc).__name__}: {exc}"
+            self.get_logger().error(f"bridge analyze failed: {response.error}")
+        return response
+
+    def _handle_trigger(self, msg: String):
+        try:
+            payload = json.loads(msg.data)
+            prompt = str(payload.get("prompt", ""))
+            model = str(payload.get("model", ""))
+            resp, source = self._analyze(prompt, model)
+            out = VlmDescription()
+            out.stamp = self.get_clock().now().to_msg()
+            out.source = source
+            out.prompt = prompt
+            out.description = resp.description
+            out.elapsed_ms = resp.elapsed_ms
+            self._result_pub.publish(out)
+            self.get_logger().info(f"trigger analyzed {source} in {resp.elapsed_ms:.0f}ms")
+        except Exception as exc:  # noqa: BLE001
+            self.get_logger().error(f"trigger analyze failed: {exc}")
+
+
+def _ensure_ros_log_dir() -> None:
+    """rclpy aborts when ~/.ros/log is not writable; fall back to a writable dir."""
+    import os
+    if os.environ.get("ROS_LOG_DIR"):
+        return
+    target = os.path.expanduser("~/.ros/log")
+    try:
+        os.makedirs(target, exist_ok=True)
+        probe = os.path.join(target, ".dsh-vlm-probe")
+        with open(probe, "w", encoding="utf-8"):
+            pass
+        os.remove(probe)
+    except OSError:
+        fallback = f"/tmp/ros-log-{os.getuid()}"
+        os.makedirs(fallback, exist_ok=True)
+        os.environ["ROS_LOG_DIR"] = fallback
+
+
+def main():
+    _ensure_ros_log_dir()
+    rclpy.init()
+    node = VlmBridgeNode()
+    executor = MultiThreadedExecutor(num_threads=4)
+    executor.add_node(node)
+    try:
+        executor.spin()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node._spin_stop.set()
+        node._spin_thread.join(timeout=2.0)
+        executor.shutdown()
+        node.destroy_node()
+        node._client.destroy_node()
+        rclpy.shutdown()
+
+
+if __name__ == "__main__":
+    main()

@@ -4,6 +4,25 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [SemVer](https://semver.org/).
 
+## [0.5.0] - 2026-08-19
+
+### Added
+
+- **常驻图像→VLM 桥接节点（`vlm_bridge_node`）**：持续订阅一路图像话题（raw /
+  CompressedImage）并**仅缓存最新帧字节**；只有在被 LLM 触发时才把帧转发给
+  `vlm_node` 分析——平时零开销、无进程冷启动。
+  - service `/vlm_bridge/analyze_latest`（同步请求-响应，`VlmBridgeAnalyze.srv`）；
+  - topic `/vlm_bridge/trigger`（JSON `{prompt, model}`）→ `/vlm_bridge/result`
+    （`VlmDescription.msg`，transient-local 缓存，异步）；
+  - **内存字节直传**（`image_bytes_b64`）：compressed JPEG 话题免解重编、免磁盘中转。
+- **`ros2_vlm_analyze` 新增 `useBridge` 模式**：走 `/vlm_bridge/analyze_latest` 分析
+  桥接最新帧（无需先取帧文件）。
+- **并发设计**：VLM client 由**专用 spin 线程**服务（executor 回调内等待自己的 client
+  响应会死锁；本环境 coroutine 回调亦不可用——已实测排除），service/trigger 回调仅等待。
+- **实测效率**：bridge 链路开销（冷启动 + 转发）~0.7s vs 旧链路（取帧+分析两次冷启动
+  + 磁盘中转）~2s；VLM HTTP 3.0~4.2s 为主导；trigger→result 5.4s。
+- **测试**：73 用例（`ros2_vlm_analyze` useBridge 命令构造）。
+
 ## [0.4.0] - 2026-08-19
 
 ### Added

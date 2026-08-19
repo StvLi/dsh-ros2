@@ -1,0 +1,13 @@
+# Bridge analysis request/response: analyze the bridge node's latest cached
+# frame (or an explicit override image).
+
+string prompt
+string model             # optional model override (empty = vlm_node default)
+string image_bytes_b64   # optional override image (base64); empty = latest frame
+int32 max_wait_ms        # ms to wait for a first frame if none cached yet (0 = don't wait)
+---
+bool success
+string description
+float32 elapsed_ms
+string source            # frame source (image topic / inline)
+string error

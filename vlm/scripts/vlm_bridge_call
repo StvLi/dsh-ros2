@@ -1,0 +1,64 @@
+#!/usr/bin/env python3
+"""Service client for the persistent VLM bridge node (dsh-ros2).
+
+Calls /vlm_bridge/analyze_latest: analyzes the bridge's latest cached frame
+from its image topic — no snapshot file, no disk, no per-request process
+besides this one-shot CLI. Prints the response as JSON. Usage:
+
+    ros2 run dsh_ros2_vlm vlm_bridge_call --ros-args \
+        -p prompt:='Describe this' -p model:=
+"""
+
+import json
+import sys
+
+import rclpy
+from rclpy.node import Node
+
+from dsh_ros2_vlm.srv import VlmBridgeAnalyze
+
+
+class VlmBridgeCall(Node):
+    def __init__(self):
+        super().__init__("vlm_bridge_call")
+        self.declare_parameter("prompt", "Describe this image.")
+        self.declare_parameter("model", "")
+
+    def run(self) -> int:
+        client = self.create_client(VlmBridgeAnalyze, "/vlm_bridge/analyze_latest")
+        if not client.wait_for_service(timeout_sec=10.0):
+            print(json.dumps({"ok": False, "error": "/vlm_bridge/analyze_latest not available (start vlm_bridge_node + vlm_node)"}))
+            return 1
+        req = VlmBridgeAnalyze.Request()
+        req.prompt = str(self.get_parameter("prompt").value)
+        req.model = str(self.get_parameter("model").value)
+        req.image_bytes_b64 = ""
+        req.max_wait_ms = 0
+        future = client.call_async(req)
+        rclpy.spin_until_future_complete(self, future, timeout_sec=90.0)
+        if not future.done():
+            print(json.dumps({"ok": False, "error": "bridge call timed out"}))
+            return 1
+        resp = future.result()
+        out = {
+            "ok": bool(resp.success),
+            "description": resp.description,
+            "elapsed_ms": round(resp.elapsed_ms, 1),
+            "source": resp.source,
+            **({"error": resp.error} if resp.error else {}),
+        }
+        print(json.dumps(out, ensure_ascii=False))
+        return 0 if resp.success else 1
+
+
+def main():
+    rclpy.init()
+    node = VlmBridgeCall()
+    code = node.run()
+    node.destroy_node()
+    rclpy.shutdown()
+    sys.exit(code)
+
+
+if __name__ == "__main__":
+    main()

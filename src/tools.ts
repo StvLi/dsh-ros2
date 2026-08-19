@@ -1221,18 +1221,27 @@ function makeImageSnapshotTool(deps: ToolDeps) {
 function makeVlmAnalyzeTool(deps: ToolDeps) {
   return ros2Tool(deps, {
     name: 'ros2_vlm_analyze',
-    description: 'Analyze an image file with the parallel VLM ROS2 node (`/vlm/describe` service, OpenAI-compatible gateway). The VLM runs in its own process; results are cached on /vlm/description. Requires the dsh_ros2_vlm package and a running vlm_node.',
+    description: 'Analyze an image with the parallel VLM ROS2 node (OpenAI-compatible gateway). Two modes: (a) imagePath — send an image file via /vlm/describe; (b) useBridge — analyze the vlm_bridge_node\'s latest cached frame via /vlm_bridge/analyze_latest (no file, in-memory transfer; bridge holds the newest frame from its image topic). Requires the dsh_ros2_vlm package and a running vlm_node.',
     parameters: {
-      imagePath: { type: 'string', required: true, description: 'Path to a JPEG/PNG image (e.g. from ros2_image_snapshot).' },
+      imagePath: { type: 'string', default: '', description: 'Path to a JPEG/PNG image (mode a). Omit when useBridge is true.' },
+      useBridge: { type: 'boolean', default: false, description: 'Analyze the bridge node\'s latest cached frame instead of a file (mode b).' },
       prompt: { type: 'string', default: '', description: 'Optional instruction for the vision model.' },
       model: { type: 'string', default: '', description: 'Optional model override (default: vlm_node model).' },
     },
-    buildArgs: (params) => [
-      'run', 'dsh_ros2_vlm', 'vlm_call', '--ros-args',
-      '-p', `image_path:=${String(params.imagePath)}`,
-      ...(strOrUndefined(params.prompt) ? ['-p', `prompt:=${strOrUndefined(params.prompt)}`] : []),
-      ...(strOrUndefined(params.model) ? ['-p', `model:=${strOrUndefined(params.model)}`] : []),
-    ],
+    buildArgs: (params) => {
+      const useBridge = params.useBridge === true
+      const args = [
+        'run', 'dsh_ros2_vlm', useBridge ? 'vlm_bridge_call' : 'vlm_call', '--ros-args',
+      ]
+      if (useBridge) {
+        args.push('-p', `prompt:=${strOrUndefined(params.prompt) ?? ''}`, '-p', `model:=${strOrUndefined(params.model) ?? ''}`)
+      } else {
+        args.push('-p', `image_path:=${String(params.imagePath)}`)
+        if (strOrUndefined(params.prompt)) args.push('-p', `prompt:=${strOrUndefined(params.prompt)}`)
+        if (strOrUndefined(params.model)) args.push('-p', `model:=${strOrUndefined(params.model)}`)
+      }
+      return args
+    },
     // The VLM HTTP call can take up to 60s server-side; give it room.
     runOpts: () => ({ timeoutMs: 90000 }),
     parse: (res) => parseJsonOrRaw(res.stdout),

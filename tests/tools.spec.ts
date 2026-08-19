@@ -141,6 +141,15 @@ describe('ros2_vlm_analyze', () => {
     expect(out.command).not.toContain('prompt:=')
     expect(out.command).not.toContain('model:=')
   })
+  it('calls the bridge service when useBridge is set', async () => {
+    const run = makeRun(() => ({ stdout: JSON.stringify({ ok: true, description: '桥接最新帧分析', elapsed_ms: 900.1, source: '/camera/image' }) }))
+    const out = await call('ros2_vlm_analyze', run, { useBridge: true, prompt: 'describe scene' })
+    expect(out.ok).toBe(true)
+    expect(out.command).toContain('ros2 run dsh_ros2_vlm vlm_bridge_call --ros-args')
+    expect(out.command).not.toContain('image_path:=')
+    expect(out.command).toContain('prompt:=describe scene')
+    expect(out.data).toMatchObject({ ok: true, description: '桥接最新帧分析', source: '/camera/image' })
+  })
 })
 
 describe('command failures', () => {

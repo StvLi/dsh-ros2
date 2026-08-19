@@ -15,6 +15,7 @@ find_package(builtin_interfaces REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/VlmDescribe.srv"
+  "srv/VlmBridgeAnalyze.srv"
   "msg/VlmDescription.msg"
   DEPENDENCIES builtin_interfaces
 )
@@ -25,6 +26,8 @@ install(PROGRAMS
   scripts/vlm_node
   scripts/image_snapshot
   scripts/vlm_call
+  scripts/vlm_bridge_node
+  scripts/vlm_bridge_call
   DESTINATION lib/${PROJECT_NAME}
 )
 

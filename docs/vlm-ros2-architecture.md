@@ -58,8 +58,27 @@ ROS2 图像话题（相机话题 / RViz2 离屏渲染话题），彻底摆脱截
 | `vlm_node` | VLM 并行进程 | service `/vlm/describe` + topic `/vlm/description` |
 | `image_snapshot` | 话题取帧（一次性 CLI） | 订阅图像话题 → JPEG 文件 + JSON |
 | `vlm_call` | service 客户端（一次性 CLI） | 调 `/vlm/describe` → JSON |
+| `vlm_bridge_node` | **常驻图像→VLM 桥接** | 订阅图像话题缓存最新帧；service `/vlm_bridge/analyze_latest` + topic `/vlm_bridge/trigger` → `/vlm_bridge/result` |
+| `vlm_bridge_call` | 桥接 service 客户端（一次性 CLI） | 调 `/vlm_bridge/analyze_latest` → JSON |
 
-**接口定义**（`vlm/srv/VlmDescribe.srv` / `vlm/msg/VlmDescription.msg`）：
+### 3.1 常驻桥接（v0.5.0，实时性核心）
+
+```
+[相机话题] ──订阅──▶ [vlm_bridge_node（常驻）]  仅缓存最新帧字节（不处理）
+                       │  service /vlm_bridge/analyze_latest（LLM 触发）
+                       │  topic   /vlm_bridge/trigger → /vlm_bridge/result（异步）
+                       ▼  image_bytes_b64（内存直传，无磁盘/无重编码）
+                   [vlm_node] → HTTP → 描述
+```
+
+- **只响应不监听**：未被触发时桥接仅持有引用，零开销；无每请求进程冷启动；
+- **内存直传**：compressed JPEG 话题原始字节直接 base64 转发（免解/重编）；
+- **并发设计**：VLM client 由专用 spin 线程服务——executor 回调内等待自己的 client
+  响应会死锁（rclpy 实测），coroutine 回调在本环境亦不可用，此为唯一可靠模式；
+- **实测**：bridge 链路开销 ~0.7s（1 次 CLI 冷启动 + 转发）vs 旧链路 ~2s（取帧+分析
+  两次冷启动 + 磁盘中转）；VLM HTTP 3.0~4.2s 为主导；trigger→result 5.4s。
+
+**接口定义**（`vlm/srv/VlmDescribe.srv` / `vlm/srv/VlmBridgeAnalyze.srv` / `vlm/msg/VlmDescription.msg`）：
 
 ```
 # VlmDescribe.srv
@@ -73,7 +92,19 @@ string description
 float32 elapsed_ms
 string error
 
-# VlmDescription.msg（/vlm/description）
+# VlmBridgeAnalyze.srv
+string prompt
+string model
+string image_bytes_b64   # 空 = 桥接最新帧
+int32 max_wait_ms
+---
+bool success
+string description
+float32 elapsed_ms
+string source            # 帧来源（话题 / inline）
+string error
+
+# VlmDescription.msg（/vlm/description、/vlm_bridge/result）
 builtin_interfaces/Time stamp
 string source
 string prompt
