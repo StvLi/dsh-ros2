@@ -21,6 +21,13 @@ All notable changes to **dsh-ros2** are documented here. Format follows
     经各自 bridge 分析成功（service 5.5s / 3.9s），VLM 发现手腕处胶带卷边/面板污损等细节。
 - **测试**：77 用例（vision_topics 过滤+映射、vision_analyze 路由、工具清单 37）。
 
+### Changed（文档维护）
+
+- **文档合并精简**：`docs/vlm-ros2-architecture.md` 并入 `docs/architecture.md`（全景架构：
+  L1–L4 分层、执行缝隙、实时视觉架构、**架构演进性能对比**、安全模型、兼容性）；
+  删除 `docs/turtlesim-test-report.md`（早期 X11 截图链路过程记录）与无引用图片；
+  README L4 工具表补全（vision_topics / vision_analyze）、`compatibility.md` 补 L4 依赖。
+
 ## [0.5.0] - 2026-08-19
 
 ### Added
