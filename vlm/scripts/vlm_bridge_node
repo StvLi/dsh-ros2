@@ -46,14 +46,22 @@ LATEST_QOS = QoSProfile(
 
 
 class VlmBridgeNode(Node):
-    def __init__(self):
-        super().__init__("vlm_bridge_node")
+    def __init__(self, bridge_id: str = ""):
+        super().__init__(f"vlm_bridge_{bridge_id}" if bridge_id else "vlm_bridge_node")
+        self.declare_parameter("id", bridge_id)
         self.declare_parameter("image_topic", "/camera/image")
         self.declare_parameter("compressed", False)
         self.declare_parameter("wait_for_service_s", 10.0)
+        self._id = str(self.get_parameter("id").value) or bridge_id
         self._topic = str(self.get_parameter("image_topic").value)
         self._compressed = bool(self.get_parameter("compressed").value)
         self._wait_service = float(self.get_parameter("wait_for_service_s").value)
+
+        # Per-instance names: with an id, every bridge exposes its own
+        # service/trigger/result so several cameras can run side by side.
+        self._svc = f"/vlm_bridge/{self._id}/analyze_latest" if self._id else "/vlm_bridge/analyze_latest"
+        self._trig = f"/vlm_bridge/{self._id}/trigger" if self._id else "/vlm_bridge/trigger"
+        self._res = f"/vlm_bridge/{self._id}/result" if self._id else "/vlm_bridge/result"
 
         self._latest_jpeg: bytes | None = None
 
@@ -65,21 +73,21 @@ class VlmBridgeNode(Node):
             self.create_subscription(Image, self._topic, self._cb_raw, 1)
 
         # Dedicated client node + spin thread (never spin inside a callback).
-        self._client = Node("vlm_bridge_client")
+        self._client = Node(f"vlm_bridge_client_{self._id}" if self._id else "vlm_bridge_client")
         self._client._vlm = self._client.create_client(VlmDescribe, "/vlm/describe")
         self._client._wait_service = self._wait_service
         self._spin_stop = threading.Event()
         self._spin_thread = threading.Thread(target=self._spin_loop, daemon=True)
         self._spin_thread.start()
 
-        self.create_service(VlmBridgeAnalyze, "/vlm_bridge/analyze_latest", self._handle_service)
-        self.create_subscription(String, "/vlm_bridge/trigger", self._handle_trigger, 10)
-        self._result_pub = self.create_publisher(VlmDescription, "/vlm_bridge/result", LATEST_QOS)
+        self.create_service(VlmBridgeAnalyze, self._svc, self._handle_service)
+        self.create_subscription(String, self._trig, self._handle_trigger, 10)
+        self._result_pub = self.create_publisher(VlmDescription, self._res, LATEST_QOS)
 
         self.get_logger().info(
             f"vlm_bridge_node ready: watching {self._topic} "
             f"({'compressed' if self._compressed else 'raw'}), "
-            f"service=/vlm_bridge/analyze_latest trigger=/vlm_bridge/trigger")
+            f"service={self._svc} trigger={self._trig}")
 
     def _spin_loop(self):
         while rclpy.ok() and not self._spin_stop.is_set():

@@ -1,0 +1,113 @@
+#!/usr/bin/env python3
+"""Vision pipeline bringup for dsh-ros2.
+
+Discovers every live image topic (sensor_msgs/Image or CompressedImage) on
+the ROS2 graph and brings up one vlm_bridge_node per topic, so the LLM /
+harness can analyze any camera's latest frame through a stable per-topic
+service:
+
+    /vlm_bridge/<topic_id>/analyze_latest     (VlmBridgeAnalyze.srv)
+    /vlm_bridge/<topic_id>/trigger  ->  /vlm_bridge/<topic_id>/result
+
+topic_id is the topic name with leading '/' removed and non-alphanumerics
+mapped to '_' (e.g. /deepcybo/.../wrist_left/image_raw/compressed ->
+deepcybo_..._wrist_left_image_raw_compressed).
+
+Requires vlm_node to be running (the VLM provider); Ctrl-C closes all
+spawned bridges. Prints a JSON mapping of topic -> bridge service.
+"""
+
+import json
+import os
+import signal
+import subprocess
+import sys
+import time
+
+import rclpy
+from rclpy.node import Node
+
+IMAGE_TYPES = {"sensor_msgs/msg/Image", "sensor_msgs/msg/CompressedImage"}
+
+
+def topic_id(topic: str) -> str:
+    base = "".join(c if c.isalnum() or c == "_" else "_" for c in topic.lstrip("/"))
+    return base or "cam"
+
+
+def discover_image_topics(node: Node):
+    found = []
+    try:
+        names = node.get_topic_names_and_types()  # list[(topic, [types])]
+    except Exception:  # noqa: BLE001
+        names = []
+    for topic, types in names:
+        if any(t in IMAGE_TYPES for t in types):
+            compressed = any("CompressedImage" in t for t in types)
+            found.append({"topic": topic, "compressed": compressed})
+    return found
+
+
+def spawn_bridge(topic: str, compressed: bool, env: dict):
+    tid = topic_id(topic)
+    cmd = [
+        "ros2", "run", "dsh_ros2_vlm", "vlm_bridge_node", "--ros-args",
+        "-p", f"id:={tid}",
+        "-p", f"image_topic:={topic}",
+        "-p", f"compressed:={'true' if compressed else 'false'}",
+    ]
+    proc = subprocess.Popen(cmd, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return proc
+
+
+def main():
+    rclpy.init()
+    node = Node("vision_bringup")
+    time.sleep(1.0)  # let discovery settle
+    topics = discover_image_topics(node)
+    node.destroy_node()
+    rclpy.shutdown()
+
+    print(json.dumps({"discovered": [t["topic"] for t in topics], "count": len(topics)}, ensure_ascii=False))
+
+    env = dict(os.environ)
+    procs = []
+    mapping = []
+    for t in topics:
+        tid = topic_id(t["topic"])
+        proc = spawn_bridge(t["topic"], t["compressed"], env)
+        procs.append(proc)
+        svc = f"/vlm_bridge/{tid}/analyze_latest"
+        mapping.append({"topic": t["topic"], "compressed": t["compressed"], "bridge_service": svc, "pid": proc.pid})
+        print(json.dumps({"started": svc, "pid": proc.pid, "watching": t["topic"]}, ensure_ascii=False), flush=True)
+
+    if not mapping:
+        print(json.dumps({"error": "no image topics found on the graph"}, ensure_ascii=False))
+        return
+
+    def cleanup(*_):
+        for p in procs:
+            try:
+                p.terminate()
+            except Exception:  # noqa: BLE001
+                pass
+        time.sleep(0.5)
+        for p in procs:
+            try:
+                p.kill()
+            except Exception:  # noqa: BLE001
+                pass
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, cleanup)
+    signal.signal(signal.SIGTERM, cleanup)
+    print(json.dumps({"bridges": mapping, "note": "Ctrl-C to stop"}, ensure_ascii=False), flush=True)
+    try:
+        while True:
+            time.sleep(1.0)
+    except KeyboardInterrupt:
+        cleanup()
+
+
+if __name__ == "__main__":
+    main()

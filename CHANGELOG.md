@@ -4,6 +4,23 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [SemVer](https://semver.org/).
 
+## [0.6.0] - 2026-08-19
+
+### Added
+
+- **视觉链路自动建立（vision pipeline）**：自动发现当前 ROS2 全部图像话题
+  （`sensor_msgs/Image` / `CompressedImage`），为每路自动拉起
+  `vlm_bridge_node`（参数化 `id`：节点名、service/trigger/result 按话题唯一化），
+  LLM/harness 按话题直接分析最新帧。
+  - `vision_bringup`：发现话题 → 批量 spawn bridge → 打印 topic↔bridge_service 映射；
+    Ctrl-C 统一关闭；
+  - `vlm_bridge_node` 支持 `id` 参数（多路并存）；`vlm_bridge_call` 支持 `service` 参数；
+  - 新工具 **`ros2_vision_topics`**（列出图像话题 + 桥接 service 名）、
+    **`ros2_vision_analyze {topic, prompt}`**（按话题路由到对应 bridge service，内存直传）。
+  - **实测**（左右手腕相机）：bringup 自动发现 3 路并建链；wrist_left / wrist_right
+    经各自 bridge 分析成功（service 5.5s / 3.9s），VLM 发现手腕处胶带卷边/面板污损等细节。
+- **测试**：77 用例（vision_topics 过滤+映射、vision_analyze 路由、工具清单 37）。
+
 ## [0.5.0] - 2026-08-19
 
 ### Added

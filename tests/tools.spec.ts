@@ -159,6 +159,42 @@ describe('ros2_vlm_analyze', () => {
   })
 })
 
+describe('ros2_vision_topics', () => {
+  it('filters image topics and maps bridge services', async () => {
+    const run = makeRun(() => ({
+      stdout: [
+        '/deepcybo/lite/camera/wrist_left/image_raw/compressed [sensor_msgs/msg/CompressedImage]',
+        '/deepcybo/lite/camera/wrist_right/image_raw/compressed [sensor_msgs/msg/CompressedImage]',
+        '/joint_states [sensor_msgs/msg/JointState]',
+      ].join('\n'),
+    }))
+    const out = await call('ros2_vision_topics', run, { search: 'wrist' })
+    expect(out.ok).toBe(true)
+    expect(out.data).toMatchObject({ count: 2 })
+    const topics = (out.data as { topics: Array<{ topic: string; bridgeService: string }> }).topics
+    expect(topics[0]?.bridgeService).toBe('/vlm_bridge/deepcybo_lite_camera_wrist_left_image_raw_compressed/analyze_latest')
+    expect(topics[1]?.bridgeService).toBe('/vlm_bridge/deepcybo_lite_camera_wrist_right_image_raw_compressed/analyze_latest')
+  })
+})
+
+describe('ros2_vision_analyze', () => {
+  it('routes to the topic bridge service', async () => {
+    const run = makeRun(() => ({ stdout: JSON.stringify({ ok: true, description: '右手腕场景', elapsed_ms: 1000.5, source: '/deepcybo/.../wrist_right' }) }))
+    const out = await call('ros2_vision_analyze', run, { topic: '/deepcybo/lite/camera/wrist_right/image_raw/compressed', prompt: 'describe' })
+    expect(out.ok).toBe(true)
+    expect(out.command).toContain('vlm_bridge_call --ros-args')
+    expect(out.command).toContain('service:=/vlm_bridge/deepcybo_lite_camera_wrist_right_image_raw_compressed/analyze_latest')
+    expect(out.command).toContain('prompt:=describe')
+    expect(out.data).toMatchObject({ ok: true, description: '右手腕场景' })
+  })
+  it('does not pass empty prompt/model', async () => {
+    const run = makeRun(() => ({ stdout: '{"ok": true, "description": "x", "elapsed_ms": 1}' }))
+    const out = await call('ros2_vision_analyze', run, { topic: '/a/b' })
+    expect(out.command).not.toContain('prompt:=')
+    expect(out.command).not.toContain('model:=')
+  })
+})
+
 describe('command failures', () => {
   it('returns ok:false with an error code on non-zero exit', async () => {
     const run = makeRun(() => ({ ok: false, exitCode: 2, stderr: 'boom' }))
@@ -240,6 +276,9 @@ describe('tool inventory', () => {
     // L4 headless perception tools
     expect(names).toContain('ros2_image_snapshot')
     expect(names).toContain('ros2_vlm_analyze')
-    expect(names).toHaveLength(35)
+    // L4 vision pipeline tools
+    expect(names).toContain('ros2_vision_topics')
+    expect(names).toContain('ros2_vision_analyze')
+    expect(names).toHaveLength(37)
   })
 })

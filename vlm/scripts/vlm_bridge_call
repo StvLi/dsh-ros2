@@ -23,11 +23,13 @@ class VlmBridgeCall(Node):
         super().__init__("vlm_bridge_call")
         self.declare_parameter("prompt", "Describe this image.")
         self.declare_parameter("model", "")
+        self.declare_parameter("service", "/vlm_bridge/analyze_latest")
 
     def run(self) -> int:
-        client = self.create_client(VlmBridgeAnalyze, "/vlm_bridge/analyze_latest")
+        service = str(self.get_parameter("service").value)
+        client = self.create_client(VlmBridgeAnalyze, service)
         if not client.wait_for_service(timeout_sec=10.0):
-            print(json.dumps({"ok": False, "error": "/vlm_bridge/analyze_latest not available (start vlm_bridge_node + vlm_node)"}))
+            print(json.dumps({"ok": False, "error": f"{service} not available (start vlm_bridge_node + vlm_node)"}))
             return 1
         req = VlmBridgeAnalyze.Request()
         req.prompt = str(self.get_parameter("prompt").value)

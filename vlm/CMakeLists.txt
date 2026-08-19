@@ -28,6 +28,7 @@ install(PROGRAMS
   scripts/vlm_call
   scripts/vlm_bridge_node
   scripts/vlm_bridge_call
+  scripts/vision_bringup
   DESTINATION lib/${PROJECT_NAME}
 )
 

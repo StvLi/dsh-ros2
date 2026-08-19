@@ -431,6 +431,9 @@ export function createRos2Tools(deps: ToolDeps) {
   // L4 headless perception (parallel VLM node + image-topic acquisition).
   tools.push(makeImageSnapshotTool(deps))
   tools.push(makeVlmAnalyzeTool(deps))
+  // L4 vision pipeline (auto bring-up: per-topic bridge -> VLM).
+  tools.push(makeVisionTopicsTool(deps))
+  tools.push(makeVisionAnalyzeTool(deps))
   return tools
 }
 
@@ -1245,6 +1248,61 @@ function makeVlmAnalyzeTool(deps: ToolDeps) {
       return args
     },
     // The VLM HTTP call can take up to 60s server-side; give it room.
+    runOpts: () => ({ timeoutMs: 90000 }),
+    parse: (res) => parseJsonOrRaw(res.stdout),
+  })
+}
+
+/** Map an image topic to its auto bridge service name (mirrors vision_bringup). */
+export function bridgeServiceForTopic(topic: string): string {
+  const id = topic.replace(/^\/+/, '').replace(/[^A-Za-z0-9_]/g, '_') || 'cam'
+  return `/vlm_bridge/${id}/analyze_latest`
+}
+
+/** L4: list live image topics and their auto bridge services. */
+function makeVisionTopicsTool(deps: ToolDeps) {
+  return ros2Tool(deps, {
+    name: 'ros2_vision_topics',
+    description: 'List live image topics (sensor_msgs/Image or CompressedImage) with their auto bridge service names, for use with ros2_vision_analyze. Requires the vision pipeline (vlm_node + vision_bringup) for the services to exist.',
+    parameters: {
+      search: { type: 'string', default: '', description: 'Optional substring filter on topic name.' },
+    },
+    buildArgs: () => ['topic', 'list', '-t'],
+    parse: (res, params) => {
+      const all = parseTopicList(res.stdout)
+      const search = typeof params.search === 'string' ? params.search.trim() : ''
+      const images = all.filter((t) =>
+        t.type !== undefined && (t.type.includes('sensor_msgs/msg/Image') || t.type.includes('sensor_msgs/msg/CompressedImage')))
+      const filtered = search.length > 0 ? images.filter((t) => t.name.includes(search)) : images
+      return {
+        topics: filtered.map((t) => ({
+          topic: t.name,
+          ...(t.type ? { type: t.type } : {}),
+          bridgeService: bridgeServiceForTopic(t.name),
+        })),
+        count: filtered.length,
+      }
+    },
+  })
+}
+
+/** L4: analyze the latest frame of any live image topic via its auto bridge. */
+function makeVisionAnalyzeTool(deps: ToolDeps) {
+  return ros2Tool(deps, {
+    name: 'ros2_vision_analyze',
+    description: 'Analyze the latest frame of any live image topic through the auto-brought-up vision pipeline (vision_bringup per-topic vlm_bridge_node → vlm_node). Routes to the topic\'s bridge service; in-memory frame transfer, no file. Requires vlm_node + vision_bringup running.',
+    parameters: {
+      topic: { type: 'string', required: true, description: 'Image topic, e.g. /deepcybo/lite/camera/wrist_left/image_raw/compressed.' },
+      prompt: { type: 'string', default: '', description: 'Optional instruction for the vision model.' },
+      model: { type: 'string', default: '', description: 'Optional model override (default: vlm_node model).' },
+    },
+    buildArgs: (params) => {
+      const service = bridgeServiceForTopic(String(params.topic))
+      const args = ['run', 'dsh_ros2_vlm', 'vlm_bridge_call', '--ros-args', '-p', `service:=${service}`]
+      if (strOrUndefined(params.prompt)) args.push('-p', `prompt:=${strOrUndefined(params.prompt)}`)
+      if (strOrUndefined(params.model)) args.push('-p', `model:=${strOrUndefined(params.model)}`)
+      return args
+    },
     runOpts: () => ({ timeoutMs: 90000 }),
     parse: (res) => parseJsonOrRaw(res.stdout),
   })

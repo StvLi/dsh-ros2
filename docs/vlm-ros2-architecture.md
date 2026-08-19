@@ -58,8 +58,9 @@ ROS2 图像话题（相机话题 / RViz2 离屏渲染话题），彻底摆脱截
 | `vlm_node` | VLM 并行进程 | service `/vlm/describe` + topic `/vlm/description` |
 | `image_snapshot` | 话题取帧（一次性 CLI） | 订阅图像话题 → JPEG 文件 + JSON |
 | `vlm_call` | service 客户端（一次性 CLI） | 调 `/vlm/describe` → JSON |
-| `vlm_bridge_node` | **常驻图像→VLM 桥接** | 订阅图像话题缓存最新帧；service `/vlm_bridge/analyze_latest` + topic `/vlm_bridge/trigger` → `/vlm_bridge/result` |
-| `vlm_bridge_call` | 桥接 service 客户端（一次性 CLI） | 调 `/vlm_bridge/analyze_latest` → JSON |
+| `vlm_bridge_node` | **常驻图像→VLM 桥接** | 订阅图像话题缓存最新帧；service `/vlm_bridge/analyze_latest`（或 `/vlm_bridge/<id>/...` 多路）+ topic trigger/result |
+| `vlm_bridge_call` | 桥接 service 客户端（一次性 CLI） | 调 `/vlm_bridge/analyze_latest`（`service` 参数可指定多路）→ JSON |
+| `vision_bringup` | **视觉链路自动建立** | 发现全部图像话题 → 每路 spawn bridge（`id` 唯一化）→ 打印映射 |
 
 ### 3.1 常驻桥接（v0.5.0，实时性核心）
 
@@ -77,6 +78,23 @@ ROS2 图像话题（相机话题 / RViz2 离屏渲染话题），彻底摆脱截
   响应会死锁（rclpy 实测），coroutine 回调在本环境亦不可用，此为唯一可靠模式；
 - **实测**：bridge 链路开销 ~0.7s（1 次 CLI 冷启动 + 转发）vs 旧链路 ~2s（取帧+分析
   两次冷启动 + 磁盘中转）；VLM HTTP 3.0~4.2s 为主导；trigger→result 5.4s。
+
+### 3.2 视觉链路自动建立（v0.6.0，LLM/harness 统一入口）
+
+```
+[vision_bringup]  发现全部图像话题（sensor_msgs/Image + CompressedImage）
+   ├─ 每路 spawn vlm_bridge_node --id <topic_id>（service/trigger/result 按话题唯一化）
+   └─ 打印 topic ↔ /vlm_bridge/<topic_id>/analyze_latest 映射
+LLM/harness:
+   ros2_vision_topics            → 列出图像话题 + 各自 bridge service
+   ros2_vision_analyze {topic}   → 路由到该话题 bridge → 最新帧内存直传 vlm_node → 描述
+```
+
+- `topic_id`：话题去前导 `/`、非字母数字转 `_`
+  （`/deepcybo/.../wrist_left/image_raw/compressed` →
+  `deepcybo_..._wrist_left_image_raw_compressed`）；
+- **实测**（左右手腕相机）：bringup 自动发现 3 路并建链；wrist_left / wrist_right 经各自
+  bridge 分析成功（service 5.5s / 3.9s），VLM 发现手腕处胶带卷边 / 面板污损等细节。
 
 **接口定义**（`vlm/srv/VlmDescribe.srv` / `vlm/srv/VlmBridgeAnalyze.srv` / `vlm/msg/VlmDescription.msg`）：
 
