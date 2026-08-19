@@ -23,6 +23,17 @@ All notable changes to **dsh-ros2** are documented here. Format follows
   + 磁盘中转）~2s；VLM HTTP 3.0~4.2s 为主导；trigger→result 5.4s。
 - **测试**：73 用例（`ros2_vlm_analyze` useBridge 命令构造）。
 
+### Fixed
+
+- **`ros2_vlm_analyze` useBridge 模式传空 `-p model:=` 导致 rclpy 解析失败**：
+  空值参数不再下发（74 用例）。
+
+### Changed
+
+- **文档**：`docs/robot-camera-analysis.md` 更新至 v0.5.0——最新三路相机分析
+  （head 走 bridge）+ 优化历程性能参数对比（bash 串行 17s → 插件并行 6.6s → bridge
+  链路开销 ~0.7s）。
+
 ## [0.4.0] - 2026-08-19
 
 ### Added

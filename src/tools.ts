@@ -1234,7 +1234,9 @@ function makeVlmAnalyzeTool(deps: ToolDeps) {
         'run', 'dsh_ros2_vlm', useBridge ? 'vlm_bridge_call' : 'vlm_call', '--ros-args',
       ]
       if (useBridge) {
-        args.push('-p', `prompt:=${strOrUndefined(params.prompt) ?? ''}`, '-p', `model:=${strOrUndefined(params.model) ?? ''}`)
+        // Only pass non-empty values: rclpy rejects an empty `-p model:=`.
+        if (strOrUndefined(params.prompt)) args.push('-p', `prompt:=${strOrUndefined(params.prompt)}`)
+        if (strOrUndefined(params.model)) args.push('-p', `model:=${strOrUndefined(params.model)}`)
       } else {
         args.push('-p', `image_path:=${String(params.imagePath)}`)
         if (strOrUndefined(params.prompt)) args.push('-p', `prompt:=${strOrUndefined(params.prompt)}`)

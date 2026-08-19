@@ -150,6 +150,13 @@ describe('ros2_vlm_analyze', () => {
     expect(out.command).toContain('prompt:=describe scene')
     expect(out.data).toMatchObject({ ok: true, description: '桥接最新帧分析', source: '/camera/image' })
   })
+  it('does not pass empty -p args in bridge mode (rclpy rejects model:=)', async () => {
+    const run = makeRun(() => ({ stdout: '{"ok": true, "description": "x", "elapsed_ms": 1}' }))
+    const out = await call('ros2_vlm_analyze', run, { useBridge: true })
+    expect(out.command).not.toContain('model:=')
+    expect(out.command).not.toContain('prompt:=')
+    expect(out.command).toContain('vlm_bridge_call --ros-args')
+  })
 })
 
 describe('command failures', () => {
