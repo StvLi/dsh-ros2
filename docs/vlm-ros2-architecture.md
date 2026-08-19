@@ -150,9 +150,84 @@ ros2 run dsh_ros2_vlm vlm_call --ros-args -p image_path:=/tmp/f.jpg -p prompt:='
 
 ---
 
+## 7.5 RViz2 离屏渲染（dsh_ros2_rviz_offscreen，v0.4.0）
+
+> 解决「真实 RViz2 可视化」的无头获取：不重画、不截屏，直接驱动 rviz 渲染内核。
+
+### 为什么
+
+早期 `turtle_render_node` 是插件自己用 OpenCV **重画**一张简化图——这不符合真实需求。
+用户要的是 **RViz2 渲染出的真实场景**（TF 树 / Grid / URDF / 点云 / Marker），且**不借助
+物理显示器与窗口层级**（无头机器人）。rviz2 官方无无头模式，但它的渲染内核是 OGRE，
+可以**离屏渲染**。
+
+### 技术方案（已实测）
+
+```
+Xvfb（虚拟 X：仅提供 OGRE 的 GLX context，无物理屏幕、无窗口管理器）
+   └─ rviz_offscreen_node（C++，链接 rviz_common + OGRE + rviz_default_plugins）
+        ├─ RenderPanel + VisualizationManager（真实 rviz 栈）
+        ├─ 加载 .rviz 配置（Grid / TF / RobotModel / PointCloud2 / Marker ...）
+        ├─ 主循环：onUpdate（Display 数据流）+ 离屏渲染（captureScreenShot）
+        └─ 发布 /rviz/scene (sensor_msgs/Image, raw RGB)
+              │
+              ▼
+        ros2_image_snapshot（取帧）→ ros2_vlm_analyze（并行 VLM）→ 描述
+```
+
+关键点：
+- **渲染内核输出**：`captureScreenShot()` 读 OGRE RenderTarget，非 X 截图、无窗口层级；
+- **GL context**：OGRE 需要 GLX，由 Xvfb + Mesa llvmpipe（软件 GL 4.5）提供；
+  机器人上可跑轻量 Xvfb，物理显示器完全不需要；
+- **Qt**：默认 xcb platform（offscreen platform 与 OGRE GLX 冲突，已踩坑排除）；
+- **Display 加载**：`vm.load()` 需传 .rviz 的 `Visualization Manager` 子段（非整个文件）。
+
+### 实测（本机，图像全程走话题、零显示器依赖）
+
+| 场景 | 渲染结果 | VLM 反馈 |
+| --- | --- | --- |
+| Grid + TF（map→odom→base_link 静态 TF） | Grid 网格 + 两个 RGB 坐标轴 | 「网格地面：有；坐标轴：有（红绿蓝三轴）；Orbit 俯视视角」✅ |
+| 相机话题 `/camera/image`（直取帧） | 320×240 传感器帧 | 「CAM 765 + 渐变背景」✅ |
+
+![RViz2 离屏渲染场景（Grid+TF）](images/rviz_grid_tf.jpg)
+![相机话题直取帧](images/camera_frame.jpg)
+
+### 构建与启动
+
+```bash
+mkdir -p /tmp/vlm_ws/src && ln -s <repo>/vlm /tmp/vlm_ws/src/dsh_ros2_vlm \
+  && ln -s <repo>/offscreen /tmp/vlm_ws/src/dsh_ros2_rviz_offscreen
+cd /tmp/vlm_ws && colcon build --symlink-install && source install/setup.bash
+
+# 1) 提供场景数据（示例：静态 TF；真机为 robot_state_publisher / 相机等）
+ros2 run tf2_ros static_transform_publisher 0 0 0 0 0 0 map odom &
+ros2 run tf2_ros static_transform_publisher 1 0 0 0 0 0 odom base_link &
+
+# 2) 离屏渲染节点（Xvfb 内部提供 GL context；图像发布到 /rviz/scene）
+xvfb-run -a -s "-screen 0 1280x800x24" \
+  ros2 run dsh_ros2_rviz_offscreen rviz_offscreen_node --ros-args \
+    -p config_path:=/path/to/scene.rviz -p topic:=/rviz/scene \
+    -p width:=800 -p height:=600 -p rate:=5.0
+
+# 3) 无头取帧 + VLM（复用 L4 工具链）
+ros2 run dsh_ros2_vlm image_snapshot --ros-args -p topic:=/rviz/scene -p output:=/tmp/f.jpg
+ros2 run dsh_ros2_vlm vlm_call --ros-args -p image_path:=/tmp/f.jpg -p prompt:='Describe'
+```
+
+参数：`config_path`（.rviz 文件）、`topic`、`width`/`height`、`rate`。
+
+### 已知限制
+
+- `rviz_default_plugins/Image`（相机贴图面板）在无头下因内嵌渲染面板崩溃——
+  相机图请直接用 `ros2_image_snapshot` 从相机话题取帧（更直接，已在实测验证）；
+- 每帧经 PNG 编解码（captureScreenShot → libpng），5Hz 足够 VLM 场景；高帧率可改直接 readPixels；
+- 依赖 Xvfb + Mesa（软件 GL）：机器人部署需安装 `xvfb`（无物理屏）；性能敏感场景可换 GPU + X。
+
+---
+
 ## 8. 已知限制 / 下一步
 
 - `image_snapshot` 目前取"最新一帧"，无帧率控制；高帧率相机可加采样节流；
 - VLM 单请求延迟 ~1.6-2s 是网关/模型固有（并行进程缓解了 agent 阻塞，但单帧分析本身仍在此量级）；
 - 下一步候选：agent 侧异步消费（订阅 `/vlm/description` 而非同步调用）、
-  prompt 模板库、图像话题 QoS 兼容（compressed 图像）。
+  prompt 模板库、图像话题 QoS 兼容（compressed 图像）、离屏渲染 readPixels 直出（去掉 PNG 中转）。

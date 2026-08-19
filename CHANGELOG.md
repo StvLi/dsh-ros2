@@ -4,6 +4,29 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [SemVer](https://semver.org/).
 
+## [0.4.0] - 2026-08-19
+
+### Added
+
+- **RViz2 离屏渲染节点（`offscreen/`，C++ 包 `dsh_ros2_rviz_offscreen`）**：
+  驱动真实 rviz 渲染栈（`rviz_common::VisualizationManager` + OGRE + `rviz_default_plugins`），
+  在虚拟 X（Xvfb，无物理屏、无窗口层级）上**离屏渲染** .rviz 场景（Grid/TF/RobotModel/
+  PointCloud2/Marker 等），读渲染内核输出发布 `/rviz/scene`（`sensor_msgs/Image`）。
+  修复链路上的坑：render window 需先 `initialize()`（建 OGRE scene manager）、
+  `RenderPanel::initialize(&vm)`（建 viewport/相机）、`vm.load()` 需传
+  `Visualization Manager` 子段、主循环用 `QMetaObject::invokeMethod(vm,"onUpdate")`
+  显式驱动 Display 数据流（rviz 默认 QTimer 依赖 Qt 事件循环，无头下不触发）。
+- **实测验证**：Grid+TF（static TF map→odom→base_link）渲染出网格与双坐标轴，
+  VLM 正确解读（「网格地面、红绿蓝三轴、Orbit 视角」）；相机话题 `/camera/image`
+  直取帧 → VLM 识别画面内容。图像全程走话题，零显示器依赖。
+- **文档**：`docs/vlm-ros2-architecture.md` §7.5（方案/实测/构建启动/已知限制）。
+
+### Known limitations
+
+- `rviz_default_plugins/Image`（相机贴图面板）无头下内嵌面板崩溃——相机图直接用
+  `ros2_image_snapshot` 从话题取帧（更直接，已实测）；
+- 每帧经 PNG 编解码，5Hz 足够 VLM；高帧率可改直接 readPixels。
+
 ## [0.3.0] - 2026-08-19
 
 ### Added
