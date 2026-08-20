@@ -24,7 +24,7 @@
 
 ## 截图
 
-| RViz2 离屏渲染（机器人本体 mesh，绑定实时 TF） | 头部相机 | 左手眼相机 | 右手眼相机 |
+| RViz2 离屏渲染（最新 `lite_urdf`，真实材质配色） | 头部相机 | 左手眼相机 | 右手眼相机 |
 | --- | --- | --- | --- |
 | ![mesh render](docs/images/robot_mesh_full.jpg) | ![head cam](docs/images/camera_head.jpg) | ![wrist left](docs/images/camera_wrist_left.jpg) | ![wrist right](docs/images/camera_wrist_right.jpg) |
 

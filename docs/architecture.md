@@ -139,9 +139,15 @@ ROS2 通信），图像全部来自话题，杜绝 X11 截图依赖与窗口层�
    实际描述（`/robot_description`，mesh 路径改写为 `file://`）即可。**若 URDF 与 TF
    不匹配，所有 link 的变换查找失败，mesh 全部渲染到固定坐标系原点——即"零件堆叠在
    原点"**（v0.8.0 曾因发布了一套 `_link` 后缀的旧 URDF 而踩坑）；
-4. **视距**：Orbit `Distance` ≈ 1.5–2.0 m 可得到 RViz 式近景全身视角；Distance ≳ 5 m
-   时机器人缩成画面中心小点；
-5. 已实测渲染出机器人实体几何（白/灰色连杆外壳，STL 无材质渲染为默认白模；
+4. **视距与视角**：Orbit `Distance` ≈ 1.5–2.0 m 可得到 RViz 式近景全身视角；Distance ≳ 5 m
+   时机器人缩成画面中心小点。**相机焦点高度**（`Focal Point Z`）应对准机器人主体高度
+   （如双臂展开在 Z≈0.8 m 时设 Z≈0.55–0.8），否则高支架/柱状底座会遮挡或裁切主体；
+5. **材质颜色**：URDF 内 `<material><color rgba=...>` 会被 RobotModel 应用——
+   **带材质的 URDF 渲染出真实配色**（如 lite_urdf：白基座/躯干 + 橙上臂 + 红前臂 +
+   黑关节，v0.8.2 实测）；无 `<material>` 的 STL 才渲染为默认白模。
+   mesh 尺寸正常（米制，如 world_root 0.39×0.39×1.03 m）；渲染大 mesh 时首次加载
+   需数十秒（RSS 从 ~300 MB 升至 ~1 GB，CPU 持续 = 加载中），期间画面静止属正常；
+6. 已实测渲染出机器人实体几何（白/灰色连杆外壳，STL 无材质渲染为默认白模；
    inertia 警告 `unrealistic inertia` 为 rviz 提示，不影响 mesh）；节点启动 ~3 s 后
    在日志打印 `FM: ... frames=N` 与 `transformHasProblems(...)=0` 表明 TF 已解析，
    可用作"mesh 是否正确绑定 TF"的判定信号。

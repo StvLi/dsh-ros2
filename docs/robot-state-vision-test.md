@@ -173,3 +173,51 @@ v0.8.0 的 mesh 渲染图（§5.1）视觉上**全部零件 + TF 坐标轴堆叠
 - **新增** FrameManager 诊断：`getTransformer()->getClassId()`（确认 TF 插件而非
   Identity 回退）、`getAllFrameNames()`、`transformHasProblems()`，预热后打印一次
   全帧名，之后每 20s 打印一行帧数，便于判定 mesh/TF 绑定状态。
+
+---
+
+## 7. 补充：彩色 URDF（`lite_urdf`）渲染验证（v0.8.2，2026-08-20）
+
+### 7.1 目标与背景
+
+最新生产描述包 `bar_ws/src/lite_urdf`（xacro：`urdf/lite.urdf.xacro`）的 URDF **带
+真实材质**（`<material><color rgba=...>`：白基座/躯干、橙上臂、红前臂、黑关节），
+不再是无材质白模。真机栈此时已下线（仅相机节点在线），故采用**静态演示渲染**：
+自己起 `robot_state_publisher` 发布该 URDF 的 TF，再离屏渲染。
+
+### 7.2 静态渲染流程（无真机 TF 时的标准做法）
+
+1. `xacro lite.urdf.xacro mode:=arms_grippers emit_ros2_control:=false > /tmp/lite_latest.urdf`
+   （24 links / 23 joints / 19 个 visual mesh / 19 个材质颜色；`check_urdf` 通过）；
+2. mesh 路径改写为 `file:///home/stvli/Desktop/bar_ws/src/lite_urdf/meshes/...`；
+3. `robot_state_publisher` 加载该 URDF 并 **remap `/robot_description:=/robot_description_abs`**
+   （同时发布 URDF 与 TF，帧名 = link 名 `xxx_link`，与 URDF 一致，无需额外发布器）；
+4. 发布 `/joint_states` 全 0（该模型零位 = 双臂水平侧平举，Z≈0.8 m）；
+5. `.rviz`：`Fixed Frame: world_root`（模型根帧），Grid + RobotModel（Description
+   Source/Topic → `robot_description_abs`）+ TF；Orbit `Distance 1.7 / Yaw 0.8 /
+   Pitch 0.18 / Focal Z 0.55`（焦点对准手臂高度，避免 1.03 m 高基座柱遮挡/裁切）；
+6. `rviz_offscreen_node` 渲染（1000×750）。**大 mesh 首次加载需数十秒**（RSS 升至
+   ~1 GB、CPU 持续 = 加载中，期间画面静止属正常）。
+
+### 7.3 验证结果
+
+![彩色 URDF 渲染](images/robot_mesh_full.jpg)
+
+- 节点日志：`FM: ... frames=24`，TF 全解析；
+- **VLM 确认彩色渲染**：白/浅灰基座立柱躯干头 + **橙上臂**（含夹爪）+ **红前臂** +
+  **黑关节**；双臂完整带夹爪；整机（底座到头）无裁剪；
+- 像素分析：红色/橙色像素各数千、黑色关节像素存在，非白模；
+- 连续多帧快照字节一致，渲染稳定；
+- 单 mesh probe（Fixed Frame = 自身、Distance 0.5）可快速验证大 STL 加载与材质
+  颜色（红 shoulder_pitch 部件清晰可见）。
+
+### 7.4 踩坑要点
+
+- **视角/焦点是关键**：该模型双臂沿 X 轴水平展开在 Z≈0.8 m 高度，若相机焦点在
+  地面（Z=0）且从侧面看，双臂落在视野外或被 1.03 m 高基座柱遮挡 → 画面只见
+  "白模柱子"。把 `Focal Point Z` 对准手臂高度即可看到完整彩色机器人；
+- 一次只保留**一个** `rviz_offscreen_node` 进程发布 `/rviz/scene`（多进程并存时
+  取帧会随机订阅到旧进程的帧；旧进程若订阅到被覆盖的 URDF 会把全部 mesh 堆到
+  原点渲染成白团）；
+- 零位姿态因模型而异：`lite_urdf` 全 0 = 双臂水平侧平举（与用户对真机
+  `bar_description_lite` 的标定一致）。

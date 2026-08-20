@@ -4,6 +4,24 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [SemVer](https://semver.org/).
 
+## [0.8.2] - 2026-08-20
+
+### Added
+
+- **彩色 URDF 渲染验证**（`lite_urdf` 最新生产描述包）：URDF 内 `<material>` 材质
+  颜色被 RobotModel 正确应用——白基座/躯干 + 橙上臂 + 红前臂 + 黑关节，不再是白模；
+  `docs/images/robot_mesh_full.jpg` 更新为彩色渲染图。
+- **静态演示渲染流程**（真机下线时）：`robot_state_publisher` 加载带 `file://` mesh
+  的 URDF 并 remap 描述话题，配合 `/joint_states` 发布器即可离屏渲染任意 URDF；
+  记录于 `docs/robot-state-vision-test.md` §7。
+
+### Changed
+
+- **文档**：`docs/architecture.md` §4.4 补充材质颜色、相机焦点高度（`Focal Point Z`
+  应对准主体高度，避免高基座柱遮挡/裁切）、大 mesh 首次加载耗时特征；
+  `docs/robot-state-vision-test.md` 新增 §7（彩色渲染验证 + 静态渲染流程 +
+  视角/多进程踩坑）；README 截图说明更新。
+
 ## [0.8.1] - 2026-08-20
 
 ### Fixed
