@@ -4,6 +4,19 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [SemVer](https://semver.org/).
 
+## [0.8.0] - 2026-08-20
+
+### Changed / Fixed
+
+- **RViz2 离屏渲染支持机器人本体 mesh 渲染**：实测定位并解决三个根因——
+  ① Jazzy RobotModel 需 `Description Source/Topic` 属性（旧 `Robot Description:` 被忽略）；
+  ② URDF mesh 路径需绝对路径或 `file://` 前缀（裸路径 `resource_retriever` fopen 失败）；
+  ③ 视距需适配 mesh 尺度。详见 `docs/architecture.md` §4.4。
+- **联合分析验证**：RViz2 场景（mesh 渲染）+ 头部相机 + 左右手眼相机 4 路并行分析，
+  状态正常；记录于 `docs/robot-state-vision-test.md` §5。
+- **文档**：新增 mesh 渲染图 `docs/images/robot_mesh_full.jpg`；记录 `vision_bringup`
+  发现不完整（2/4 路）与 transient-local 发布者需常驻的局限。
+
 ## [0.7.0] - 2026-08-20
 
 ### Added

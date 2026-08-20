@@ -151,6 +151,26 @@ int main(int argc, char ** argv)
     } else {
       vm.load(vm_cfg);
       RCLCPP_INFO(node->get_logger(), "loaded rviz config: %s", config_path.c_str());
+      // Diagnostics: list displays and the RobotModel's subscribed topic.
+      auto * group = vm.getRootDisplayGroup();
+      if (group) {
+        RCLCPP_INFO(node->get_logger(), "displays loaded: %d", group->numDisplays());
+        for (int i = 0; i < group->numDisplays(); ++i) {
+          auto * display = group->getDisplayAt(i);
+          QString desc = display ? display->getDescription() : QString("?");
+          RCLCPP_INFO(node->get_logger(), "display[%d] %s children=%d", i, desc.toStdString().c_str(),
+            display ? display->numChildren() : -1);
+          if (display) {
+            for (int p = 0; p < display->numChildren(); ++p) {
+              auto * child = display->childAt(p);
+              if (!child) continue;
+              QString name = child->getName();
+              QString val = child->getValue().toString();
+              RCLCPP_INFO(node->get_logger(), "  prop[%d] %s = %s", p, name.toStdString().c_str(), val.toStdString().c_str());
+            }
+          }
+        }
+      }
     }
   }
 

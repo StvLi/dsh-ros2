@@ -126,6 +126,18 @@ ROS2 通信），图像全部来自话题，杜绝 X11 截图依赖与窗口层�
   图像话题（Grid/TF/RobotModel/PointCloud2/Marker 等，读取渲染内核而非 X 截图）；
 - 相机图直接经 `ros2_image_snapshot` 从话题取帧（rviz 的 Image 面板无头下不适用）。
 
+**机器人本体 mesh 渲染要点**（v0.8.0 实测）：
+1. **Jazzy RobotModel 属性格式**：`.rviz` 中须用 `Description Source: Topic` +
+   `Description Topic: <话题名>`（旧版 `Robot Description:` 字段被忽略，导致
+   RobotModel 未订阅任何话题、`Links` 为空）；
+2. **mesh 路径**：URDF 内 mesh 用**绝对路径或 `file://` 前缀**（裸相对/绝对路径会被
+   `resource_retriever` fopen 失败——`Could not load resource ... Unable to open file`）；
+   可用 sed 将 `../meshes/` 替换为 `file://<绝对路径>/` 生成绝对版 URDF，常驻发布到
+   独立话题（transient-local，发布者须保持运行，否则新订阅者收不到）；
+3. **视距**：mesh 尺度小时需调近相机（Orbit `Distance`），否则几何体在画面外不可见；
+4. 已实测渲染出机器人实体几何（白/灰色连杆外壳，STL 无材质渲染为默认白模；
+   inertia 警告 `unrealistic inertia` 为 rviz 提示，不影响 mesh）。
+
 ---
 
 ## 5. 架构演进与性能对比
