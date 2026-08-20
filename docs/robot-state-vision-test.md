@@ -119,6 +119,12 @@
 | **wrist_left 手眼** | 机器人自身结构（白部件「1」标签 + 黄色防护装置），无异常 |
 | **wrist_right 手眼** | 白面板「R」标识 + 木制结构，无异常 |
 
+**四路图像**（`image_snapshot` 从话题取帧，1280×720）：
+
+| head 头部相机 | wrist_left 手眼 | wrist_right 手眼 |
+| --- | --- | --- |
+| ![head](images/camera_head.jpg) | ![wrist_left](images/camera_wrist_left.jpg) | ![wrist_right](images/camera_wrist_right.jpg) |
+
 **联合结论**：3D 渲染（本体几何/姿态）+ 头部相机（环境/人员）+ 手眼相机（近距结构/标签）
 四通道互补，状态正常无异常。每路分析 3~6s（VLM 主导）。
 

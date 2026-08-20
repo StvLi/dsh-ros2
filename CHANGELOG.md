@@ -27,7 +27,9 @@ All notable changes to **dsh-ros2** are documented here. Format follows
   `Description Source/Topic`、URDF↔TF 帧名必须一致（否则堆叠原点）、`file://` mesh
   路径、视距 1.5–2.0 m 与 `FM frames` 判定信号；交叉验证新增"全渲染在原点"的排查路径。
 - **文档**：`docs/architecture.md` §4.4 与 `docs/robot-state-vision-test.md` §6
-  记录根因、修复与验证；`docs/images/robot_mesh_full.jpg` 更新为修复后正确渲染图。
+  记录根因、修复与验证；`docs/images/robot_mesh_full.jpg` 更新为修复后正确渲染图，
+  并补充三路相机实拍图（`camera_head.jpg` / `camera_wrist_left.jpg` /
+  `camera_wrist_right.jpg`）嵌入联合分析 §5.2。
 
 ## [0.8.0] - 2026-08-20
 
