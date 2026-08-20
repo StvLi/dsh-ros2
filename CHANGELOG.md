@@ -14,6 +14,10 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 - **测试**：79 用例（新增 skill 结构/内容断言）；真机端到端验证——19 节点链路下
   关节零位读取、离屏渲染 `/rviz/scene`、bridge VLM 分析 5.7s 全部通过，
   结果记录于 `docs/architecture.md` §6.5。
+- **文档**：`docs/robot-camera-analysis.md` 更名为 `docs/robot-state-vision-test.md`
+  （机器人状态视觉分析测试与实时性）：双臂自由下垂构型分析（关节 ±77° 外展 + VLM 视觉 +
+  零位语义标定交叉验证）、单轮流水线实时性（稳态 ~7.1s，VLM 推理主导）、链路演进对比；
+  附当前状态离屏渲染图 `docs/images/robot_scene.jpg`。
 
 ## [0.6.0] - 2026-08-19
 
