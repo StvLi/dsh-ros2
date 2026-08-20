@@ -154,6 +154,22 @@ ROS2 通信），图像全部来自话题，杜绝 X11 截图依赖与窗口层�
 
 ---
 
+## 6.5 Skills
+
+插件注册两个运行时 skill（`ctx.skills.register`）：
+
+| Skill | 用途 |
+| --- | --- |
+| `ros2-diagnostics` | 调试工作流：先广后窄、无数据/消息不匹配/TF 排障 |
+| `robot-state-vision-analysis` | **状态 → 离屏渲染 → VLM → 交叉验证** 的无头机器人状态分析流水线（L1 状态读取 → `rviz_offscreen_node` → `vision_bringup`/`ros2_vision_analyze` → 数值交叉验证，如零位构型下 TF 轴共线重叠属预期而非异常） |
+
+**测试结果（2026-08-20 真机）**
+- 单测：79 用例全绿（含 skill 结构/内容断言）；
+- 端到端：19 节点真机链路——关节零位读取 ✅、离屏渲染 800×600 `/rviz/scene` ✅、
+  bridge VLM 分析 5.7s ✅（识别直立姿态/TF 树，提示坐标系重叠；与零位数据交叉验证一致）。
+
+---
+
 ## 7. 兼容性与环境注意
 
 详见 `compatibility.md`。要点：Jazzy 实测（Humble 预期可用）；X11 仅 L3 需要

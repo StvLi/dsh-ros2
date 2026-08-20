@@ -4,6 +4,17 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [SemVer](https://semver.org/).
 
+## [0.7.0] - 2026-08-20
+
+### Added
+
+- **新 skill `robot-state-vision-analysis`**：封装「状态读取 → 离屏渲染 → 传 VLM → 交叉验证」
+  的无头机器人状态分析流水线（L1 状态工具 + L4 视觉链路组合；含最小 `.rviz` 配方、
+  零位构型下 TF 轴共线属预期的交叉验证指导）。
+- **测试**：79 用例（新增 skill 结构/内容断言）；真机端到端验证——19 节点链路下
+  关节零位读取、离屏渲染 `/rviz/scene`、bridge VLM 分析 5.7s 全部通过，
+  结果记录于 `docs/architecture.md` §6.5。
+
 ## [0.6.0] - 2026-08-19
 
 ### Added

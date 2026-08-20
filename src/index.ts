@@ -10,7 +10,7 @@ import { runCommand } from './runner.js'
 import { GuiManager } from './gui.js'
 import { createVisionProvider, type VisionProvider } from './vision.js'
 import { createRos2Tools, type ApprovalRequest, type JobsApi, type RunFn } from './tools.js'
-import { ros2DiagnosticsSkill } from './skill.js'
+import { robotStateVisionSkill, ros2DiagnosticsSkill } from './skill.js'
 
 export const name = 'dsh-ros2'
 
@@ -69,7 +69,10 @@ export function apply(ctx: Context, config: Ros2Config): void {
   })
 
   ctx.effect(() => {
-    const dispose = ctx.skills.register(ros2DiagnosticsSkill)
-    return () => dispose()
+    const disposers = [
+      ctx.skills.register(ros2DiagnosticsSkill),
+      ctx.skills.register(robotStateVisionSkill),
+    ]
+    return () => disposers.forEach((dispose) => dispose())
   })
 }
