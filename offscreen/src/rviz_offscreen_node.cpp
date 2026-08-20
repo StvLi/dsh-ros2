@@ -124,6 +124,10 @@ int main(int argc, char ** argv)
   const double rate_hz = node->get_parameter("rate").as_double();
 
   // Real rviz stack: render panel + central visualization manager.
+  // NOTE: VisualizationManager owns a private SingleThreadedExecutor that
+  // holds the raw node (add_node in its ctor) and spins it from onUpdate()
+  // (executor_->spin_some). Do NOT spin the raw node ourselves — rclcpp
+  // rejects a node that already belongs to another executor.
   auto ros_abs = std::make_shared<rviz_common::ros_integration::RosNodeAbstraction>("rviz_offscreen_ros");
   auto panel = std::make_unique<rviz_common::RenderPanel>();
   panel->resize(width, height);
@@ -181,6 +185,7 @@ int main(int argc, char ** argv)
 
   RCLCPP_INFO(node->get_logger(), "rviz_offscreen_node: publishing %s at %.1f Hz (%dx%d)", topic.c_str(), rate_hz, width, height);
   bool first_frame = true;
+  uint64_t frame_idx = 0;
   while (rclcpp::ok()) {
     // Drive the rviz update pipeline explicitly (it is normally a 30 Hz QTimer
     // slot): updates Displays + FrameManager + spins rviz's ROS node so TF and
@@ -195,6 +200,33 @@ int main(int argc, char ** argv)
         invoked ? 1 : 0, group ? group->numDisplays() : -1);
       first_frame = false;
     }
+    // FrameManager diagnostics: which transformer is active and does rviz's
+    // own TF buffer actually resolve the robot frames? The detailed dump runs
+    // once after warmup (a few seconds, when TF has arrived); a one-line
+    // frames count keeps running so a later TF loss is visible in the log.
+    if (frame_idx == 15 || (frame_idx % 100 == 0)) {
+      auto * fm = vm.getFrameManager();
+      if (fm) {
+        std::string err;
+        std::string tf_id = fm->getTransformer() ? fm->getTransformer()->getClassId().toStdString() : "<none>";
+        auto names = fm->getAllFrameNames();
+        RCLCPP_INFO(
+          node->get_logger(), "FM: transformer=%s fixed=%s frames=%zu",
+          tf_id.c_str(), fm->getFixedFrame().c_str(), names.size());
+        if (frame_idx == 15) {
+          for (size_t i = 0; i < names.size(); ++i) {
+            RCLCPP_INFO(node->get_logger(), "FM frame[%zu]: %s", i, names[i].c_str());
+          }
+          for (const auto & f : {"chest", "left_shoulder_pitch", "left_elbow_pitch",
+                                 "right_wrist_yaw", "head", "base_link"}) {
+            err.clear();
+            bool bad = fm->transformHasProblems(f, err);
+            RCLCPP_INFO(node->get_logger(), "FM transformHasProblems(%s)=%d %s", f, bad ? 1 : 0, err.c_str());
+          }
+        }
+      }
+    }
+    ++frame_idx;
     auto * win = panel->getRenderWindow();
     if (win) {
       win->render();

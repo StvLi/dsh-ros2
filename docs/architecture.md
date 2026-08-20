@@ -126,7 +126,7 @@ ROS2 通信），图像全部来自话题，杜绝 X11 截图依赖与窗口层�
   图像话题（Grid/TF/RobotModel/PointCloud2/Marker 等，读取渲染内核而非 X 截图）；
 - 相机图直接经 `ros2_image_snapshot` 从话题取帧（rviz 的 Image 面板无头下不适用）。
 
-**机器人本体 mesh 渲染要点**（v0.8.0 实测）：
+**机器人本体 mesh 渲染要点**（v0.8.0/v0.8.1 实测）：
 1. **Jazzy RobotModel 属性格式**：`.rviz` 中须用 `Description Source: Topic` +
    `Description Topic: <话题名>`（旧版 `Robot Description:` 字段被忽略，导致
    RobotModel 未订阅任何话题、`Links` 为空）；
@@ -134,9 +134,17 @@ ROS2 通信），图像全部来自话题，杜绝 X11 截图依赖与窗口层�
    `resource_retriever` fopen 失败——`Could not load resource ... Unable to open file`）；
    可用 sed 将 `../meshes/` 替换为 `file://<绝对路径>/` 生成绝对版 URDF，常驻发布到
    独立话题（transient-local，发布者须保持运行，否则新订阅者收不到）；
-3. **视距**：mesh 尺度小时需调近相机（Orbit `Distance`），否则几何体在画面外不可见；
-4. 已实测渲染出机器人实体几何（白/灰色连杆外壳，STL 无材质渲染为默认白模；
-   inertia 警告 `unrealistic inertia` 为 rviz 提示，不影响 mesh）。
+3. **URDF 与 TF 必须同名绑定**：发布给 RobotModel 的 URDF **link 名必须与实时 TF
+   frame 名完全一致**（如 `left_shoulder_pitch`，不带 `_link` 后缀）。直接发布机器人
+   实际描述（`/robot_description`，mesh 路径改写为 `file://`）即可。**若 URDF 与 TF
+   不匹配，所有 link 的变换查找失败，mesh 全部渲染到固定坐标系原点——即"零件堆叠在
+   原点"**（v0.8.0 曾因发布了一套 `_link` 后缀的旧 URDF 而踩坑）；
+4. **视距**：Orbit `Distance` ≈ 1.5–2.0 m 可得到 RViz 式近景全身视角；Distance ≳ 5 m
+   时机器人缩成画面中心小点；
+5. 已实测渲染出机器人实体几何（白/灰色连杆外壳，STL 无材质渲染为默认白模；
+   inertia 警告 `unrealistic inertia` 为 rviz 提示，不影响 mesh）；节点启动 ~3 s 后
+   在日志打印 `FM: ... frames=N` 与 `transformHasProblems(...)=0` 表明 TF 已解析，
+   可用作"mesh 是否正确绑定 TF"的判定信号。
 
 ---
 

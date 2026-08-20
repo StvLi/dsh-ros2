@@ -4,6 +4,31 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [SemVer](https://semver.org/).
 
+## [0.8.1] - 2026-08-20
+
+### Fixed
+
+- **RViz2 离屏渲染"零件堆叠在原点"问题**：根因是发布给 RobotModel 的 URDF link 名
+  与实时 TF 帧名不匹配（`_link` 后缀旧文件 vs 真机裸名），导致所有 link 变换查找失败、
+  mesh 全部渲染到固定坐标系原点。修复方式：直接抓取真机 `/robot_description`
+  （link 名与 TF 帧名一一对应）+ `file://` mesh 路径改写后常驻发布。
+- **删除自建 `rclcpp::spin(raw_node)` 线程**：`VisualizationManager` 内部持有
+  `SingleThreadedExecutor`（`onUpdate()` 已 `spin_some`），自行 spin 触发
+  "node already added to an executor" 崩溃（exit 250）。
+- **新增 FrameManager 诊断**：启动 ~3s 后打印 transformer 类型、帧数、全帧名与
+  `transformHasProblems(...)` 判定，之后每 20s 打印一行帧数——mesh 是否正确绑定 TF
+  可直接从日志判定。
+
+### Changed
+
+- **相机视距修正**：Orbit `Distance` ≈ 1.5–2.0 m 得到 RViz 式近景全身视角（误设 8 时
+  机器人缩成画面中心小点）。
+- **skill `robot-state-vision-analysis` 更新**：离屏渲染步骤补充 Jazzy
+  `Description Source/Topic`、URDF↔TF 帧名必须一致（否则堆叠原点）、`file://` mesh
+  路径、视距 1.5–2.0 m 与 `FM frames` 判定信号；交叉验证新增"全渲染在原点"的排查路径。
+- **文档**：`docs/architecture.md` §4.4 与 `docs/robot-state-vision-test.md` §6
+  记录根因、修复与验证；`docs/images/robot_mesh_full.jpg` 更新为修复后正确渲染图。
+
 ## [0.8.0] - 2026-08-20
 
 ### Changed / Fixed

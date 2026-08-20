@@ -127,3 +127,43 @@
 - `vision_bringup` 一次性发现可能不完整（本场合计发现 2/4 路，head 与 rviz_scene
   需手动补桥）——后续可加轮询/刷新发现；
 - mesh 渲染的 URDF 发布者需常驻（transient-local 发布者退出后新订阅者收不到）。
+
+---
+
+## 6. 补充：mesh/TF 绑定修复与正确渲染验证（v0.8.1，2026-08-20）
+
+### 6.1 问题：所有零件堆叠在原点
+
+v0.8.0 的 mesh 渲染图（§5.1）视觉上**全部零件 + TF 坐标轴堆叠在原点**，与
+"mesh 应与 TF 绑定"的预期不符。排查结论：
+
+1. **根因 = URDF 与 TF 帧名不匹配**：发布给 RobotModel 的 URDF 是一套 `_link` 后缀
+   的旧文件（`left_shoulder_pitch_link`…），而真机 TF 帧名为**不带后缀**的
+   `left_shoulder_pitch`…。RobotModel 按 URDF link 名查变换全部失败 → 所有 mesh
+   渲染到固定坐标系原点。
+2. **修复**：直接抓取真机实际描述（订阅 `/robot_description`，21 个 link 名与 TF
+   帧名一一对应），mesh 路径改写为 `file:///tmp/live_meshes/…` 后常驻发布到
+   `/robot_description_abs`。
+3. **次要因素**：`.rviz` 相机 `Distance` 被误设为 8（一次 sed 未匹配），机器人缩成
+   画面中心小点；调回 1.8 后得到 RViz 式近景全身视角。
+
+### 6.2 修复后验证
+
+![修复后 mesh/TF 绑定渲染](images/robot_mesh_full.jpg)
+
+- 节点日志（启动 ~3s 后）：`FM: ... frames=21`，且
+  `transformHasProblems(chest/left_shoulder_pitch/left_elbow_pitch/right_wrist_yaw/head/base_link)=0`
+  —— rviz 自身 TF 缓冲已解析全部机器人帧（新增的内置诊断）；
+- 像素分析：白色 mesh 区域 240×435 px、TF 三色轴纵跨 y 48..520，非原点堆叠；
+- VLM 确认：头/躯干/双臂完整、各部件位于正确分离位置（"not collapsed into a
+  single point"）、双臂下垂（与关节数值、用户零位标定一致）；
+- 连续多帧快照字节一致，渲染稳定。
+
+### 6.3 代码变更（`rviz_offscreen_node.cpp`）
+
+- **删除**了错误的自建 `rclcpp::spin(raw_node)` 线程：`VisualizationManager` 内部
+  持有一个 `SingleThreadedExecutor`（构造时 `add_node`），`onUpdate()` 里已
+  `spin_some`，自行 spin 会因"node already added to an executor"崩溃（exit 250）；
+- **新增** FrameManager 诊断：`getTransformer()->getClassId()`（确认 TF 插件而非
+  Identity 回退）、`getAllFrameNames()`、`transformHasProblems()`，预热后打印一次
+  全帧名，之后每 20s 打印一行帧数，便于判定 mesh/TF 绑定状态。
