@@ -39,7 +39,7 @@
 - **审批门控的写操作**：构建、装依赖、生成消息骨架等写操作通过 DSH 审批服务，fail-closed，拒绝即失败；
 - **可视化即服务**：无头也能"看"——截图/多模态描述/窗口交互全部本地化，不依赖远程显示；
 - **并行实时视觉**：VLM 跑在独立 ROS2 进程（`vlm_node`，服务 `/vlm/describe`），图像来自话题（`sensor_msgs/Image` / `CompressedImage`），`vision_bringup` 自动为每个图像话题建桥，无头可用；
-- **RViz2 离屏渲染**：真实 rviz 渲染内核（`rviz_common` + OGRE）在虚拟显示器下渲染任意 `.rviz` 场景并发布为图像话题——不截图、不依赖 X11 窗口层级；
+- **RViz2 离屏渲染（动作渲染 10Hz+）**：真实 rviz 渲染内核（`rviz_common` + OGRE）在虚拟显示器下渲染任意 `.rviz` 场景并发布为图像话题——不截图、不依赖 X11 窗口层级。**v0.9.0 性能优化**：open3d 低模 mesh（`scripts/simplify_visual_meshes.py`）+ OGRE 直接读像素（跳过 PNG 中转），动作渲染 1.9 → **10.2 Hz（5.4×）**，内存 -2.5×；
 - **内置技能**：`ros2-diagnostics`（何时用哪个工具、如何由宽到窄排查）与 `robot-state-vision-analysis`（状态读取 → 离屏渲染 → VLM → 交叉验证的完整流水线）。
 
 ---

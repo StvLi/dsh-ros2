@@ -167,6 +167,20 @@ ROS2 通信），图像全部来自话题，杜绝 X11 截图依赖与窗口层�
 - 并行调用消除串行等待；常驻桥接消除进程冷启动与磁盘中转；
 - 高频/持续观察场景桥接收益最大，重复调用稳定。
 
+### 5.1 离屏渲染性能优化（v0.9.0，实测）
+
+"渲染机器人动作"提速的两个关键手段（完整链路 1.9 → 10.2 Hz，**5.4×**）：
+
+| 手段 | 做法 | 效果 |
+| --- | --- | --- |
+| **① 渲染低模 mesh** | `scripts/simplify_visual_meshes.py` 用 **open3d** quadric decimation 把大 STL 降到 25k/15k 面（实测 276 万 → 38.7 万面，7.1×） | 稳定帧率 1.9 → 7.1 Hz；内存 962 → 386 MB；mesh 加载 ~90s → ~40s；渲染内容保留 99.7% |
+| **② 直接读像素（跳过 PNG）** | `rviz_offscreen_node` 用 `Ogre::RenderSystem::getRenderTargetIterator` + `copyContentsToMemory` 直读帧缓冲（不再 `captureScreenShot` 写 PNG + libpng 解码） | capture 38ms → 1-2ms/帧；每帧 74ms → 31ms；帧率 7.1 → 10.2 Hz |
+
+**注意**：
+- **不要用 fast_simplification 生成渲染低模**：实测其输出在 OGRE 中渲染丢失 ~70% 内容（面统计/法线/流形均正常但光栅化空洞），open3d 的 quadric decimation 输出完整（工具脚本已内置此结论）；
+- OGRE include 用 rviz vendor 头（`<OgreRoot.h>` 不带 `OGRE/` 前缀，include 路径为 `.../include/OGRE`；带前缀会回退系统 OGRE 1.9 报类型冲突）；CMake 需 `find_package(rviz_ogre_vendor)` + `include_directories(BEFORE ${OGRE_INCLUDE_DIRS})`；
+- 节点每 100 帧打印一行 `frame-timing: total/render/capture/pub`（~10s @10Hz），可观测每帧预算。
+
 ---
 
 ## 6. 安全模型

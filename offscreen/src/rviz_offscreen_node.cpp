@@ -34,6 +34,13 @@
 #include <rviz_common/yaml_config_reader.hpp>
 #include <rviz_rendering/render_window.hpp>
 
+// rviz 的 OGRE vendor（include 路径为 .../include/OGRE，故不带 OGRE/ 前缀；
+// 若带前缀会回退到系统 OGRE 1.9 导致类型冲突）
+#include <OgreRoot.h>
+#include <OgreRenderSystem.h>
+#include <OgreRenderTarget.h>
+#include <OgrePixelFormat.h>
+
 namespace
 {
 
@@ -52,8 +59,7 @@ public:
 
 /// Decode a PNG file into raw RGB (8-bit) using libpng.
 bool decodePng(const std::string & path, std::vector<uint8_t> & rgb, uint32_t & width, uint32_t & height)
-{
-  FILE * f = std::fopen(path.c_str(), "rb");
+{  FILE * f = std::fopen(path.c_str(), "rb");
   if (!f) return false;
   png_structp png = png_create_read_struct(PNG_LIBPNG_VER_STRING, nullptr, nullptr, nullptr);
   png_infop info = png ? png_create_info_struct(png) : nullptr;
@@ -97,6 +103,31 @@ bool decodePng(const std::string & path, std::vector<uint8_t> & rgb, uint32_t & 
       dst[x * 3 + 2] = src[x * 4 + 2];
     }
   }
+  return true;
+}
+
+/// Find the OGRE render target of the offscreen window (matched by size).
+/// Used to read pixels directly instead of round-tripping through PNG.
+Ogre::RenderTarget * findRenderTarget(uint32_t width, uint32_t height)
+{
+  Ogre::Root * root = Ogre::Root::getSingletonPtr();
+  if (!root || !root->getRenderSystem()) return nullptr;
+  auto it = root->getRenderSystem()->getRenderTargetIterator();
+  while (it.hasMoreElements()) {
+    Ogre::RenderTarget * t = it.getNext();
+    if (t && t->getWidth() == width && t->getHeight() == height) return t;
+  }
+  return nullptr;
+}
+
+/// Copy the render target's current frame into a RGB buffer (no PNG round-trip).
+/// Returns false on failure.
+bool copyRenderTargetToRgb(Ogre::RenderTarget * rt, std::vector<uint8_t> & rgb, uint32_t width, uint32_t height)
+{
+  if (!rt) return false;
+  rgb.resize(static_cast<size_t>(width) * height * 3);
+  Ogre::PixelBox pb(Ogre::Box(0, 0, width, height), Ogre::PF_BYTE_RGB, rgb.data());
+  rt->copyContentsToMemory(pb);
   return true;
 }
 
@@ -229,11 +260,26 @@ int main(int argc, char ** argv)
     ++frame_idx;
     auto * win = panel->getRenderWindow();
     if (win) {
+      // Per-frame timing breakdown (logged every 25 frames): render / capture /
+      // publish — identifies where the frame budget goes.
+      const auto t_render0 = std::chrono::steady_clock::now();
       win->render();
-      win->captureScreenShot(tmp_png);
+      // Read pixels directly from the OGRE render target (no PNG round-trip);
+      // fall back to captureScreenShot + libpng decode if the target is not
+      // reachable yet (first frame).
+      static Ogre::RenderTarget * rt = nullptr;
+      if (!rt) rt = findRenderTarget(static_cast<uint32_t>(width), static_cast<uint32_t>(height));
       std::vector<uint8_t> rgb;
-      uint32_t w = 0, h = 0;
-      if (decodePng(tmp_png, rgb, w, h)) {
+      uint32_t w = width, h = height;
+      const auto t_cap0 = std::chrono::steady_clock::now();
+      bool ok = rt && copyRenderTargetToRgb(rt, rgb, w, h);
+      if (!ok) {
+        win->captureScreenShot(tmp_png);
+        ok = decodePng(tmp_png, rgb, w, h);
+        std::remove(tmp_png.c_str());
+      }
+      const auto t_pub0 = std::chrono::steady_clock::now();
+      if (ok) {
         sensor_msgs::msg::Image msg;
         msg.header.stamp = node->now();
         msg.header.frame_id = "rviz";
@@ -243,10 +289,16 @@ int main(int argc, char ** argv)
         msg.step = w * 3;
         msg.data = std::move(rgb);
         pub->publish(msg);
+        const auto t_end = std::chrono::steady_clock::now();
+        if (frame_idx % 100 == 0) {  // 每 100 帧（~10s @10Hz）打印一次耗时
+          auto ms = [](auto a, auto b) { return std::chrono::duration_cast<std::chrono::milliseconds>(b - a).count(); };
+          RCLCPP_INFO(node->get_logger(),
+            "frame-timing: total=%lldms render=%lldms capture=%lldms pub=%lldms",
+            ms(t_render0, t_end), ms(t_render0, t_cap0), ms(t_cap0, t_pub0), ms(t_pub0, t_end));
+        }
       } else {
-        RCLCPP_WARN_THROTTLE(node->get_logger(), *node->get_clock(), 5000, "frame decode failed");
+        RCLCPP_WARN_THROTTLE(node->get_logger(), *node->get_clock(), 5000, "frame capture failed");
       }
-      std::remove(tmp_png.c_str());
     }
     loop.sleep();
   }

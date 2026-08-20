@@ -4,6 +4,33 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [SemVer](https://semver.org/).
 
+## [0.9.0] - 2026-08-20
+
+### Performance
+
+- **离屏渲染"动作渲染"提速 5.4×（1.9 → 10.2 Hz）**，两个关键手段（实测，详见
+  `docs/architecture.md` §5.1 与 `docs/robot-state-vision-test.md` §8）：
+  1. **渲染低模 mesh**：新增 `scripts/simplify_visual_meshes.py`（**open3d** quadric
+     decimation，大 STL → 25k/15k 面；实测 276 万 → 38.7 万面），帧率 1.9 → 7.1 Hz、
+     内存 962 → 386 MB、mesh 加载 ~90s → ~40s、渲染内容保留 99.7%；
+  2. **OGRE 直接读像素**：`rviz_offscreen_node` 用 `copyContentsToMemory` 直读帧
+     缓冲，替代 `captureScreenShot`（PNG 写盘）+ libpng 解码——capture 38ms →
+     1-2ms/帧，帧率 7.1 → 10.2 Hz（达 rate 上限）。
+- 节点每 100 帧打印 `frame-timing: total/render/capture/pub`（~10s @10Hz），
+  每帧预算可观测。
+
+### Fixed / Notes
+
+- **不要用 fast_simplification 生成渲染低模**：实测其输出在 OGRE 中渲染丢失 ~70%
+  内容（open3d 输出完整；工具脚本已内置结论）；
+- OGRE vendor 头 include 规范（`<OgreRoot.h>` 不带 `OGRE/` 前缀）+ CMake
+  `find_package(rviz_ogre_vendor)` + `include_directories(BEFORE ${OGRE_INCLUDE_DIRS})`。
+
+### Added
+
+- 文档：`docs/architecture.md` §5.1（性能优化）、`docs/robot-state-vision-test.md`
+  §8（动作渲染优化验证）；README 特性栏更新。
+
 ## [0.8.2] - 2026-08-20
 
 ### Added
