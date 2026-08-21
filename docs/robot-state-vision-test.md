@@ -254,21 +254,21 @@ dsh-ros2 作为具身基础插件需被快速调用；"渲染机器人动作"（
   frame / sleep）；
 - 完整动作渲染链路 1.9 → 10.2 Hz（5.4×，rate=10 上限内）。
 
-### 8.4 30 Hz 请求实测（v0.9.1）
+### 8.4 30 Hz 请求实测（v0.9.1 / v0.9.2）
 
 把 `rate` 拉到 30 后逐项优化，实测（lite_urdf 低模 38.7 万面，1000×750，静止/运动）：
 
 | 配置（rate=30） | 实际帧率 | 每帧循环 | 说明 |
 | --- | --- | --- | --- |
-| 原始（processEvents 每帧） | 11.1 Hz | 92ms | onUpdate 30ms + processEvents 30ms + render 31ms |
-| + **events 节流**（每 5 帧） | 14.2 Hz | 66ms | processEvents 触发 Qt paint → OGRE **双重渲染**，节流后 events 30ms→0ms |
-| + **onUpdate/2**（每 2 帧刷新 TF 位置） | 16.2 Hz | ~48ms | 渲染仍 30Hz；TF 位置刷新 15Hz（FrameManager 缓冲，不丢数据） |
-| 800×600 + 全部优化 | 17.1 Hz | ~47ms | render 仍 ~30ms：耗时由**三角形数**决定，分辨率影响小 |
-| **30Hz + 运动**（shoulder_roll 摆动） | **15.6 Hz** | ~64ms | 动作渲染场景 |
+| 原始（processEvents 每帧 + **双重渲染**） | 11.1 Hz | 92ms | onUpdate 30ms（内含渲染）+ processEvents 30ms + **win->render 再渲染一次** 31ms |
+| + **events 节流**（每 5 帧） | 14.2 Hz | 66ms | processEvents 触发 Qt paint → OGRE 额外渲染，节流后 events 30ms→0ms |
+| + **onUpdate/2**（每 2 帧刷新 TF） | 16.2 Hz | ~48ms | display update 摊销减半（但牺牲 TF 刷新 15Hz） |
+| **+ 去掉冗余 win->render()**（onUpdate 每帧，v0.9.2） | **21.5–24.2 Hz** | ~33ms | **消除双重渲染**：`VisualizationManager::onUpdate()` 内已 `renderOneFrame()`，主循环再调 `win->render()` 是第二次渲染（+31ms/帧）；去掉后帧率翻倍且 TF 全帧率刷新 |
+| 800×600 + 全部优化 | 17.1 Hz | ~47ms | render 由**三角形数**决定，分辨率影响小 |
 | 回归：rate=10 + 全部优化 | 10.3 Hz | sleep 主导 | 达 rate 上限，无劣化 |
 
-**结论**：30 Hz 请求下实际最高 ~16–17 Hz。瓶颈为 llvmpipe 软件光栅化 38.7 万面
-（render 27–31ms，与分辨率无关）+ rviz display update（onUpdate ~30ms）。**达到
-30 Hz 需 GPU 直通（非 llvmpipe）**；本次新增优化（events 节流 + onUpdate/2）使
-30 Hz 请求帧率 11.1 → 16.2 Hz（+46%），10 Hz 请求仍达上限。
+**结论**：30 Hz 请求下实际 **~22–24 Hz**（运动 21.5 Hz 稳态）。真正瓶颈是
+llvmpipe 软件光栅化（onUpdate 内 renderOneFrame 27–31ms，与分辨率无关）——
+**每帧只渲染一次后，帧率从 11.1 → ~22 Hz（2×）**。达 30 Hz 需 GPU 直通（非
+llvmpipe）或进一步降低面数/分辨率。
 

@@ -221,15 +221,17 @@ int main(int argc, char ** argv)
     // Drive the rviz update pipeline explicitly (it is normally a 30 Hz QTimer
     // slot): updates Displays + FrameManager + spins rviz's ROS node so TF and
     // topic data flow in, then render the kernel and publish the frame.
-    // onUpdate every 2 frames: its display-update pass (~30ms with large mesh
-    // scenes) is the dominant cost; TF data is buffered by the FrameManager
-    // transformer, so a 15 Hz pose refresh still renders smooth motion.
+    // NOTE: onUpdate() already renders (ogre_root_->renderOneFrame() inside
+    // VisualizationManager::onUpdate, gated by render_requested_ / >10ms wall
+    // time). Do NOT call win->render() afterwards: that was a second render of
+    // the same scene every frame (~31ms extra, halved the achievable rate).
+    // Verified: without win->render() the frame comes out identical (pixel
+    // stats equal) and 30 Hz requests reach ~23 Hz instead of ~11 Hz.
     const auto t_loop0 = std::chrono::steady_clock::now();
     std::chrono::steady_clock::time_point t_end_loop;
     auto t_render0 = t_loop0;
     auto t_end = t_loop0;
-    const bool invoked = (frame_idx % 2 == 0) &&
-      QMetaObject::invokeMethod(&vm, "onUpdate", Qt::DirectConnection);
+    const bool invoked = QMetaObject::invokeMethod(&vm, "onUpdate", Qt::DirectConnection);
     const auto t_upd1 = std::chrono::steady_clock::now();
     // Qt events only need low-frequency handling headless: processing them every
     // frame can trigger extra OGRE renders (paint events) that double the work.
@@ -273,9 +275,9 @@ int main(int argc, char ** argv)
     auto * win = panel->getRenderWindow();
     if (win) {
       // Per-frame timing breakdown (logged every 25 frames): render / capture /
-      // publish — identifies where the frame budget goes.
+      // publish — identifies where the frame budget goes. No win->render()
+      // here: onUpdate() already rendered (see loop comment above).
       t_render0 = std::chrono::steady_clock::now();
-      win->render();
       // Read pixels directly from the OGRE render target (no PNG round-trip);
       // fall back to captureScreenShot + libpng decode if the target is not
       // reachable yet (first frame).

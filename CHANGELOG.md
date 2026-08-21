@@ -4,6 +4,20 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [SemVer](https://semver.org/).
 
+## [0.9.2] - 2026-08-21
+
+### Fixed / Performance
+
+- **消除"双重渲染"（30 Hz 请求帧率翻倍，11.1 → ~22 Hz）**：`VisualizationManager::onUpdate()`
+  内部已 `renderOneFrame()` 渲染场景（受 `render_requested_`/10ms 门控），主循环此前
+  又调 `win->render()` 造成**每帧第二次渲染**（+31ms/帧）。去掉冗余渲染后每帧 ~33ms，
+  TF 全帧率刷新（onUpdate 每帧）；`onUpdate/2`（v0.9.1 的折中）不再需要。
+- 实测（38.7 万面低模，1000×750，rate=30）：静止 22.9 Hz、运动 21.5–24.2 Hz
+  （400+ 帧稳态）；10 Hz 请求仍达上限（10.3 Hz）；画面像素与之前一致。
+- 代码注释明确"不要在 onUpdate 后再 win->render()"的成因与验证。
+- 文档：`docs/architecture.md` §5.2、`docs/robot-state-vision-test.md` §8.4 更新为
+  双重渲染发现与新数据。
+
 ## [0.9.1] - 2026-08-20
 
 ### Performance

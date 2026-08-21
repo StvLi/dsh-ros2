@@ -181,19 +181,22 @@ ROS2 通信），图像全部来自话题，杜绝 X11 截图依赖与窗口层�
 - OGRE include 用 rviz vendor 头（`<OgreRoot.h>` 不带 `OGRE/` 前缀，include 路径为 `.../include/OGRE`；带前缀会回退系统 OGRE 1.9 报类型冲突）；CMake 需 `find_package(rviz_ogre_vendor)` + `include_directories(BEFORE ${OGRE_INCLUDE_DIRS})`；
 - 节点每 100 帧打印一行 `loop-timing: loop/onupdate/events/spin/frame/sleep`，可观测循环预算。
 
-### 5.2 30 Hz 请求与循环开销（v0.9.1，实测）
+### 5.2 30 Hz 请求：双重渲染消除（v0.9.2，实测）
 
-rate=30 时帧率被**循环固定开销**限制（与 rate 无关），逐项优化后 11.1 → 16.2 Hz：
+rate=30 实测发现真正瓶颈是**双重渲染**：`VisualizationManager::onUpdate()` 内部
+`ogre_root_->renderOneFrame()` 已渲染场景，而主循环又调 `win->render()`——
+**每帧渲染两次**（+31ms/帧）。消除后帧率翻倍：
 
 | 优化 | 做法 | 效果 |
 | --- | --- | --- |
-| **events 节流** | `app.processEvents()` 每 5 帧调用一次（headless 下 Qt 事件少） | processEvents 触发 Qt paint → OGRE **双重渲染**（~30ms/帧），节流后 events 30ms → 0ms |
-| **onUpdate/2** | `QMetaObject::invokeMethod(vm,"onUpdate")` 每 2 帧调用（渲染仍每帧；TF 位置刷新 15Hz，FrameManager transformer 缓冲不丢数据） | onUpdate（display update ~30ms）摊销减半，帧率 +14% |
+| **去掉冗余 win->render()** | `onUpdate()` 已渲染（renderOneFrame，受 `render_requested_`/10ms 门控），主循环直接读像素 | 每帧 66ms → ~33ms；30Hz 请求 11.1 → **~22 Hz**（2×）；TF 全帧率刷新 |
+| **events 节流** | `app.processEvents()` 每 5 帧（headless 下 Qt 事件少） | processEvents 触发 Qt paint → OGRE 额外渲染（~30ms/帧），节流后 0ms |
 
-实测（1000×750，38.7 万面低模）：原始 92ms/帧 → 66ms（events 节流）→ ~48ms
-（onUpdate/2），30Hz 请求实际 11.1 → 16.2 Hz；运动场景 15.6 Hz；800×600 仅 17.1 Hz
-（render 由**三角形数**决定，分辨率影响小）。**30 Hz 需 GPU 直通（非 llvmpipe）**，
-llvmpipe 软件光栅化 render 27–31ms 为硬成本。详见 `docs/robot-state-vision-test.md` §8.4。
+实测（1000×750，38.7 万面低模）：30Hz 请求静止 22.9 Hz / 运动 21.5–24.2 Hz
+（400+ 帧稳态）；800×600 仅 17.1 Hz（render 由**三角形数**决定，分辨率影响小）；
+10Hz 请求仍达上限（10.3 Hz）。**30 Hz 需 GPU 直通（非 llvmpipe）**——llvmpipe
+软件光栅化 renderOneFrame 27–31ms 为硬成本（每帧仅渲染一次后）。详见
+`docs/robot-state-vision-test.md` §8.4。
 
 ---
 
