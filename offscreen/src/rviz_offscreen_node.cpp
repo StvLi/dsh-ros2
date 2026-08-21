@@ -33,6 +33,7 @@
 #include <rviz_common/window_manager_interface.hpp>
 #include <rviz_common/yaml_config_reader.hpp>
 #include <rviz_rendering/render_window.hpp>
+#include <rviz_rendering/render_system.hpp>
 
 // rviz 的 OGRE vendor（include 路径为 .../include/OGRE，故不带 OGRE/ 前缀；
 // 若带前缀会回退到系统 OGRE 1.9 导致类型冲突）
@@ -141,6 +142,11 @@ int main(int argc, char ** argv)
   // kernel (captureScreenShot), not from X screenshots or window stacking.
 
   QApplication app(argc, argv);
+  // GPU (NVIDIA) GLX: FSAA=4 selects 32-bit ARGB visual fbconfigs whose
+  // GL 3.0 core contexts NVIDIA refuses (BadValue). Disabling AA lets OGRE
+  // pick a 24-bit config (verified: only 24-bit / samples=0 configs create
+  // GLX contexts on NVIDIA). No visual downside for offscreen rendering.
+  rviz_rendering::RenderSystem::disableAntiAliasing();
   rclcpp::init(argc, argv);
   auto node = std::make_shared<rclcpp::Node>("rviz_offscreen_node");
   node->declare_parameter<std::string>("config_path", "");

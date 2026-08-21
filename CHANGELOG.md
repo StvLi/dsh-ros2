@@ -4,6 +4,28 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [SemVer](https://semver.org/).
 
+## [0.9.3] - 2026-08-21
+
+### Added
+
+- **GPU 直通渲染验证通过（30 Hz 满帧）**：实测 NVIDIA RTX 4060 Ti + Xorg GLX，
+  `rviz_offscreen_node` 30 Hz 请求帧率从 llvmpipe 的 ~22 Hz 提升到 **30.0 Hz
+  （满 rate）**；onUpdate（含渲染）30 → 9 ms，且链路开支不增（GPU→CPU 回读
+  1–2 ms，远小于渲染节省）。完整测试报告：`docs/gpu-passthrough-test.md`。
+
+### Fixed
+
+- **NVIDIA GLX context 创建失败**（`BadValue`）：rviz 默认 FSAA=4 使 OGRE 选中
+  32-bit ARGB visual 的 fbconfig，而 NVIDIA GLX 拒绝在其上创建 GL 3.0 core
+  context（实测仅 24-bit / samples=0 配置可创建）。修复：离屏渲染节点调用
+  `rviz_rendering::RenderSystem::disableAntiAliasing()`——llvmpipe 回归无劣化
+  （22.4 Hz，AA 对离屏渲染无视觉损失）。
+
+### Changed
+
+- 文档：新增 `docs/gpu-passthrough-test.md`（硬件/排查/结果/使用方式）；
+  `docs/architecture.md` §5.2 补充 GPU 直通结论。
+
 ## [0.9.2] - 2026-08-21
 
 ### Fixed / Performance

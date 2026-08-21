@@ -194,9 +194,11 @@ rate=30 实测发现真正瓶颈是**双重渲染**：`VisualizationManager::onU
 
 实测（1000×750，38.7 万面低模）：30Hz 请求静止 22.9 Hz / 运动 21.5–24.2 Hz
 （400+ 帧稳态）；800×600 仅 17.1 Hz（render 由**三角形数**决定，分辨率影响小）；
-10Hz 请求仍达上限（10.3 Hz）。**30 Hz 需 GPU 直通（非 llvmpipe）**——llvmpipe
-软件光栅化 renderOneFrame 27–31ms 为硬成本（每帧仅渲染一次后）。详见
-`docs/robot-state-vision-test.md` §8.4。
+10Hz 请求仍达上限（10.3 Hz）。
+
+**GPU 直通（v0.9.3，已验证）**：NVIDIA Xorg GLX + `disableAntiAliasing()` 后
+30 Hz 请求 **满帧 30.0 Hz**（onUpdate 30 → 9 ms，链路开支不增）。详见
+`docs/gpu-passthrough-test.md`。
 
 ---
 
