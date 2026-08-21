@@ -19,7 +19,7 @@ function makeRun(handler: (bin: string, args: string[]) => Partial<RosResult>): 
   }
 }
 
-const execStub = {} as never
+const execStub = { agent: { id: 'test-agent' } } as never
 
 function tool(name: string, run: RunFn) {
   const found = createRos2Tools({ run }).find((t) => t.name === name)
@@ -279,6 +279,68 @@ describe('tool inventory', () => {
     // L4 vision pipeline tools
     expect(names).toContain('ros2_vision_topics')
     expect(names).toContain('ros2_vision_analyze')
-    expect(names).toHaveLength(37)
+    expect(names).toContain('ros2_install')
+    expect(names).toHaveLength(38)
   })
+})
+
+describe('ros2_install', () => {
+  it('check reports installed when ros2 --version succeeds', async () => {
+    const run = makeRun(() => ({ stdout: 'ros2 0.33.2\n' }))
+    const out = await call('ros2_install', run, { action: 'check' })
+    expect(out.data).toMatchObject({ installed: true })
+  })
+
+  it('check reports not installed when ros2 is missing', async () => {
+    const run = makeRun(() => ({ ok: false, stdout: '', exitCode: 127 }))
+    const out = await call('ros2_install', run, { action: 'check' })
+    expect(out.data).toMatchObject({ installed: false })
+  })
+
+  it('start refuses when ROS2 is already installed (no re-install)', async () => {
+    const run = makeRun(() => ({ stdout: 'ros2 0.33.2\n' }))
+    const out = await call('ros2_install', run, { action: 'start' })
+    expect(out.ok).toBe(true)
+    expect(out.data).toMatchObject({ started: false, reason: 'already-installed' })
+  })
+})
+
+describe('ros2_install interactive flow (mock installer, no network)', () => {
+  it('start -> send -> status -> stop drives the installer menus via PTY', async () => {
+    const run = makeRun((bin, args) => {
+      if (bin === 'bash') return { ok: true, stdout: '', exitCode: 0 } // no /opt/ros (fresh machine)
+      return { ok: false, stdout: '', exitCode: 127 } // ros2 missing
+    })
+    const approval = async () => 'allowed-once'
+    const toolsList = createRos2Tools({ run, approval })
+    const t = toolsList.find((x) => x.name === 'ros2_install')
+    if (!t) throw new Error('ros2_install not registered')
+
+    const started = (await t.execute({ action: 'start', installer: '/tmp/mock_fishros.sh' }, execStub)) as ToolResult
+    expect(started.ok).toBe(true)
+    const session = (started.data as { session: string }).session
+    expect(session.startsWith('ros2install-')).toBe(true)
+
+    // menu appears
+    const s1 = (await t.execute({ action: 'status', session }, execStub)) as ToolResult
+    const out1 = (s1.data as { output: string }).output
+    expect(out1).toContain('众多工具')
+    expect(out1).toContain('请输入数字')
+
+    // choose "1" (install ROS) -> version menu
+    await t.execute({ action: 'send', session, input: '1' }, execStub)
+    await new Promise((r) => setTimeout(r, 800))
+    const s2 = (await t.execute({ action: 'status', session }, execStub)) as ToolResult
+    expect((s2.data as { output: string }).output).toContain('选择ROS版本')
+
+    // choose "2" (Jazzy) -> finish
+    await t.execute({ action: 'send', session, input: '2' }, execStub)
+    await new Promise((r) => setTimeout(r, 2500))
+    const s3 = (await t.execute({ action: 'status', session }, execStub)) as ToolResult
+    const d3 = s3.data as { output: string; state: string }
+    expect(d3.output).toContain('安装完成')
+    expect(d3.state).toContain('exited')
+
+    await t.execute({ action: 'stop', session }, execStub)
+  }, 15000)
 })

@@ -43,7 +43,22 @@ You have a read-only ROS2 tool set (all commands run as \`ros2\`/\`colcon\`/\`ro
 4. **TF problems:** \`ros2_tf_list\` to see available edges, \`ros2_tf_echo\` for a specific pair; a missing edge usually means no broadcaster for that frame.
 5. **Dependency / build problems:** \`ros2_rosdep_check\` first (missing deps), then \`ros2_pkg_list\` + \`ros2_colcon_list\` to locate packages.
 6. **Tool results:** every tool returns \`{ok, tool, command, data}\`. \`ok:false\` with \`error.code\` \`TIMEOUT\` means the command hung (common for discovery); retry once or widen \`timeoutMs\`. stderr noise like \`RTPS_TRANSPORT_SHM\`/FastDDS SHM warnings is harmless and dropped unless configured otherwise.
-7. **Read-only contract:** all tools in this skill are read-only. Do NOT use them to modify the system; that is L2 scope.`,
+7. **Read-only contract:** all tools in this skill are read-only. Do NOT use them to modify the system; that is L2 scope.
+
+## ROS2 missing on the host (one-click install)
+
+- If \`ros2_* \` tools fail because ROS2 is not available, run
+  \`ros2_install {action: "check"}\` first: it distinguishes "not installed"
+  from "installed but not sourced" (detects \`/opt/ros/*/setup.bash\`) — in the
+  latter case configure \`rosSetup\` / source the environment, do NOT reinstall.
+- Only when the check reports **not installed**, ask the user for confirmation
+  (approval covers it) and run \`ros2_install {action: "start"}\` — it launches
+  the FishROS one-click installer (http://fishros.com/install) in an interactive
+  PTY session. Then drive its menus with
+  \`ros2_install {action: "send", session, input: "<menu number>"}\` and watch
+  progress with \`ros2_install {action: "status", session}\` (e.g. menu "1" →
+  choose the ROS2 distro) until the session reports exited; cancel anytime with
+  \`ros2_install {action: "stop", session}\`.`,
 }
 
 /**

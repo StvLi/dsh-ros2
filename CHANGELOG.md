@@ -4,6 +4,25 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [SemVer](https://semver.org/).
 
+## [0.10.0] - 2026-08-21
+
+### Added
+
+- **`ros2_install` — 鱼香ROS一键安装（第 38 个工具，L2 审批）**：主设备未安装
+  ROS2 时，经用户确认后拉起鱼香ROS一键安装（http://fishros.com/install）并以
+  **交互式方式**完成：
+  - `check`：探测 ROS2 状态——可用 / **已装但未 source**（检测 `/opt/ros/*/setup.bash`，
+    提示配置 `rosSetup`，避免重复安装）/ 未装；
+  - `start`（审批）：启动安装器于 **PTY 交互会话**（`scripts/pty_session.py`，
+    纯 stdlib pty；支持 sudo 密码提示与菜单）；
+  - `send` / `status` / `stop`：驱动菜单（数字选择）、观察进度、随时取消；
+  - 内置保护：本机已装（含未 source）时 `start` 拒绝，防止误装；`installer`
+    参数可指向本地脚本/镜像（测试与离线场景）。
+- 端到端测试：mock 安装器完整菜单交互（start→send→status→stop）通过（83 例全绿）；
+  本机 smoke：check/start 对"已装未 source"正确拒绝。
+- 文档：README/README_CN L2 表、`ros2-diagnostics` skill 新增"ROS2 缺失时一键安装"
+  章节、CHANGELOG。
+
 ## [0.9.3] - 2026-08-21
 
 ### Added

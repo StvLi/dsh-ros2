@@ -122,6 +122,7 @@ ros2_doctor                         # 系统健康报告
 | `ros2_bag_record` | `ros2 bag record <topics...> --output <dir>` | 限时录制：`duration` 秒后自动停止 |
 | `ros2_jobs_list` | `ctx.jobs.list` | 本智能体的后台任务（只读） |
 | `ros2_job_status` | `ctx.jobs.get` | 按 id 查任务状态（只读） |
+| `ros2_install` | 鱼香ROS一键安装（交互式 PTY 会话） | ROS2 未安装时：`check` 探测（已装/已装未 source/未装）；`start`（审批）拉起安装器；`send`/`status`/`stop` 驱动与观察交互菜单 |
 
 ### L3 可视化
 

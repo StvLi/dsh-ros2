@@ -122,6 +122,7 @@ Every L2 tool performs a **write operation** and asks the user first via the DSH
 | `ros2_bag_record` | `ros2 bag record <topics...> --output <dir>` | Bounded recording: stops automatically after `duration` seconds |
 | `ros2_jobs_list` | `ctx.jobs.list` | Background jobs of this agent (read-only) |
 | `ros2_job_status` | `ctx.jobs.get` | Status of one job by id (read-only) |
+| `ros2_install` | FishROS one-click installer (interactive PTY session) | When ROS2 is missing: `check` probes (installed / installed-not-sourced / absent); `start` (approval) launches the installer; `send` / `status` / `stop` drive and observe the interactive menus |
 
 ### L3 visualization
 

@@ -1,5 +1,6 @@
 import { access, mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { execFile } from 'node:child_process'
 import { defineTool, type ParameterSchemaSpec } from '@deepseek-ai/dsh-tools'
 import { spawnJob, type JobHooks, type RosResult, type RunOptions } from './runner.js'
 import type { GuiManager } from './gui.js'
@@ -185,6 +186,10 @@ function deniedResult(tool: string, command: string, outcome: string): ToolResul
 
 function toolError(tool: string, command: string, code: string, message: string): ToolResult {
   return { ok: false, tool, command, data: null, error: { code, message } }
+}
+
+function okResult(tool: string, command: string, data: JsonValue): ToolResult {
+  return { ok: true, tool, command, data }
 }
 
 const renderResult = (_args: unknown, value: JsonValue) => [{ type: 'text' as const, text: JSON.stringify(value) }]
@@ -417,6 +422,8 @@ export function createRos2Tools(deps: ToolDeps) {
   tools.push(makeBagRecordTool(deps))
   tools.push(makeJobsListTool(deps))
   tools.push(makeJobStatusTool(deps))
+  // L2: one-click ROS2 install via FishROS when ROS2 is missing (interactive PTY session).
+  tools.push(makeRos2InstallTool(deps))
   // L3 visualization tools (GUI lifecycle + screenshot + multimodal vision).
   tools.push(makeGuiStartTool(deps))
   tools.push(makeGuiListTool(deps))
@@ -1320,4 +1327,173 @@ function sessionToJson(session: { label: string; pid: number; command: string; s
 
 function windowToJson(window: { id: string; x: number; y: number; width: number; height: number; title: string }): JsonValue {
   return { id: window.id, x: window.x, y: window.y, width: window.width, height: window.height, title: window.title }
+}
+
+// ── L2: one-click ROS2 install (FishROS) ──────────────────────────────────────
+
+const FISHROS_INSTALL_URL = 'http://fishros.com/install'
+
+/** Path to the PTY session helper (scripts/pty_session.py, shipped with the package). */
+function ptyHelperPath(): string {
+  return path.join(__dirname, '..', 'scripts', 'pty_session.py')
+}
+
+/** Default PTY session dir ($TMPDIR/dsh-ros2/pty, same default as the helper). */
+function ptyDir(): string {
+  return path.join(process.env.TMPDIR ?? '/tmp', 'dsh-ros2', 'pty')
+}
+
+function execFileP(bin: string, args: string[]): Promise<{ ok: boolean; stdout: string; stderr: string }> {
+  return new Promise((resolve) => {
+    execFile(bin, args, { timeout: 20000, env: { ...process.env, TMPDIR: process.env.TMPDIR ?? '/tmp' } }, (error, stdout, stderr) => {
+      resolve({ ok: !error, stdout: String(stdout), stderr: String(stderr) })
+    })
+  })
+}
+
+/**
+ * Probe whether ROS2 is usable from the tool's environment.
+ * - usable: `ros2 --version` succeeds (PATH has ros2, e.g. via rosSetup).
+ * - installed-but-not-sourced: ros2 not on PATH but an /opt/ros setup.bash exists.
+ * - absent: neither — the FishROS installer applies.
+ */
+async function probeRos2(deps: ToolDeps): Promise<{ installed: boolean; version?: string; note?: string }> {
+  // `ros2 --version` is not a valid Jazzy CLI option; --help is distro-agnostic.
+  const res = await deps.run('ros2', ['--help'], { timeoutMs: 10000 })
+  if (res.ok) {
+    return { installed: true, version: 'ros2 available' }
+  }
+  const probe = await deps.run('bash', ['-lc', 'ls -d /opt/ros/*/setup.bash 2>/dev/null | head -1'], { timeoutMs: 10000 })
+  const found = probe.stdout.trim()
+  if (found) {
+    return {
+      installed: false,
+      note: `检测到 ${found}（ROS2 已安装但未 source）。请配置 rosSetup（如 "source ${path.dirname(found)} && "）或先 source 该环境；若确认无法使用再 start 安装。`,
+    }
+  }
+  return { installed: false }
+}
+
+/** L2: interactive one-click ROS2 installation via the FishROS installer. */
+function makeRos2InstallTool(deps: ToolDeps) {
+  return defineTool({
+    name: 'ros2_install',
+    description:
+      'One-click ROS2 install via the FishROS installer (http://fishros.com/install) when ROS2 is missing on the host. ' +
+      'Interactive flow: action=start launches the installer in a PTY session (system write — requires approval), ' +
+      'then action=send drives its menus (numbers + Enter) and action=status reads the session output, ' +
+      'action=stop cancels. action=check reports whether ROS2 is already installed.',
+    parameters: {
+      action: {
+        type: 'string',
+        enum: ['check', 'start', 'send', 'status', 'stop'],
+        description: 'check: is ROS2 installed? | start: launch the FishROS installer (approval required) | send: send keyboard input to the session | status: read the session output | stop: cancel the session.',
+      },
+      session: { type: 'string', default: '', description: 'Session id returned by start; required for send/status/stop.' },
+      input: { type: 'string', default: '', description: 'Text to send (action=send); a newline is appended automatically.' },
+      installer: { type: 'string', default: '', description: 'Optional installer URL/path override (default: http://fishros.com/install). Local paths or file:// are copied directly (useful for mirrors/tests).' },
+    },
+    output: { schema: resultSchema, render: renderResult },
+    async execute(args, exec) {
+      const params = args as Record<string, unknown>
+      const action = String(params.action ?? '')
+      const session = String(params.session ?? '')
+      const command = `ros2_install action=${action}${session ? ` session=${session}` : ''}`
+
+      if (action === 'check' || action === '') {
+        const probe = await probeRos2(deps)
+        return okResult('ros2_install', `${command} --version`, {
+          installed: probe.installed,
+          ...(probe.version ? { version: probe.version } : {}),
+          ...(probe.note ? { note: probe.note } : {}),
+          action,
+          hint: probe.installed
+            ? 'ROS2 已安装，无需一键安装。可直接使用 ros2_* 工具。'
+            : probe.note
+              ? 'ROS2 已检测到但未 source——请先配置 rosSetup 或 source 环境；只有确认未安装才用 action=start。'
+              : 'ROS2 未安装。使用 action=start 拉起鱼香ROS一键安装（交互式，需审批）。',
+        })
+      }
+
+      if (action === 'start') {
+        // Refuse when ROS2 is present (usable OR installed-but-not-sourced):
+        // protects this machine from an accidental re-install.
+        const probe = await probeRos2(deps)
+        if (probe.installed) {
+          return okResult('ros2_install', command, {
+            started: false, reason: 'already-installed',
+            ...(probe.version ? { version: probe.version } : {}),
+            hint: 'ROS2 已安装，跳过一键安装。',
+          })
+        }
+        if (probe.note) {
+          return okResult('ros2_install', command, {
+            started: false, reason: 'installed-not-sourced', note: probe.note,
+            hint: '检测到已安装的 ROS2 但未 source——请配置 rosSetup（如 "source /opt/ros/<distro>/setup.bash && "）后重试，避免重复安装。',
+          })
+        }
+        const reason =
+          '将下载并运行鱼香ROS一键安装脚本（http://fishros.com/install，交互式菜单，需 sudo 权限），' +
+          '在主设备未安装 ROS2 时安装 ROS2。是否继续？ / Will download & run the FishROS one-click installer (interactive, needs sudo) to install ROS2.'
+        const approval = await requestApproval(deps, exec, 'ros2_install', reason)
+        if (!approval.allowed) return deniedResult('ros2_install', command, approval.outcome)
+
+        // Obtain the bootstrap script (default FishROS URL; local paths /
+        // file:// copied directly for mirrors/tests). Execution happens in the PTY.
+        const installer = strOrUndefined(params.installer) ?? FISHROS_INSTALL_URL
+        const bootDir = path.join(process.env.TMPDIR ?? '/tmp', 'dsh-ros2')
+        const boot = path.join(bootDir, 'fishros-install')
+        let dl: { ok: boolean; stderr: string }
+        if (installer.startsWith('file://') || installer.startsWith('/')) {
+          const src = installer.startsWith('file://') ? installer.slice('file://'.length) : installer
+          dl = await execFileP('bash', ['-lc', `mkdir -p "${bootDir}" && cp "${src}" "${boot}" && chmod +x "${boot}"`])
+        } else {
+          dl = await execFileP('bash', ['-lc', `mkdir -p "${bootDir}" && (curl -fsSL ${installer} -o "${boot}" || wget -q ${installer} -O "${boot}") && test -s "${boot}" && chmod +x "${boot}"`])
+        }
+        if (!dl.ok || dl.stderr.includes('not found')) {
+          return toolError('ros2_install', command, 'DOWNLOAD_FAILED', `无法获取一键安装脚本（${installer}；需要 curl/wget，本地路径需存在）`)
+        }
+        const sid = `ros2install-${Date.now()}`
+        const dir = ptyDir()
+        const helper = ptyHelperPath()
+        const start = await execFileP('python3', [helper, 'start', sid, 'bash', boot, '--dir', dir])
+        if (!start.ok) {
+          return toolError('ros2_install', command, 'SESSION_START_FAILED', start.stderr.trim() || 'PTY 会话启动失败（需要 python3）')
+        }
+        return okResult('ros2_install', command, {
+          started: true, session: sid, action,
+          next: '使用 send 发送菜单数字（如 "1" 选择一键安装ROS），status 查看输出，stop 取消。',
+          fishros: FISHROS_INSTALL_URL,
+        })
+      }
+
+      if (!session) {
+        return toolError('ros2_install', command, 'SESSION_REQUIRED', 'send/status/stop 需要 session（start 返回的会话 id）')
+      }
+      const helper = ptyHelperPath()
+      const dir = ptyDir()
+      if (action === 'send') {
+        const input = String(params.input ?? '')
+        // No --dir here: nargs=REMAINDER in the helper greedily captures every
+        // token after the session id, so only the `--`-separated input is sent;
+        // the helper's default dir ($TMPDIR/dsh-ros2/pty) matches ptyDir().
+        const r = await execFileP('python3', [helper, 'send', session, '--', input])
+        if (!r.ok) return toolError('ros2_install', command, 'SEND_FAILED', r.stderr.trim())
+        return okResult('ros2_install', command, { session, action, sent: input, hint: '继续用 status 查看菜单响应' })
+      }
+      if (action === 'status') {
+        const r = await execFileP('python3', [helper, 'status', session, '--dir', dir])
+        const lines = r.stdout.split('\n').filter((l) => l.length > 0)
+        const stateLine = lines.find((l) => l.startsWith('STATE '))
+        const state = stateLine ? stateLine.replace('STATE ', '') : 'unknown'
+        const output = lines.filter((l) => !l.startsWith('STATE ')).slice(-20).join('\n')
+        return okResult('ros2_install', command, { session, action, state, output })
+      }
+      if (action === 'stop') {
+        const r = await execFileP('python3', [helper, 'stop', session, '--dir', dir])
+        return okResult('ros2_install', command, { session, action, stopped: true })
+      }
+      return toolError('ros2_install', command, 'BAD_ACTION', `未知 action: ${action}`)
+    },
+  })
 }
