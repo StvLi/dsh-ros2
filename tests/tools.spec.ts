@@ -316,7 +316,7 @@ describe('ros2_install interactive flow (mock installer, no network)', () => {
     const t = toolsList.find((x) => x.name === 'ros2_install')
     if (!t) throw new Error('ros2_install not registered')
 
-    const started = (await t.execute({ action: 'start', installer: '/tmp/mock_fishros.sh' }, execStub)) as ToolResult
+    const started = (await t.execute({ action: 'start', installer: new URL('./fixtures/mock_fishros.sh', import.meta.url).pathname }, execStub)) as ToolResult
     expect(started.ok).toBe(true)
     const session = (started.data as { session: string }).session
     expect(session.startsWith('ros2install-')).toBe(true)
