@@ -250,7 +250,25 @@ dsh-ros2 作为具身基础插件需被快速调用；"渲染机器人动作"（
 
 - 低模生成：`scripts/simplify_visual_meshes.py`（open3d；勿用 fast_simplification，
   其输出在 OGRE 渲染丢失 ~70% 内容）；
-- 节点日志每 100 帧输出 `frame-timing` 可观测每帧预算（render 27ms 为 llvmpipe
-  光栅化下限，capture 1-2ms，pub 1ms）；
-- 完整动作渲染链路 1.9 → 10.2 Hz（5.4×），在 rate=10 上限内，后续提速需 GPU
-  直通（非 llvmpipe）或更低分辨率。
+- 节点日志每 100 帧输出 `loop-timing` 可观测循环预算（onupdate / events / spin /
+  frame / sleep）；
+- 完整动作渲染链路 1.9 → 10.2 Hz（5.4×，rate=10 上限内）。
+
+### 8.4 30 Hz 请求实测（v0.9.1）
+
+把 `rate` 拉到 30 后逐项优化，实测（lite_urdf 低模 38.7 万面，1000×750，静止/运动）：
+
+| 配置（rate=30） | 实际帧率 | 每帧循环 | 说明 |
+| --- | --- | --- | --- |
+| 原始（processEvents 每帧） | 11.1 Hz | 92ms | onUpdate 30ms + processEvents 30ms + render 31ms |
+| + **events 节流**（每 5 帧） | 14.2 Hz | 66ms | processEvents 触发 Qt paint → OGRE **双重渲染**，节流后 events 30ms→0ms |
+| + **onUpdate/2**（每 2 帧刷新 TF 位置） | 16.2 Hz | ~48ms | 渲染仍 30Hz；TF 位置刷新 15Hz（FrameManager 缓冲，不丢数据） |
+| 800×600 + 全部优化 | 17.1 Hz | ~47ms | render 仍 ~30ms：耗时由**三角形数**决定，分辨率影响小 |
+| **30Hz + 运动**（shoulder_roll 摆动） | **15.6 Hz** | ~64ms | 动作渲染场景 |
+| 回归：rate=10 + 全部优化 | 10.3 Hz | sleep 主导 | 达 rate 上限，无劣化 |
+
+**结论**：30 Hz 请求下实际最高 ~16–17 Hz。瓶颈为 llvmpipe 软件光栅化 38.7 万面
+（render 27–31ms，与分辨率无关）+ rviz display update（onUpdate ~30ms）。**达到
+30 Hz 需 GPU 直通（非 llvmpipe）**；本次新增优化（events 节流 + onUpdate/2）使
+30 Hz 请求帧率 11.1 → 16.2 Hz（+46%），10 Hz 请求仍达上限。
+

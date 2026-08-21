@@ -4,6 +4,22 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [SemVer](https://semver.org/).
 
+## [0.9.1] - 2026-08-20
+
+### Performance
+
+- **30 Hz 请求实测与循环开销优化**（详见 `docs/architecture.md` §5.2、
+  `docs/robot-state-vision-test.md` §8.4）：
+  1. **events 节流**：`app.processEvents()` 每 5 帧调用（headless 下 Qt 事件少；
+     每帧处理会触发 Qt paint → OGRE 双重渲染 ~30ms/帧），events 30ms → 0ms；
+  2. **onUpdate/2**：`onUpdate` 每 2 帧调用（渲染仍每帧；TF 位置刷新 15Hz，
+     FrameManager transformer 缓冲不丢数据），display update 摊销减半；
+- 30 Hz 请求实际帧率 **11.1 → 16.2 Hz**（+46%）；运动场景 15.6 Hz；800×600 仅
+  17.1 Hz（render 由三角形数决定，分辨率影响小）；10 Hz 请求仍达上限（10.3 Hz）。
+- **结论**：llvmpipe 软件光栅化（render 27–31ms/帧，与分辨率无关）为硬成本，
+  **达 30 Hz 需 GPU 直通（非 llvmpipe）**。
+- 节点 `loop-timing` 日志升级：onupdate/events/spin/frame/sleep 分段可观测。
+
 ## [0.9.0] - 2026-08-20
 
 ### Performance

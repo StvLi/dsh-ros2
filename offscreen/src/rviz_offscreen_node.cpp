@@ -221,8 +221,20 @@ int main(int argc, char ** argv)
     // Drive the rviz update pipeline explicitly (it is normally a 30 Hz QTimer
     // slot): updates Displays + FrameManager + spins rviz's ROS node so TF and
     // topic data flow in, then render the kernel and publish the frame.
-    const bool invoked = QMetaObject::invokeMethod(&vm, "onUpdate", Qt::DirectConnection);
-    app.processEvents();
+    // onUpdate every 2 frames: its display-update pass (~30ms with large mesh
+    // scenes) is the dominant cost; TF data is buffered by the FrameManager
+    // transformer, so a 15 Hz pose refresh still renders smooth motion.
+    const auto t_loop0 = std::chrono::steady_clock::now();
+    std::chrono::steady_clock::time_point t_end_loop;
+    auto t_render0 = t_loop0;
+    auto t_end = t_loop0;
+    const bool invoked = (frame_idx % 2 == 0) &&
+      QMetaObject::invokeMethod(&vm, "onUpdate", Qt::DirectConnection);
+    const auto t_upd1 = std::chrono::steady_clock::now();
+    // Qt events only need low-frequency handling headless: processing them every
+    // frame can trigger extra OGRE renders (paint events) that double the work.
+    if (frame_idx % 5 == 0) app.processEvents();
+    const auto t_pe1 = std::chrono::steady_clock::now();
     rclcpp::spin_some(node);
     if (first_frame) {
       auto * group = vm.getRootDisplayGroup();
@@ -262,7 +274,7 @@ int main(int argc, char ** argv)
     if (win) {
       // Per-frame timing breakdown (logged every 25 frames): render / capture /
       // publish — identifies where the frame budget goes.
-      const auto t_render0 = std::chrono::steady_clock::now();
+      t_render0 = std::chrono::steady_clock::now();
       win->render();
       // Read pixels directly from the OGRE render target (no PNG round-trip);
       // fall back to captureScreenShot + libpng decode if the target is not
@@ -289,18 +301,20 @@ int main(int argc, char ** argv)
         msg.step = w * 3;
         msg.data = std::move(rgb);
         pub->publish(msg);
-        const auto t_end = std::chrono::steady_clock::now();
-        if (frame_idx % 100 == 0) {  // 每 100 帧（~10s @10Hz）打印一次耗时
-          auto ms = [](auto a, auto b) { return std::chrono::duration_cast<std::chrono::milliseconds>(b - a).count(); };
-          RCLCPP_INFO(node->get_logger(),
-            "frame-timing: total=%lldms render=%lldms capture=%lldms pub=%lldms",
-            ms(t_render0, t_end), ms(t_render0, t_cap0), ms(t_cap0, t_pub0), ms(t_pub0, t_end));
-        }
+        t_end = std::chrono::steady_clock::now();
       } else {
         RCLCPP_WARN_THROTTLE(node->get_logger(), *node->get_clock(), 5000, "frame capture failed");
       }
     }
     loop.sleep();
+    t_end_loop = std::chrono::steady_clock::now();
+    if (frame_idx % 100 == 0) {  // 每 100 帧打印一次循环耗时
+      auto ms = [](auto a, auto b) { return std::chrono::duration_cast<std::chrono::milliseconds>(b - a).count(); };
+      RCLCPP_INFO(node->get_logger(),
+        "loop-timing: loop=%lldms onupdate=%lldms events=%lldms spin=%lldms frame=%lldms sleep=%lldms",
+        ms(t_loop0, t_end_loop), ms(t_loop0, t_upd1), ms(t_upd1, t_pe1),
+        ms(t_pe1, t_render0), ms(t_render0, t_end), ms(t_end, t_end_loop));
+    }
   }
   vm.stopUpdate();
   rclcpp::shutdown();
