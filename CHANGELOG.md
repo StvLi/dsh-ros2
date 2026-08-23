@@ -4,6 +4,15 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [SemVer](https://semver.org/).
 
+## [0.13.1] - 2026-08-23
+
+### Fixed
+
+- **`vision_bringup` 轮询/刷新发现**：原一次性发现会漏掉晚出现的图像话题（实测
+  2/4 路）。现在每 `--refresh` 秒（默认 10，`--refresh 0` 保持一次性）重新发现——
+  新出现的话题自动补桥、消失的话题自动停桥；实测相机话题陆续出现时逐一补桥、
+  发布器停止后自动停桥、Ctrl-C 干净退出。
+
 ## [0.13.0] - 2026-08-23
 
 ### Changed

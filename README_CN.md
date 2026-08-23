@@ -248,7 +248,7 @@ dsh-ros2/
 - **RobotModel 没有 mesh（`Links` 空）**：Jazzy 必须用 `Description Source/Topic`，旧 `Robot Description:` 无效。
 - **`Could not load resource ... Unable to open file`**：mesh 路径需绝对路径或 `file://` 前缀。
 - **发布者退出后收不到描述**：URDF 发布者须常驻（transient-local 只对后订阅者补发一次，进程退出即失效）。
-- **`vision_bringup` 只发现部分图像话题**：一次性发现可能不完整（实测 2/4 路），可用 `vlm_bridge_node` 手动补桥。
+- **`vision_bringup` 曾漏发现部分图像话题（实测 2/4 路）**：已修复——现在每 `--refresh` 秒（默认 10）刷新发现，后续出现的话题自动补桥、消失的话题自动停桥。
 
 ---
 
@@ -269,7 +269,7 @@ CI（`.github/workflows/ci.yml`）：push 到 `main` / PR 时在 Node 22 与 24 
 
 ## 路线图
 
-- [ ] `vision_bringup` 轮询/刷新发现（补全一次性发现漏掉的话题）；
+- [x] `vision_bringup` 轮询/刷新发现（晚出现话题自动补桥、消失自动停桥）；
 - [ ] skill 补充各机器人零位语义（如"零位 = 侧平举、肘窝向前"）以提升 VLM 姿态解读精度；
 - [ ] npm 发布（`pnpm publish --access public`，需 `npm login`）；
 - [ ] 更多 ROS2 版本（Humble / Rolling）兼容验证。

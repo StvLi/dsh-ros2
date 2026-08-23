@@ -248,7 +248,7 @@ dsh-ros2/
 - **RobotModel shows no meshes (`Links` empty)**: on Jazzy you must use `Description Source/Topic`; the legacy `Robot Description:` does nothing.
 - **`Could not load resource ... Unable to open file`**: mesh paths need absolute paths or a `file://` prefix.
 - **Description missing after the publisher exits**: the URDF publisher must stay alive (transient-local only re-sends once to late subscribers; gone when the process exits).
-- **`vision_bringup` finds only some image topics**: one-shot discovery can be incomplete (2/4 measured); add bridges manually with `vlm_bridge_node`.
+- **`vision_bringup` missed some image topics (2/4 measured)**: fixed — it now refreshes discovery every `--refresh` seconds (default 10), auto-spawning bridges for topics that appear later and stopping bridges for topics that disappear.
 
 ---
 
@@ -269,7 +269,7 @@ Release workflow (npm & GitHub Releases): see [`PUBLISH.md`](PUBLISH.md).
 
 ## Roadmap
 
-- [ ] `vision_bringup` polling/refresh discovery (complete topics missed by one-shot discovery);
+- [x] `vision_bringup` polling/refresh discovery (auto-bridge late topics, stop bridges for gone topics);
 - [ ] Skill: per-robot zero-pose semantics (e.g. "zero = lateral raise, elbows forward") to improve VLM pose interpretation;
 - [ ] npm publishing (`pnpm publish --access public`, requires `npm login`);
 - [ ] More ROS2 distros (Humble / Rolling) compatibility validation.

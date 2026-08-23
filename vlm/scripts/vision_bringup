@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Vision pipeline bringup for dsh-ros2.
+"""Vision pipeline bringup for dsh-ros2 (with periodic refresh).
 
 Discovers every live image topic (sensor_msgs/Image or CompressedImage) on
 the ROS2 graph and brings up one vlm_bridge_node per topic, so the LLM /
@@ -13,10 +13,15 @@ topic_id is the topic name with leading '/' removed and non-alphanumerics
 mapped to '_' (e.g. /deepcybo/.../wrist_left/image_raw/compressed ->
 deepcybo_..._wrist_left_image_raw_compressed).
 
-Requires vlm_node to be running (the VLM provider); Ctrl-C closes all
-spawned bridges. Prints a JSON mapping of topic -> bridge service.
+Unlike the original one-shot discovery (which could miss topics that appear
+late, e.g. 2 of 4 measured), this version REFRESHES discovery every
+--refresh seconds: topics that appear later get a bridge spawned, topics
+that disappear have their bridge stopped. Pass --refresh 0 for one-shot
+behavior. Requires vlm_node to be running (the VLM provider); Ctrl-C closes
+all spawned bridges. Prints a JSON mapping of topic -> bridge service.
 """
 
+import argparse
 import json
 import os
 import signal
@@ -60,53 +65,95 @@ def spawn_bridge(topic: str, compressed: bool, env: dict):
     return proc
 
 
+class BridgeManager:
+    """Owns one bridge process per image topic; refreshes on a timer."""
+
+    def __init__(self, env: dict):
+        self._env = env
+        self._bridges: dict[str, dict] = {}  # topic -> {proc, tid, compressed}
+
+    def reconcile(self, topics: list[dict]):
+        current = {t["topic"]: t for t in topics}
+        # stop bridges for gone topics
+        for topic in list(self._bridges):
+            if topic not in current:
+                self._stop(topic)
+        # spawn bridges for new topics
+        for topic, info in current.items():
+            if topic not in self._bridges:
+                self._spawn(topic, info["compressed"])
+        return {"bridges": len(self._bridges), "topics": sorted(current)}
+
+    def _spawn(self, topic: str, compressed: bool):
+        proc = spawn_bridge(topic, compressed, self._env)
+        tid = topic_id(topic)
+        svc = f"/vlm_bridge/{tid}/analyze_latest"
+        self._bridges[topic] = {"proc": proc, "tid": tid, "compressed": compressed}
+        print(json.dumps({"started": svc, "pid": proc.pid, "watching": topic,
+                          "compressed": compressed}, ensure_ascii=False), flush=True)
+
+    def _stop(self, topic: str):
+        entry = self._bridges.pop(topic, None)
+        if not entry:
+            return
+        proc = entry["proc"]
+        try:
+            proc.terminate()
+        except Exception:  # noqa: BLE001
+            pass
+        print(json.dumps({"stopped": f"/vlm_bridge/{entry['tid']}/analyze_latest",
+                          "was_watching": topic}, ensure_ascii=False), flush=True)
+
+    def stop_all(self):
+        for topic in list(self._bridges):
+            self._stop(topic)
+
+
 def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--refresh", type=float, default=10.0,
+                    help="Discovery refresh interval in seconds (0 = one-shot).")
+    args = ap.parse_args()
+
     rclpy.init()
     node = Node("vision_bringup")
     time.sleep(1.0)  # let discovery settle
-    topics = discover_image_topics(node)
-    node.destroy_node()
-    rclpy.shutdown()
 
-    print(json.dumps({"discovered": [t["topic"] for t in topics], "count": len(topics)}, ensure_ascii=False))
-
-    env = dict(os.environ)
-    procs = []
-    mapping = []
-    for t in topics:
-        tid = topic_id(t["topic"])
-        proc = spawn_bridge(t["topic"], t["compressed"], env)
-        procs.append(proc)
-        svc = f"/vlm_bridge/{tid}/analyze_latest"
-        mapping.append({"topic": t["topic"], "compressed": t["compressed"], "bridge_service": svc, "pid": proc.pid})
-        print(json.dumps({"started": svc, "pid": proc.pid, "watching": t["topic"]}, ensure_ascii=False), flush=True)
-
-    if not mapping:
-        print(json.dumps({"error": "no image topics found on the graph"}, ensure_ascii=False))
-        return
+    mgr = BridgeManager(env=dict(os.environ))
+    first = True
+    running = True
 
     def cleanup(*_):
-        for p in procs:
-            try:
-                p.terminate()
-            except Exception:  # noqa: BLE001
-                pass
-        time.sleep(0.5)
-        for p in procs:
-            try:
-                p.kill()
-            except Exception:  # noqa: BLE001
-                pass
-        sys.exit(0)
+        nonlocal running
+        running = False
 
     signal.signal(signal.SIGINT, cleanup)
     signal.signal(signal.SIGTERM, cleanup)
-    print(json.dumps({"bridges": mapping, "note": "Ctrl-C to stop"}, ensure_ascii=False), flush=True)
+
     try:
-        while True:
-            time.sleep(1.0)
+        while running:
+            topics = discover_image_topics(node)
+            result = mgr.reconcile(topics)
+            if first:
+                print(json.dumps({"discovered": [t["topic"] for t in topics],
+                                  "count": len(topics)}, ensure_ascii=False), flush=True)
+                first = False
+            if not result["topics"] and args.refresh <= 0:
+                print(json.dumps({"error": "no image topics found on the graph"}, ensure_ascii=False))
+                break
+            if args.refresh <= 0:
+                break
+            # wait in small slices so Ctrl-C is responsive
+            deadline = time.monotonic() + args.refresh
+            while running and time.monotonic() < deadline:
+                time.sleep(0.2)
     except KeyboardInterrupt:
-        cleanup()
+        pass
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+        mgr.stop_all()
+        sys.exit(0)
 
 
 if __name__ == "__main__":
