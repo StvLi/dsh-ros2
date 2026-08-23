@@ -349,47 +349,48 @@ describe('L3 visualization tools', () => {
 
   // ── L3 interaction tools (P4) ──────────────────────────────────────────
 
-  it('ros2_gui_click clicks at absolute coordinates', async () => {
+  it('ros2_gui_interact click at absolute coordinates', async () => {
     const { deps } = visualDeps()
-    const out = (await tool(deps, 'ros2_gui_click').execute({ x: 100, y: 200, button: 1 }, execStub)) as ToolResult
+    const out = (await tool(deps, 'ros2_gui_interact').execute({ action: 'click', x: 100, y: 200, button: 1 }, execStub)) as ToolResult
     expect(out.ok).toBe(true)
     expect(out.data).toMatchObject({ button: 1, count: 1, x: 100, y: 200 })
   })
 
-  it('ros2_gui_click activates a window and clicks its center', async () => {
+  it('ros2_gui_interact click activates a window and clicks its center', async () => {
     const { deps } = visualDeps()
-    const out = (await tool(deps, 'ros2_gui_click').execute({ windowTitle: 'rviz2' }, execStub)) as ToolResult
+    const out = (await tool(deps, 'ros2_gui_interact').execute({ action: 'click', windowTitle: 'rviz2' }, execStub)) as ToolResult
     expect(out.ok).toBe(true)
     expect(out.data).toMatchObject({ button: 1, window: '0x03a00007', x: 400, y: 300 })
   })
 
-  it('ros2_gui_drag drags inside a window and validates toX/toY', async () => {
+  it('ros2_gui_interact drag inside a window and validates toX/toY', async () => {
     const { deps } = visualDeps()
-    const out = (await tool(deps, 'ros2_gui_drag').execute({ windowTitle: 'rviz2', toX: 300, toY: 400, steps: 2 }, execStub)) as ToolResult
+    const out = (await tool(deps, 'ros2_gui_interact').execute({ action: 'drag', windowTitle: 'rviz2', toX: 300, toY: 400, steps: 2 }, execStub)) as ToolResult
     expect(out.ok).toBe(true)
     expect(out.data).toMatchObject({ button: 1, window: '0x03a00007', fromX: 400, fromY: 300, toX: 300, toY: 400 })
-    const missing = tool(deps, 'ros2_gui_drag').execute({ windowTitle: 'rviz2' }, execStub)
-    await expect(missing).rejects.toThrow(/toX/)
+    const missing = (await tool(deps, 'ros2_gui_interact').execute({ action: 'drag', windowTitle: 'rviz2' }, execStub)) as ToolResult
+    expect(missing.error?.code).toBe('INVALID_INPUT')
   })
 
-  it('ros2_gui_key sends combos or text, not both', async () => {
+  it('ros2_gui_interact key sends combos or text, not both', async () => {
     const { deps } = visualDeps()
-    const combo = (await tool(deps, 'ros2_gui_key').execute({ keys: 'ctrl+shift+r' }, execStub)) as ToolResult
+    const combo = (await tool(deps, 'ros2_gui_interact').execute({ action: 'key', keys: 'ctrl+shift+r' }, execStub)) as ToolResult
     expect(combo.ok).toBe(true)
     expect(combo.data).toMatchObject({ kind: 'keys', value: 'ctrl+shift+r' })
-    const typed = (await tool(deps, 'ros2_gui_key').execute({ text: 'hello' }, execStub)) as ToolResult
+    const typed = (await tool(deps, 'ros2_gui_interact').execute({ action: 'key', text: 'hello' }, execStub)) as ToolResult
     expect(typed.data).toMatchObject({ kind: 'text', value: 'hello' })
-    const both = (await tool(deps, 'ros2_gui_key').execute({ keys: 'a', text: 'b' }, execStub)) as ToolResult
+    const both = (await tool(deps, 'ros2_gui_interact').execute({ action: 'key', keys: 'a', text: 'b' }, execStub)) as ToolResult
     expect(both.error?.code).toBe('INVALID_INPUT')
-    const neither = (await tool(deps, 'ros2_gui_key').execute({}, execStub)) as ToolResult
+    const neither = (await tool(deps, 'ros2_gui_interact').execute({ action: 'key' }, execStub)) as ToolResult
     expect(neither.error?.code).toBe('INVALID_INPUT')
+    // note: an invalid action is rejected by the parameter enum (ToolArgsError)
   })
 
-  it('interaction tools fail closed without a GUI manager', async () => {
+  it('interaction tool fails closed without a GUI manager', async () => {
     const bare: ToolDeps = { run: async () => ({ ok: true, command: '', stdout: '', stderr: '', exitCode: 0, timedOut: false, durationMs: 0 }) }
-    const click = (await tool(bare, 'ros2_gui_click').execute({}, execStub)) as ToolResult
+    const click = (await tool(bare, 'ros2_gui_interact').execute({ action: 'click' }, execStub)) as ToolResult
     expect(click.error?.code).toBe('GUI_UNAVAILABLE')
-    const key = (await tool(bare, 'ros2_gui_key').execute({ keys: 'a' }, execStub)) as ToolResult
+    const key = (await tool(bare, 'ros2_gui_interact').execute({ action: 'key', keys: 'a' }, execStub)) as ToolResult
     expect(key.error?.code).toBe('GUI_UNAVAILABLE')
   })
 })

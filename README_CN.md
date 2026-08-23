@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![ROS2](https://img.shields.io/badge/ROS2-Jazzy-orange)]()
 ![Node](https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-brightgreen)
-![Tools](https://img.shields.io/badge/tools-41-blue)
+![Tools](https://img.shields.io/badge/tools-39-blue)
 
 **dsh-ros2** 让 DSH 智能体在一台装有 ROS2 的主机上获得完整的机器人开发/调试能力，分为四个能力层：
 
@@ -139,11 +139,9 @@ GUI 生命周期 + 截图 + 多模态视觉（"先能看，再谈动"）+ xdotoo
 | `ros2_screenshot` | 截屏或按窗口标题截图到 PNG |
 | `ros2_vision_describe` | 用配置的多模态模型描述一张图片（Gemini / OpenAI / mock） |
 | `ros2_gui_observe` | 确保 GUI 运行 → 截图 → 返回多模态描述（"看"工作流） |
-| `ros2_gui_click` | xdotool 点击/滚动：激活窗口、移动指针、点击（`button` 4/5 = 滚动） |
-| `ros2_gui_drag` | xdotool 拖拽：RViz2 视角控制（左键 orbit、中键 pan、右键 zoom） |
-| `ros2_gui_key` | xdotool 键盘：组合键（如 `ctrl+shift+r` 重载 RViz2 显示配置）或输入文本 |
+| `ros2_gui_interact` | 统一 xdotool 交互：`action=click`（点击/滚动，`button` 4/5 = 滚动）、`action=drag`（拖拽：RViz2 orbit/pan/zoom）、`action=key`（组合键如 `ctrl+shift+r` 或输入文本） |
 
-交互配方（模型视角）：`ros2_gui_drag {windowTitle: "rviz2", button: 1, toX: <dx>, toY: <dy>}` 环绕视角、`button: 3` 缩放、`ros2_gui_key {keys: "ctrl+shift+r"}` 重载配置。`wmctrl` 枚举不到窗口（如显示上没有窗口管理器）时窗口相对交互会报"未找到窗口"——退回绝对屏幕坐标。交互属于本地会话操作（无需审批，与其它 L3 工具一致）。
+交互配方（模型视角）：`ros2_gui_interact {action: "drag", windowTitle: "rviz2", button: 1, toX: <dx>, toY: <dy>}` 环绕视角、`action: "drag", button: 3` 缩放、`ros2_gui_interact {action: "key", keys: "ctrl+shift+r"}` 重载配置。`wmctrl` 枚举不到窗口（如显示上没有窗口管理器）时窗口相对交互会报"未找到窗口"——退回绝对屏幕坐标。交互属于本地会话操作（无需审批，与其它 L3 工具一致）。
 
 ### L4 实时视觉（并行 VLM over ROS2，无头图像话题）
 

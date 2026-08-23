@@ -269,10 +269,8 @@ describe('tool inventory', () => {
     expect(names).toContain('ros2_screenshot')
     expect(names).toContain('ros2_vision_describe')
     expect(names).toContain('ros2_gui_observe')
+    expect(names).toContain('ros2_gui_interact')
     // L3 interaction tools (P4)
-    expect(names).toContain('ros2_gui_click')
-    expect(names).toContain('ros2_gui_drag')
-    expect(names).toContain('ros2_gui_key')
     // L4 headless perception tools
     expect(names).toContain('ros2_image_snapshot')
     expect(names).toContain('ros2_vlm_analyze')
@@ -283,7 +281,7 @@ describe('tool inventory', () => {
     expect(names).toContain('moveit_discover')
     expect(names).toContain('moveit_move_to_pose')
     expect(names).toContain('moveit_cartesian')
-    expect(names).toHaveLength(41)
+    expect(names).toHaveLength(39)
   })
 })
 

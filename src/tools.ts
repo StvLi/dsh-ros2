@@ -438,9 +438,7 @@ export function createRos2Tools(deps: ToolDeps) {
   tools.push(makeVisionDescribeTool(deps))
   tools.push(makeGuiObserveTool(deps))
   // L3 interaction tools (P4: xdotool click/drag/key on the host display).
-  tools.push(makeGuiClickTool(deps))
-  tools.push(makeGuiDragTool(deps))
-  tools.push(makeGuiKeyTool(deps))
+  tools.push(makeGuiInteractTool(deps))
   // L4 headless perception (parallel VLM node + image-topic acquisition).
   tools.push(makeImageSnapshotTool(deps))
   tools.push(makeVlmAnalyzeTool(deps))
@@ -1097,112 +1095,94 @@ function makeGuiObserveTool(deps: ToolDeps) {
 }
 
 /** L3: xdotool click / scroll (P4 interaction). */
-function makeGuiClickTool(deps: ToolDeps) {
+/**
+ * L3: unified xdotool interaction (click / drag / key via one tool).
+ * action=click: mouse click/scroll (button 1-5, count repeats).
+ * action=drag: press-drag-release (RViz2 view: 1 orbit, 2 pan, 3 zoom).
+ * action=key: key combos (e.g. ctrl+shift+r) or typed text (keys/text one of).
+ */
+function makeGuiInteractTool(deps: ToolDeps) {
   return defineTool({
-    name: 'ros2_gui_click',
-    description: 'Send a mouse click or scroll via xdotool on the host display. With windowTitle the pointer moves to (x, y) relative to that window (default: its center); without it, (x, y) are absolute screen coordinates. button: 1 left, 2 middle, 3 right, 4 scroll up, 5 scroll down. count repeats the click (scroll notches for 4/5). Requires xdotool.',
+    name: 'ros2_gui_interact',
+    description: 'Unified xdotool interaction on the host display: action=click (mouse click/scroll: button 1 left, 2 middle, 3 right, 4 scroll up, 5 scroll down; count repeats), action=drag (press-drag-release: RViz2 view control, left-drag orbit / middle-drag pan / right-drag zoom), action=key (key combos like "ctrl+shift+r" or typed text). With windowTitle the pointer/coordinates are relative to that window (default: its center); without it they are absolute (drag start defaults to the current pointer). Requires xdotool.',
     parameters: {
-      windowTitle: { type: 'string', default: '', description: 'Optional window title substring; activates it first and makes x/y window-relative.' },
-      x: { type: 'number', default: 0, description: 'X coordinate (window-relative when windowTitle set, else absolute). Empty = window center.' },
-      y: { type: 'number', default: 0, description: 'Y coordinate (see x).' },
+      action: { type: 'string', enum: ['click', 'drag', 'key'], description: 'Interaction kind: click | drag | key.' },
+      windowTitle: { type: 'string', default: '', description: 'Optional window title substring; activates it first and makes coordinates window-relative.' },
+      // click
+      x: { type: 'number', default: 0, description: 'Click X (window-relative when windowTitle set, else absolute). Empty = window center.' },
+      y: { type: 'number', default: 0, description: 'Click Y (see x).' },
       button: { type: 'number', default: 1, description: 'Mouse button: 1 left, 2 middle, 3 right, 4 scroll up, 5 scroll down.' },
       count: { type: 'number', default: 1, description: 'Click repeat count (scroll notches for buttons 4/5).' },
+      // drag
+      fromX: { type: 'number', default: 0, description: 'Drag start X (default: window center / current pointer).' },
+      fromY: { type: 'number', default: 0, description: 'Drag start Y.' },
+      toX: { type: 'number', default: 0, description: 'Drag end X (window-relative or absolute, matching fromX).' },
+      toY: { type: 'number', default: 0, description: 'Drag end Y.' },
+      steps: { type: 'number', default: 10, description: 'Drag intermediate moves (default 10).' },
+      pauseMs: { type: 'number', default: 20, description: 'Drag pause between steps in ms.' },
+      // key
+      keys: { type: 'string', default: '', description: 'Key or combo, e.g. ctrl+shift+r; multiple combos space-separated (action=key, exclusive with text).' },
+      text: { type: 'string', default: '', description: 'Literal text to type (action=key, exclusive with keys).' },
+      delayMs: { type: 'number', default: 0, description: 'Key delay between keys in ms.' },
     },
     output: { schema: resultSchema, render: renderResult },
     async execute(args) {
       const params = args as Record<string, unknown>
-      const button = numOrUndefined(params.button) ?? 1
-      const command = `xdotool click ${button}`
-      if (!deps.gui) return toolError('ros2_gui_click', command, 'GUI_UNAVAILABLE', 'GUI 管理器未启用')
-      const result = await deps.gui.click({
-        windowTitle: strOrUndefined(params.windowTitle),
-        x: numOrUndefined(params.x),
-        y: numOrUndefined(params.y),
-        button,
-        count: numOrUndefined(params.count) ?? 1,
-      })
-      if (!result.ok) return toolError('ros2_gui_click', command, 'INTERACT_FAILED', result.error)
-      const value: ToolResult = { ok: true, tool: 'ros2_gui_click', command, data: jsonOf(result.data) }
-      return value
-    },
-  })
-}
-
-/** L3: xdotool press-drag-release (P4 interaction, e.g. RViz2 viewpoint). */
-function makeGuiDragTool(deps: ToolDeps) {
-  return defineTool({
-    name: 'ros2_gui_drag',
-    description: 'Press-drag-release via xdotool (e.g. RViz2 view control: left-drag orbit, middle-drag pan, right-drag zoom). With windowTitle the coordinates are relative to that window (start defaults to its center); without it they are absolute (start defaults to the current pointer via getmouselocation). Requires xdotool.',
-    parameters: {
-      windowTitle: { type: 'string', default: '', description: 'Optional window title substring; activates it first and makes coordinates window-relative.' },
-      fromX: { type: 'number', default: 0, description: 'Start X (default: window center / current pointer).' },
-      fromY: { type: 'number', default: 0, description: 'Start Y.' },
-      toX: { type: 'number', required: true, description: 'End X (window-relative or absolute, matching fromX).' },
-      toY: { type: 'number', required: true, description: 'End Y.' },
-      steps: { type: 'number', default: 10, description: 'Number of intermediate moves (default 10).' },
-      button: { type: 'number', default: 1, description: '1 left (orbit), 2 middle (pan), 3 right (zoom).' },
-      pauseMs: { type: 'number', default: 20, description: 'Pause between steps in ms (default 20).' },
-    },
-    output: { schema: resultSchema, render: renderResult },
-    async execute(args) {
-      const params = args as Record<string, unknown>
-      const toX = numOrUndefined(params.toX)
-      const toY = numOrUndefined(params.toY)
-      const command = 'xdotool drag'
-      if (toX === undefined || toY === undefined) {
-        return toolError('ros2_gui_drag', command, 'INVALID_INPUT', '需要 toX/toY 终点坐标')
+      const action = String(params.action ?? '')
+      if (!deps.gui) return toolError('ros2_gui_interact', `xdotool ${action}`, 'GUI_UNAVAILABLE', 'GUI 管理器未启用')
+      if (action === 'click') {
+        const button = numOrUndefined(params.button) ?? 1
+        const command = `xdotool click ${button}`
+        const result = await deps.gui.click({
+          windowTitle: strOrUndefined(params.windowTitle),
+          x: numOrUndefined(params.x),
+          y: numOrUndefined(params.y),
+          button,
+          count: numOrUndefined(params.count) ?? 1,
+        })
+        if (!result.ok) return toolError('ros2_gui_interact', command, 'INTERACT_FAILED', result.error)
+        return { ok: true, tool: 'ros2_gui_interact', command, data: jsonOf(result.data) }
       }
-      if (!deps.gui) return toolError('ros2_gui_drag', command, 'GUI_UNAVAILABLE', 'GUI 管理器未启用')
-      const result = await deps.gui.drag({
-        windowTitle: strOrUndefined(params.windowTitle),
-        fromX: numOrUndefined(params.fromX),
-        fromY: numOrUndefined(params.fromY),
-        toX,
-        toY,
-        steps: numOrUndefined(params.steps),
-        button: numOrUndefined(params.button),
-        pauseMs: numOrUndefined(params.pauseMs),
-      })
-      if (!result.ok) return toolError('ros2_gui_drag', command, 'INTERACT_FAILED', result.error)
-      const value: ToolResult = { ok: true, tool: 'ros2_gui_drag', command, data: jsonOf(result.data) }
-      return value
-    },
-  })
-}
-
-/** L3: xdotool key combos / typed text (P4 interaction). */
-function makeGuiKeyTool(deps: ToolDeps) {
-  return defineTool({
-    name: 'ros2_gui_key',
-    description: 'Send keyboard input via xdotool to the focused window (optionally activating one by title first): key combos like "ctrl+shift+r" (RViz2 display config reload) or literal text with type. Exactly one of keys/text required. Requires xdotool.',
-    parameters: {
-      windowTitle: { type: 'string', default: '', description: 'Optional window title substring to activate first.' },
-      keys: { type: 'string', default: '', description: 'Key or combo, e.g. ctrl+shift+r; multiple combos space-separated.' },
-      text: { type: 'string', default: '', description: 'Literal text to type (mutually exclusive with keys).' },
-      delayMs: { type: 'number', default: 0, description: 'Delay between keys in ms (default 0).' },
-    },
-    output: { schema: resultSchema, render: renderResult },
-    async execute(args) {
-      const params = args as Record<string, unknown>
-      const keys = strOrUndefined(params.keys)
-      const text = typeof params.text === 'string' && params.text.length > 0 ? params.text : undefined
-      const command = keys ? `xdotool key ${keys}` : text !== undefined ? `xdotool type ${text}` : 'xdotool key/type'
-      if (keys && text !== undefined) {
-        return toolError('ros2_gui_key', command, 'INVALID_INPUT', 'keys 与 text 只能二选一')
+      if (action === 'drag') {
+        const toX = numOrUndefined(params.toX)
+        const toY = numOrUndefined(params.toY)
+        const command = 'xdotool drag'
+        if (toX === undefined || toY === undefined) {
+          return toolError('ros2_gui_interact', command, 'INVALID_INPUT', '需要 toX/toY 终点坐标')
+        }
+        const result = await deps.gui.drag({
+          windowTitle: strOrUndefined(params.windowTitle),
+          fromX: numOrUndefined(params.fromX),
+          fromY: numOrUndefined(params.fromY),
+          toX,
+          toY,
+          steps: numOrUndefined(params.steps),
+          button: numOrUndefined(params.button),
+          pauseMs: numOrUndefined(params.pauseMs),
+        })
+        if (!result.ok) return toolError('ros2_gui_interact', command, 'INTERACT_FAILED', result.error)
+        return { ok: true, tool: 'ros2_gui_interact', command, data: jsonOf(result.data) }
       }
-      if (!keys && text === undefined) {
-        return toolError('ros2_gui_key', command, 'INVALID_INPUT', '需要 keys 或 text')
+      if (action === 'key') {
+        const keys = strOrUndefined(params.keys)
+        const text = typeof params.text === 'string' && params.text.length > 0 ? params.text : undefined
+        const command = keys ? `xdotool key ${keys}` : text !== undefined ? `xdotool type ${text}` : 'xdotool key/type'
+        if (keys && text !== undefined) {
+          return toolError('ros2_gui_interact', command, 'INVALID_INPUT', 'keys 与 text 只能二选一')
+        }
+        if (!keys && text === undefined) {
+          return toolError('ros2_gui_interact', command, 'INVALID_INPUT', '需要 keys 或 text')
+        }
+        const result = await deps.gui.key({
+          windowTitle: strOrUndefined(params.windowTitle),
+          keys,
+          text,
+          delayMs: numOrUndefined(params.delayMs),
+        })
+        if (!result.ok) return toolError('ros2_gui_interact', command, 'INTERACT_FAILED', result.error)
+        return { ok: true, tool: 'ros2_gui_interact', command, data: jsonOf(result.data) }
       }
-      if (!deps.gui) return toolError('ros2_gui_key', command, 'GUI_UNAVAILABLE', 'GUI 管理器未启用')
-      const result = await deps.gui.key({
-        windowTitle: strOrUndefined(params.windowTitle),
-        keys,
-        text,
-        delayMs: numOrUndefined(params.delayMs),
-      })
-      if (!result.ok) return toolError('ros2_gui_key', command, 'INTERACT_FAILED', result.error)
-      const value: ToolResult = { ok: true, tool: 'ros2_gui_key', command, data: jsonOf(result.data) }
-      return value
+      return toolError('ros2_gui_interact', 'xdotool', 'INVALID_INPUT', `action 必须为 click|drag|key，收到 "${action}"`)
     },
   })
 }

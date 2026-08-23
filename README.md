@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![ROS2](https://img.shields.io/badge/ROS2-Jazzy-orange)]()
 ![Node](https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-brightgreen)
-![Tools](https://img.shields.io/badge/tools-41-blue)
+![Tools](https://img.shields.io/badge/tools-39-blue)
 
 **dsh-ros2** gives a DSH agent full robot development / debugging capabilities on any host with ROS2, organized in four capability tiers:
 
@@ -139,11 +139,9 @@ GUI lifecycle + screenshots + multimodal vision ("see first, then move") + xdoto
 | `ros2_screenshot` | Capture the screen or one window to a PNG |
 | `ros2_vision_describe` | Describe an image with the configured multimodal model (Gemini / OpenAI / mock) |
 | `ros2_gui_observe` | Ensure a GUI is running → screenshot → return the multimodal description (the "see it" workflow) |
-| `ros2_gui_click` | xdotool click / scroll: activate a window, move to (x, y) (window-relative or absolute), click (`button` 4/5 = scroll) |
-| `ros2_gui_drag` | xdotool press-drag-release: RViz2 viewpoint control (left-drag orbit, middle-drag pan, right-drag zoom) |
-| `ros2_gui_key` | xdotool keyboard: key combos (e.g. `ctrl+shift+r` reloads the RViz2 display config) or typed text |
+| `ros2_gui_interact` | unified xdotool interaction: `action=click` (click/scroll, `button` 4/5 = scroll), `action=drag` (press-drag-release: RViz2 orbit/pan/zoom), `action=key` (combos like `ctrl+shift+r` or typed text) |
 
-Interaction recipes (model-facing): orbit the RViz2 view with `ros2_gui_drag {windowTitle: "rviz2", button: 1, toX: <dx>, toY: <dy>}`, zoom with `button: 3`, reload a display config with `ros2_gui_key {keys: "ctrl+shift+r"}`. When `wmctrl` cannot enumerate windows (e.g. no window manager on the display), window-relative interaction reports "window not found" — fall back to absolute screen coordinates. Interaction is local to the host session (no approval, same as other L3 tools).
+Interaction recipes (model-facing): orbit the RViz2 view with `ros2_gui_interact {action: "drag", windowTitle: "rviz2", button: 1, toX: <dx>, toY: <dy>}`, zoom with `action: "drag", button: 3`, reload a display config with `ros2_gui_interact {action: "key", keys: "ctrl+shift+r"}`. When `wmctrl` cannot enumerate windows (e.g. no window manager on the display), window-relative interaction reports "window not found" — fall back to absolute screen coordinates. Interaction is local to the host session (no approval, same as other L3 tools).
 
 ### L4 realtime vision (parallel VLM over ROS2, headless image topics)
 

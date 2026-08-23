@@ -4,6 +4,15 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [SemVer](https://semver.org/).
 
+## [0.13.0] - 2026-08-23
+
+### Changed
+
+- **合并 L3 交互工具为 `ros2_gui_interact`**（41 → 39 个工具）：`ros2_gui_click` /
+  `ros2_gui_drag` / `ros2_gui_key` 三个工具合并为一个，用 `action=click|drag|key`
+  区分（参数并集，行为不变：窗口激活/相对坐标、按钮、拖拽 orbit/pan/zoom、
+  组合键/文本）。README/README_CN 交互配方同步更新。
+
 ## [0.12.0] - 2026-08-23
 
 ### Added
