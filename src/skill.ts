@@ -102,9 +102,11 @@ One headless pipeline: **status data → offscreen RViz render → parallel VLM 
      hanging). VLM cannot infer joint angles from a TF-skeleton render; always treat
      \`joint_states\` as authoritative. To learn a robot's zero-pose semantics use
      \`ros2_zero_pose_semantics {action: "analyze"}\`: it publishes all-zero joints,
-     renders the URDF offscreen, asks the VLM what posture that is, then
-     \`{action: "confirm", choice, description}\` records the user-approved semantics
-     to \`~/.dsh-ros2/zero-pose.yaml\` — read that file (or the returned choice) when
+     renders the URDF offscreen, asks the VLM what posture that is (three aspects:
+     arm lateral_raise/hanging, elbow forward/upward, palm/camera-mount up/forward/
+     down), then \`{action: "confirm", arm, elbow, palm}\` (or \`customText\` for a
+     free-text description) records the user-approved semantics to
+     \`~/.dsh-ros2/zero-pose.yaml\` — read that file (or the returned fields) when
      interpreting renders. If a calibration file exists, use it instead of guessing.
 
 2. **Offscreen render (L4, headless).**

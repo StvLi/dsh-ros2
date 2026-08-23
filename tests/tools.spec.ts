@@ -541,12 +541,15 @@ describe('ros2_zero_pose_semantics', () => {
     expect(denied.error?.code).toBe('APPROVAL_DENIED')
     const approval = async () => 'allowed-once'
     const run2 = makeRun(() => ({
-      stdout: JSON.stringify({ ok: true, written: '/tmp/zp.yaml', choice: 'arms_hanging' }),
+      stdout: JSON.stringify({ ok: true, written: '/tmp/zp.yaml', arm: 'lateral_raise', elbow: 'forward', palm: 'up', custom: false }),
     }))
     const t = createRos2Tools({ run: run2, approval }).find((x) => x.name === 'ros2_zero_pose_semantics')
     if (!t) throw new Error('not registered')
-    const out = (await t.execute({ action: 'confirm', choice: 'arms_hanging', out: '/tmp/zp.yaml' }, execStub)) as ToolResult
+    const out = (await t.execute({ action: 'confirm', arm: 'lateral_raise', elbow: 'forward', palm: 'up', out: '/tmp/zp.yaml' }, execStub)) as ToolResult
     expect(out.ok).toBe(true)
-    expect(out.data).toMatchObject({ choice: 'arms_hanging', written: '/tmp/zp.yaml' })
+    expect(out.data).toMatchObject({ arm: 'lateral_raise', elbow: 'forward', palm: 'up', written: '/tmp/zp.yaml' })
+    // custom text path
+    const out2 = (await t.execute({ action: 'confirm', customText: '双臂展开45度', out: '/tmp/zp.yaml' }, execStub)) as ToolResult
+    expect(out2.ok).toBe(true)
   })
 })

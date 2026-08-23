@@ -29,11 +29,20 @@ import sys
 import threading
 import time
 
-CANDIDATES = {
-    "lateral_raise": "双臂侧平举、肘窝向前（zero = lateral raise, elbows forward）",
-    "arms_hanging": "双臂自然下垂（zero = arms hanging down）",
-    "other": "其他（请在描述中说明）",
-}
+# Structured zero-pose semantics: three orthogonal aspects whose combos
+# cover the common descriptions, plus a free-text custom fallback.
+ARMS = {"lateral_raise": "臂侧平举", "hanging": "臂自然下垂"}
+ELBOWS = {"forward": "肘弯向前", "upward": "肘弯向上"}
+PALMS = {"up": "手掌/相机支架向上", "forward": "手掌/相机支架向前", "down": "手掌/相机支架向下"}
+COMBOS = [(a, e, p) for a in ARMS for e in ELBOWS for p in PALMS]  # 12 combos
+
+
+def combo_label(arm, elbow, palm):
+    return f"{ARMS[arm]} + {ELBOWS[elbow]} + {PALMS[palm]}"
+
+
+def candidates_list():
+    return [{"arm": a, "elbow": e, "palm": p, "label": combo_label(a, e, p)} for a, e, p in COMBOS]
 
 
 def ros2(*args, timeout=30):
@@ -162,24 +171,32 @@ def ask_vlm(image_path: str) -> str:
         return f"(VLM unavailable: {e})"
 
 
-def infer_candidate(description: str) -> str:
+def infer_combo(description: str) -> dict:
     d = description.lower()
-    if "lateral" in d or "raise" in d or "horizontal" in d or "侧平举" in d:
-        return "lateral_raise"
-    if "hang" in d or "down" in d and "arm" in d or "下垂" in d:
-        return "arms_hanging"
-    return "other"
+    arm = "lateral_raise" if any(k in d for k in ("lateral", "raise", "horizontal", "out to the side", "侧平举")) else "hanging"
+    elbow = "upward" if any(k in d for k in ("elbow up", "elbows up", "bent up", "肘弯向上", "肘向上")) else "forward"
+    palm = "forward" if any(k in d for k in ("palm forward", "forward-facing", "手掌向前", "朝前")) else "up"
+    if any(k in d for k in ("palm down", "palm facing down", "手掌向下", "朝下")):
+        palm = "down"
+    return {"arm": arm, "elbow": elbow, "palm": palm}
 
 
-def write_config(choice: str, description: str, out: str) -> str:
+def write_config(spec: dict, out: str) -> str:
     os.makedirs(os.path.dirname(out), exist_ok=True)
     lines = [
         "# zero-pose semantics calibration (written by ros2_zero_pose_semantics)",
         "zero_pose_semantics:",
-        f"  choice: {choice}",
-        f"  description: \"{description}\"",
-        "  method: vlm-render-confirm",
+        f"  method: {spec.get('method', 'vlm-render-confirm')}",
     ]
+    if spec.get("custom"):
+        lines.append("  custom: true")
+        lines.append(f"  description: \"{spec['description']}\"")
+    else:
+        lines.append("  custom: false")
+        lines.append(f"  arm: {spec['arm']}    # {ARMS[spec['arm']]}")
+        lines.append(f"  elbow: {spec['elbow']}  # {ELBOWS[spec['elbow']]}")
+        lines.append(f"  palm: {spec['palm']}    # {PALMS[spec['palm']]}")
+        lines.append(f"  description: \"{spec['description']}\"")
     with open(out, "w") as f:
         f.write("\n".join(lines) + "\n")
     return out
@@ -190,22 +207,28 @@ def main():
     ap.add_argument("--action", choices=["analyze", "confirm"], required=True)
     ap.add_argument("--urdf", default="", help="URDF file path for the description publisher (if no live one).")
     ap.add_argument("--duration", type=float, default=8.0, help="Seconds to publish all-zero joints.")
-    ap.add_argument("--choice", default="", help="confirm: lateral_raise | arms_hanging | other")
-    ap.add_argument("--description", default="", help="confirm: description recorded alongside the choice.")
+    ap.add_argument("--arm", default="", choices=["lateral_raise", "hanging"],
+                    help="confirm: arm aspect (lateral_raise | hanging).")
+    ap.add_argument("--elbow", default="", choices=["forward", "upward"],
+                    help="confirm: elbow aspect (forward | upward).")
+    ap.add_argument("--palm", default="", choices=["up", "forward", "down"],
+                    help="confirm: palm/camera-mount aspect (up | forward | down).")
+    ap.add_argument("--custom-text", default="",
+                    help="confirm: free-text custom description (ignores arm/elbow/palm).")
     ap.add_argument("--out", default=os.path.expanduser("~/.dsh-ros2/zero-pose.yaml"), help="confirm: output YAML path.")
     args = ap.parse_args()
 
     if args.action == "analyze":
         ok, note = ensure_rsp(args.urdf)
         if not ok:
-            print(json.dumps({"ok": False, "error": note, "candidates": list(CANDIDATES)}))
+            print(json.dumps({"ok": False, "error": note, "candidates": candidates_list()}))
             return 1
         # verify an offscreen renderer is publishing /rviz/scene
         ok2, out2, _ = ros2("topic", "info", "/rviz/scene")
         if not (ok2 and "Publisher count: 1" in out2):
             print(json.dumps({"ok": False,
                               "error": "no /rviz/scene publisher (start rviz_offscreen_node first)",
-                              "candidates": list(CANDIDATES)}))
+                              "candidates": candidates_list()}))
             return 1
         proc = publish_zero_joints(args.duration, load_joint_names(args.urdf) if args.urdf else [])
         time.sleep(2.0)  # let TF settle at zero
@@ -216,22 +239,29 @@ def main():
         print(json.dumps({
             "ok": bool(image),
             "description": description,
-            "candidate": infer_candidate(description),
-            "candidates": list(CANDIDATES),
+            "inferred": infer_combo(description),
+            "candidates": candidates_list(),
             "image": image,
             "note": "请与使用者确认后调用 action=confirm 记录语义（choice + description）。",
         }, ensure_ascii=False))
         return 0 if image else 2
 
     if args.action == "confirm":
-        choice = args.choice.strip().lower()
-        if choice not in CANDIDATES:
-            print(json.dumps({"ok": False, "error": f"choice 必须为 {list(CANDIDATES)}，收到 '{choice}'"}))
-            return 1
-        path = write_config(choice, args.description or CANDIDATES[choice], args.out)
-        print(json.dumps({"ok": True, "written": path, "choice": choice,
-                          "description": args.description or CANDIDATES[choice],
-                          "candidates": list(CANDIDATES)}))
+        if args.custom_text:
+            spec = {"custom": True, "description": args.custom_text, "method": "vlm-render-confirm"}
+        else:
+            if not (args.arm and args.elbow and args.palm):
+                print(json.dumps({"ok": False, "error": "confirm 需 arm + elbow + palm（或 custom-text 自定义描述）",
+                                  "candidates": candidates_list()}))
+                return 1
+            spec = {
+                "custom": False,
+                "arm": args.arm, "elbow": args.elbow, "palm": args.palm,
+                "description": combo_label(args.arm, args.elbow, args.palm),
+                "method": "vlm-render-confirm",
+            }
+        path = write_config(spec, args.out)
+        print(json.dumps({"ok": True, "written": path, **spec}))
         return 0
 
 

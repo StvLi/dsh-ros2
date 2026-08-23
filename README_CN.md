@@ -126,7 +126,7 @@ ros2_doctor                         # 系统健康报告
 | `ros2_install` | 鱼香ROS一键安装（交互式 PTY 会话） | ROS2 未安装时：`check` 探测（已装/已装未 source/未装）；`start`（审批）拉起安装器；`send`/`status`/`stop` 驱动与观察交互菜单 |
 | `ros2_bag_play` | `ros2 bag play <path> [--topics ...] [--rate X] [--loop] [--start-offset S]` | 回放 rosbag 到其话题（审批门控；会发布到图）；前台运行 `timeoutMs` |
 | `ros2_launch` | `ros2 launch <pkg> <launch_file> [args]` | 以后台任务启动 launch 文件（审批门控；返回 jobId，用 DSH job 控制停止） |
-| `ros2_zero_pose_semantics` | 发零位→离屏渲染→VLM→确认 | 交互式校准零位语义（通用）：`analyze` 渲染全零姿态并让 VLM 描述；`confirm` 把使用者确认的选择（lateral_raise / arms_hanging / other）写入 `~/.dsh-ros2/zero-pose.yaml` 供 skill 使用 |
+| `ros2_zero_pose_semantics` | 发零位→离屏渲染→VLM→确认 | 交互式校准零位语义（通用）：`analyze` 渲染全零姿态并让 VLM 从三维度描述（臂：侧平举/下垂；肘：向前/向上；手掌/相机支架：上/前/下）；`confirm` 记录使用者确认的组合（或 `customText` 自定义文字）到 `~/.dsh-ros2/zero-pose.yaml` 供 skill 使用 |
 | `moveit_move_to_pose` | 标准 moveit_msgs（`/move_action` + `/execute_trajectory`） | 将规划组移动到 SRDF 命名姿态（审批门控；会真实移动机器人）。通用：仅用标准 moveit_msgs 与 SRDF 命名姿态，不绑定具体 MoveIt 包；`planOnly` 仅规划不执行 |
 | `moveit_cartesian` | 标准 moveit_msgs（`/compute_cartesian_path` + `/execute_trajectory`） | 沿笛卡尔路径平移规划组末端 (dx, dy, dz) 米（审批门控）。通用：规划帧与 EE link 取自 SRDF（`virtual_joint` + 组 chain tip），均可覆盖；`frame=ee|world`；长平移分段执行；`planOnly` 仅规划 |
 | `moveit_status` | 探测 move_group 接口 + 采样 `/joint_states` | 运行时状态：在线探测（/move_action、/execute_trajectory、/compute_cartesian_path、controller_manager）+ 当前关节状态 + SRDF 规划帧（只读） |

@@ -4,6 +4,20 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [SemVer](https://semver.org/).
 
+## [0.13.5] - 2026-08-23
+
+### Changed
+
+- **零位语义细化为三维排列组合**（`ros2_zero_pose_semantics`）：
+  - 三维度：臂（lateral_raise 侧平举 / hanging 下垂）、肘（forward 向前 /
+    upward 向上）、手掌/相机支架（up / forward / down）——2×2×3 = **12 种常用
+    组合**，`analyze` 输出全部候选供确认；
+  - `confirm` 记录三维组合（arm+elbow+palm）或 **`customText` 自定义文字描述**
+    （不含组合时兜底）；写入 `~/.dsh-ros2/zero-pose.yaml` 结构化字段；
+  - VLM prompt 改为分别描述三维度，输出推断的三维组合；
+  - skill 引用同步更新（先校准、勿假设；三方面确认或自定义）。
+- 测试：100 例全绿（confirm 三维 + 自定义路径实测写文件验证）。
+
 ## [0.13.4] - 2026-08-23
 
 ### Changed

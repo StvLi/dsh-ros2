@@ -1936,8 +1936,10 @@ function makeZeroPoseSemanticsTool(deps: ToolDeps) {
       action: { type: 'string', enum: ['analyze', 'confirm'], description: 'analyze: VLM-render calibration | confirm: record the user-approved choice.' },
       urdf: { type: 'string', default: '', description: 'URDF file path for the description publisher (if /robot_description_abs is not already live).' },
       duration: { type: 'number', default: 8, description: 'Seconds to publish all-zero joints (analyze).' },
-      choice: { type: 'string', default: '', description: 'confirm: lateral_raise | arms_hanging | other.' },
-      description: { type: 'string', default: '', description: 'confirm: description recorded alongside the choice.' },
+      arm: { type: 'string', default: '', description: 'confirm: arm aspect — lateral_raise (臂侧平举) | hanging (臂自然下垂).' },
+      elbow: { type: 'string', default: '', description: 'confirm: elbow aspect — forward (肘弯向前) | upward (肘弯向上).' },
+      palm: { type: 'string', default: '', description: 'confirm: palm/camera-mount aspect — up | forward | down.' },
+      customText: { type: 'string', default: '', description: 'confirm: free-text custom description (ignores arm/elbow/palm).' },
       out: { type: 'string', default: '', description: 'confirm: output YAML path (default ~/.dsh-ros2/zero-pose.yaml).' },
     },
     output: { schema: resultSchema, render: renderResult },
@@ -1947,7 +1949,7 @@ function makeZeroPoseSemanticsTool(deps: ToolDeps) {
       const command = `ros2_zero_pose_semantics action=${action}`
       const reason = action === 'analyze'
         ? '将发布全零关节角、抓取离屏渲染帧并调用 VLM 分析零位姿态（需 /rviz/scene 与 vlm_node 在线）。'
-        : `将把零位语义（choice=${String(params.choice ?? '')}）写入配置文件（${strOrUndefined(params.out) ?? '~/.dsh-ros2/zero-pose.yaml'}）。`
+        : `将把零位语义（arm=${String(params.arm ?? '')} elbow=${String(params.elbow ?? '')} palm=${String(params.palm ?? '')}${params.customText ? ` custom=${String(params.customText)}` : ''}）写入配置文件（${strOrUndefined(params.out) ?? '~/.dsh-ros2/zero-pose.yaml'}）。`
       const approval = await requestApproval(deps, exec, 'ros2_zero_pose_semantics', reason)
       if (!approval.allowed) return deniedResult('ros2_zero_pose_semantics', command, approval.outcome)
 
@@ -1956,10 +1958,15 @@ function makeZeroPoseSemanticsTool(deps: ToolDeps) {
         if (strOrUndefined(params.urdf)) helperArgs.push('--urdf', strOrUndefined(params.urdf)!)
         helperArgs.push('--duration', String(numOrUndefined(params.duration) ?? 8))
       } else if (action === 'confirm') {
-        const choice = strOrUndefined(params.choice) ?? ''
-        if (!choice) return toolError('ros2_zero_pose_semantics', command, 'MISSING_PARAM', 'confirm 需要 choice（lateral_raise/arms_hanging/other）')
-        helperArgs.push('--choice', choice)
-        if (strOrUndefined(params.description)) helperArgs.push('--description', strOrUndefined(params.description)!)
+        const arm = strOrUndefined(params.arm) ?? ''
+        const elbow = strOrUndefined(params.elbow) ?? ''
+        const palm = strOrUndefined(params.palm) ?? ''
+        const customText = strOrUndefined(params.customText) ?? ''
+        if (!customText && !(arm && elbow && palm)) {
+          return toolError('ros2_zero_pose_semantics', command, 'MISSING_PARAM', 'confirm 需要 arm+elbow+palm（三维组合）或 customText（自定义描述）')
+        }
+        if (customText) helperArgs.push('--custom-text', customText)
+        else helperArgs.push('--arm', arm, '--elbow', elbow, '--palm', palm)
         if (strOrUndefined(params.out)) helperArgs.push('--out', strOrUndefined(params.out)!)
       } else {
         return toolError('ros2_zero_pose_semantics', command, 'BAD_ACTION', `action 必须为 analyze|confirm`)
