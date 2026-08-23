@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![ROS2](https://img.shields.io/badge/ROS2-Jazzy-orange)]()
 ![Node](https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-brightgreen)
-![Tools](https://img.shields.io/badge/tools-37-blue)
+![Tools](https://img.shields.io/badge/tools-40-blue)
 
 **dsh-ros2** 让 DSH 智能体在一台装有 ROS2 的主机上获得完整的机器人开发/调试能力，分为四个能力层：
 
@@ -108,6 +108,7 @@ ros2_doctor                         # 系统健康报告
 | `ros2_tf_echo` | `ros2 topic echo /tf --once` | 两帧间变换 |
 | `ros2_doctor` | `ros2 doctor` | 系统健康报告 |
 | `ros2_bag_info` | `ros2 bag info <path>` | bag 摘要 |
+| `moveit_discover` | 扫描 MoveIt 包 + 解析 SRDF + 探测 move_group | 发现宿主上的 MoveIt2 配置包（任意带 SRDF 的包）、规划组与命名姿态，以及 `/move_action`/`/execute_trajectory`/`/compute_cartesian_path` 是否在线；可直接传 `srdf` 解析指定文件——通用，不绑定具体包 |
 
 ### L2 管理（审批门控）
 
@@ -123,6 +124,7 @@ ros2_doctor                         # 系统健康报告
 | `ros2_jobs_list` | `ctx.jobs.list` | 本智能体的后台任务（只读） |
 | `ros2_job_status` | `ctx.jobs.get` | 按 id 查任务状态（只读） |
 | `ros2_install` | 鱼香ROS一键安装（交互式 PTY 会话） | ROS2 未安装时：`check` 探测（已装/已装未 source/未装）；`start`（审批）拉起安装器；`send`/`status`/`stop` 驱动与观察交互菜单 |
+| `moveit_move_to_pose` | 标准 moveit_msgs（`/move_action` + `/execute_trajectory`） | 将规划组移动到 SRDF 命名姿态（审批门控；会真实移动机器人）。通用：仅用标准 moveit_msgs 与 SRDF 命名姿态，不绑定具体 MoveIt 包；`planOnly` 仅规划不执行 |
 
 ### L3 可视化
 

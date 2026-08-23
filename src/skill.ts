@@ -58,7 +58,21 @@ You have a read-only ROS2 tool set (all commands run as \`ros2\`/\`colcon\`/\`ro
   \`ros2_install {action: "send", session, input: "<menu number>"}\` and watch
   progress with \`ros2_install {action: "status", session}\` (e.g. menu "1" →
   choose the ROS2 distro) until the session reports exited; cancel anytime with
-  \`ros2_install {action: "stop", session}\`.`,
+  \`ros2_install {action: "stop", session}\`.
+
+## MoveIt2 motions (generic, not package-bound)
+
+- To move a robot arm via MoveIt, first run \`moveit_discover\`: it scans any
+  installed MoveIt config package (or accepts \`srdf\` for a direct path), returns
+  the planning **groups** and their **named poses** (from the SRDF), and reports
+  whether the standard interfaces (\`/move_action\`, \`/execute_trajectory\`,
+  \`/compute_cartesian_path\`, controller_manager) are online.
+- To move: \`moveit_move_to_pose {group, pose}\` (approval-gated — it really moves
+  the robot when move_group is online). Pick group/pose from \`moveit_discover\`
+  (e.g. group \`right_arm\`, pose \`home\` / \`ready\` / \`selfie\`). Use
+  \`planOnly: true\` to dry-run the plan without executing. The SRDF is resolved
+  automatically (package scan) or via explicit \`srdf\`/ \`package\` parameters —
+  the tools use only standard moveit_msgs, never a specific MoveIt package.`,
 }
 
 /**

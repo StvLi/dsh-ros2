@@ -4,6 +4,28 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [SemVer](https://semver.org/).
 
+## [0.11.0] - 2026-08-23
+
+### Added
+
+- **MoveIt2 通用接口（第 39/40 个工具，不绑定具体 moveit 包）**——通过**读取
+  moveit 包内容**（SRDF）动态配置可快速调用的接口：
+  - `moveit_discover`（L1 只读）：扫描宿主上任意**带 SRDF 的 MoveIt 配置包**
+    （share/*/config/*.srdf）或直接解析指定 `srdf` 文件，输出规划组（groups）、
+    每组命名姿态（named states），并探测标准 move_group 接口在线状态
+    （/move_action、/execute_trajectory、/compute_cartesian_path、
+    /controller_manager）；
+  - `moveit_move_to_pose`（L2 审批）：将规划组移动到 SRDF 命名姿态——**仅用
+    标准 moveit_msgs**（move_group action + ExecuteTrajectory）+ SRDF 命名姿态，
+    不 import 任何具体 moveit 包；支持 `planOnly` 仅规划、`timeout`、速度缩放。
+- 助手脚本：`scripts/moveit_discover.py`（SRDF 解析 + 接口探测）、
+  `scripts/moveit_move.py`（通用 move_group 客户端）；`moveit_msgs` 为系统
+  Jazzy 标准包，无需 moveit_ws 构建即可发现。
+- 测试：87 例全绿（新增 moveit_discover 解析、move 参数校验/审批 fail-closed/
+  结果解析）。本机 smoke：`moveit_discover --srdf <lite_moveit2 srdf>` 正确输出
+  4 个规划组 + 命名姿态 + 接口在线状态。
+- 文档：README/README_CN 工具表、CHANGELOG。
+
 ## [0.10.0] - 2026-08-21
 
 ### Added

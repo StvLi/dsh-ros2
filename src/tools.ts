@@ -1,5 +1,6 @@
 import { access, mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { execFile } from 'node:child_process'
 import { defineTool, type ParameterSchemaSpec } from '@deepseek-ai/dsh-tools'
 import { spawnJob, type JobHooks, type RosResult, type RunOptions } from './runner.js'
@@ -414,6 +415,10 @@ export function createRos2Tools(deps: ToolDeps) {
     }),
   ]
   tools.push(makeGraphTool(deps))
+  // L1/L2: MoveIt2 generic interfaces (discovery reads any MoveIt package's
+  // SRDF; motion uses only standard moveit_msgs, never a specific package).
+  tools.push(makeMoveitDiscoverTool(deps))
+  tools.push(makeMoveitMoveToPoseTool(deps))
   // L2 management tools (write operations, approval-gated).
   tools.push(makeBuildTool(deps))
   tools.push(makeRosdepInstallTool(deps))
@@ -1335,7 +1340,7 @@ const FISHROS_INSTALL_URL = 'http://fishros.com/install'
 
 /** Path to the PTY session helper (scripts/pty_session.py, shipped with the package). */
 function ptyHelperPath(): string {
-  return path.join(__dirname, '..', 'scripts', 'pty_session.py')
+  return fileURLToPath(new URL('../scripts/pty_session.py', import.meta.url))
 }
 
 /** Default PTY session dir ($TMPDIR/dsh-ros2/pty, same default as the helper). */
@@ -1494,6 +1499,116 @@ function makeRos2InstallTool(deps: ToolDeps) {
         return okResult('ros2_install', command, { session, action, stopped: true })
       }
       return toolError('ros2_install', command, 'BAD_ACTION', `未知 action: ${action}`)
+    },
+  })
+}
+
+// ── MoveIt2 generic interfaces (discovery + motion, not package-bound) ─────────
+
+/** Path to a helper script shipped with the package (scripts/). */
+function scriptPath(name: string): string {
+  return fileURLToPath(new URL(`../scripts/${name}`, import.meta.url))
+}
+
+/**
+ * L1: discover MoveIt2 config packages on the host and their callable
+ * interfaces. Generic: scans any package that ships an SRDF (or takes a
+ * direct --srdf path), parses planning groups + named states, and probes the
+ * standard move_group interfaces (/move_action, /execute_trajectory,
+ * /compute_cartesian_path, controller_manager).
+ */
+function makeMoveitDiscoverTool(deps: ToolDeps) {
+  return defineTool({
+    name: 'moveit_discover',
+    description:
+      'Discover MoveIt2 configuration packages and their callable interfaces (generic, not bound to a specific package). ' +
+      'Scans installed packages that ship an SRDF (config/*.srdf), parses planning groups and named states, and probes whether the standard move_group interfaces (/move_action, /execute_trajectory, /compute_cartesian_path, controller_manager) are online. Pass srdf to parse a specific file directly.',
+    parameters: {
+      package: { type: 'string', default: '', description: 'Restrict discovery to one package name (empty = scan all).' },
+      srdf: { type: 'string', default: '', description: 'Parse a specific SRDF file path directly (no package scan).' },
+    },
+    output: { schema: resultSchema, render: renderResult },
+    async execute(args) {
+      const params = args as Record<string, unknown>
+      const pkg = strOrUndefined(params.package) ?? ''
+      const srdf = strOrUndefined(params.srdf) ?? ''
+      const helperArgs = [scriptPath('moveit_discover.py')]
+      if (pkg) helperArgs.push('--package', pkg)
+      if (srdf) helperArgs.push('--srdf', srdf)
+      const command = `python3 ${helperArgs.join(' ')}`
+      const res = await deps.run('python3', helperArgs, { timeoutMs: 90000 })
+      if (!res.ok) {
+        return toolError('moveit_discover', command, res.error ?? 'COMMAND_FAILED',
+          res.stderr.trim() || `exit ${res.exitCode ?? 'unknown'}（需要 ros2 环境/rosSetup）`)
+      }
+      const parsed = parseJsonOrRaw(res.stdout)
+      return okResult('moveit_discover', command, parsed)
+    },
+  })
+}
+
+/**
+ * L2: move a MoveIt planning group to a named SRDF pose (approval-gated).
+ * Uses only standard moveit_msgs (/move_action + /execute_trajectory) and the
+ * SRDF named state — generic, never bound to a specific MoveIt package.
+ */
+function makeMoveitMoveToPoseTool(deps: ToolDeps) {
+  return defineTool({
+    name: 'moveit_move_to_pose',
+    description:
+      'Move a MoveIt planning group to a named SRDF pose (approval-gated; moves the real robot when move_group is online). ' +
+      'Generic: uses only standard moveit_msgs (move_group /move_action + /execute_trajectory) and an SRDF named state, never a specific MoveIt package. ' +
+      'Discover groups and poses first with moveit_discover. plan_only plans without executing.',
+    parameters: {
+      group: { type: 'string', description: 'MoveIt planning group name (e.g. right_arm, from moveit_discover).' },
+      pose: { type: 'string', description: 'SRDF named pose for the group (e.g. home, ready, selfie, from moveit_discover).' },
+      srdf: { type: 'string', default: '', description: 'SRDF file path (default: discovered automatically via package scan).' },
+      package: { type: 'string', default: '', description: 'MoveIt config package name to load the SRDF from (fallback when srdf empty).' },
+      planOnly: { type: 'boolean', default: false, description: 'Plan only, do not execute.' },
+      timeoutMs: { type: 'number', default: 90000, description: 'Action timeout in ms.' },
+    },
+    output: { schema: resultSchema, render: renderResult },
+    async execute(args, exec) {
+      const params = args as Record<string, unknown>
+      const group = strOrUndefined(params.group) ?? ''
+      const pose = strOrUndefined(params.pose) ?? ''
+      if (!group || !pose) {
+        return toolError('moveit_move_to_pose', 'moveit_move_to_pose', 'MISSING_PARAM', 'group 与 pose 必填（先用 moveit_discover 查询）')
+      }
+      // Resolve SRDF: explicit path > package scan > auto
+      const srdf = strOrUndefined(params.srdf) ?? ''
+      const pkg = strOrUndefined(params.package) ?? ''
+      let srdfResolved = srdf
+      if (!srdfResolved) {
+        const scan = await deps.run('python3', [scriptPath('moveit_discover.py'), ...(pkg ? ['--package', pkg] : [])], { timeoutMs: 90000 })
+        const info = scan.ok ? (parseJsonOrRaw(scan.stdout) as { packages?: { package: string; srdf: string }[] }) : { packages: [] }
+        const hit = (info.packages ?? []).find((p) => !pkg || p.package === pkg)
+        if (hit) srdfResolved = hit.srdf
+      }
+      if (!srdfResolved) {
+        return toolError('moveit_move_to_pose', 'moveit_move_to_pose', 'SRDF_NOT_FOUND',
+          '未找到 SRDF（请安装/构建 moveit 配置包，或显式传 srdf 路径）')
+      }
+      const command = `moveit_move_to_pose group=${group} pose=${pose}${params.planOnly ? ' (plan-only)' : ''}`
+      const approval = await requestApproval(deps, exec, 'moveit_move_to_pose',
+        `将调用 move_group 规划并${params.planOnly ? '（仅规划）' : '执行'}：规划组 ${group} → 命名姿态 ${pose}（SRDF: ${srdfResolved}）。${params.planOnly ? '' : '将真实移动机器人。'}`)
+      if (!approval.allowed) return deniedResult('moveit_move_to_pose', command, approval.outcome)
+
+      const helperArgs = [
+        scriptPath('moveit_move.py'),
+        '--srdf', srdfResolved,
+        '--group', group,
+        '--pose', pose,
+        ...(params.planOnly ? ['--plan-only'] : []),
+        '--timeout', String(Math.max(10, Math.floor(numOrUndefined(params.timeoutMs) ?? 90000) / 1000)),
+      ]
+      const res = await deps.run('python3', helperArgs, { timeoutMs: Math.max(30000, numOrUndefined(params.timeoutMs) ?? 90000) + 10000 })
+      if (!res.ok && res.stdout.trim().length === 0) {
+        return toolError('moveit_move_to_pose', command, res.error ?? 'COMMAND_FAILED',
+          res.stderr.trim() || `exit ${res.exitCode ?? 'unknown'}`)
+      }
+      const data = parseJsonOrRaw(res.stdout)
+      return okResult('moveit_move_to_pose', command, data)
     },
   })
 }

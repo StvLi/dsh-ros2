@@ -280,7 +280,9 @@ describe('tool inventory', () => {
     expect(names).toContain('ros2_vision_topics')
     expect(names).toContain('ros2_vision_analyze')
     expect(names).toContain('ros2_install')
-    expect(names).toHaveLength(38)
+    expect(names).toContain('moveit_discover')
+    expect(names).toContain('moveit_move_to_pose')
+    expect(names).toHaveLength(40)
   })
 })
 
@@ -343,4 +345,51 @@ describe('ros2_install interactive flow (mock installer, no network)', () => {
 
     await t.execute({ action: 'stop', session }, execStub)
   }, 15000)
+})
+
+describe('moveit_discover / moveit_move_to_pose', () => {
+  it('moveit_discover parses the helper JSON', async () => {
+    const run = makeRun(() => ({
+      stdout: JSON.stringify({
+        srdf_given: '/x.srdf',
+        groups: { right_arm: { type: '', joints: [] } },
+        named_states: { right_arm: { home: { a: 0.0 } } },
+        online: { move_action: false, execute_trajectory: false, compute_cartesian_path: false, controller_manager: true },
+      }),
+    }))
+    const out = await call('moveit_discover', run, { srdf: '/x.srdf' })
+    expect(out.ok).toBe(true)
+    expect(out.data).toMatchObject({ srdf_given: '/x.srdf' })
+    expect((out.data as { groups: Record<string, unknown> }).groups).toHaveProperty('right_arm')
+  })
+
+  it('moveit_move_to_pose requires group and pose', async () => {
+    const run = makeRun(() => ({ stdout: '' }))
+    const out = await call('moveit_move_to_pose', run, { pose: 'home' })
+    expect(out.ok).toBe(false)
+    expect(out.error?.code).toBe('MISSING_PARAM')
+  })
+
+  it('moveit_move_to_pose fails closed without approval', async () => {
+    const run = makeRun(() => ({ stdout: '' }))
+    const out = await call('moveit_move_to_pose', run, { group: 'right_arm', pose: 'home', srdf: '/x.srdf' })
+    expect(out.ok).toBe(false)
+    expect(out.error?.code).toBe('APPROVAL_DENIED')
+  })
+
+  it('moveit_move_to_pose parses helper result with approval + srdf', async () => {
+    const run = makeRun(() => ({
+      stdout: JSON.stringify({ ok: true, planned: true, planning_time: 0.4, executed: true, error_code: 1 }),
+    }))
+    const approval = async () => 'allowed-once'
+    const toolsList = createRos2Tools({ run, approval })
+    const t = toolsList.find((x) => x.name === 'moveit_move_to_pose')
+    if (!t) throw new Error('moveit_move_to_pose not registered')
+    const out = (await t.execute(
+      { group: 'right_arm', pose: 'home', srdf: '/x.srdf', planOnly: false },
+      execStub,
+    )) as ToolResult
+    expect(out.ok).toBe(true)
+    expect(out.data).toMatchObject({ ok: true, planned: true, executed: true })
+  })
 })
