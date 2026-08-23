@@ -4,6 +4,53 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [SemVer](https://semver.org/).
 
+## [0.14.0] - 2026-08-23
+
+### Added
+
+- **通用实时安全框架（50 工具）**——分层防御 + 事件驱动慢层，接口契约见
+  `docs/safety-handover.md`（本体适配交接文档，职能边界：通用框架/接口归本仓库，
+  本体数据源/方案/算法归下游 agent）：
+  - **`safety/` ROS2 包（`dsh_ros2_safety`，与 `vlm/` 同模式构建）**：
+    - 接口：`msg/SafetyState`、`msg/SafetyEvent`、`srv/GetSafetyState`、
+      `srv/Unlock`、`srv/SetLock`；
+    - `scripts/safety_core.py`：**纯逻辑无 rclpy**——锁存状态机（NORMAL/LOCKED，
+      条件消失不自动恢复，仅人工解锁）、motion 检查器（tracking_error/stall +
+      M-of-K 迟滞，单帧噪声不锁）、feedback_loss（关节反馈静默）、watchdog
+      （critical 掉线即锁 / observed 仅 WARNING 不锁，避免非关键进程拖垮整机）、
+      torque 检查器（突变 + 持续超限，无反馈时自动禁用）、取证环形缓冲（触发落盘）；
+      `--selftest` 跑 12 个故障注入场景；
+    - `scripts/safety_monitor`：rclpy 节点——控制频率定时器（非阻塞、响应 ≤100ms）、
+      订阅关节/可选指令/力矩流、慢速 watchdog 扫描（`ros2 node list` + 话题 echo）、
+      发布 `/safety/state`（transient-local 锁存）/`/safety/heartbeat`/
+      `/safety/lock_active`、三个服务；
+    - `scripts/safety_vlm_arbitrate`：**固定格式化**安全裁决（缺省 prompt 见
+      handover §5，槽位由脚本填充、LLM 不参与拼装）+ 既有 `/vlm/describe` 网关，
+      输出 `{verdict: safe|unsafe|uncertain, reason, evidence}`，非 safe 一律人工裁决。
+  - **profile `safety` 段**（`robot_profile.py`）：register 自动写入
+    （URDF 限位派生每关节 max_velocity/abs_limit）、`safety show/set` 子命令
+    （点路径更新 + schema 校验）；阈值/话题/名单/锁动作全部可注册可修改（L2 审批）。
+  - **工具集成（+5，共 50）**：
+    - `robot_safety_start`（L2）：按 profile 后台拉起监视器；
+    - `robot_safety_state`（L1）：读锁存状态（监视器离线时明示）；
+    - `robot_safety_arbitrate`：VLM 语义仲裁（任务方案大改 / 2/3 异常后拉起），
+      非 safe 返回警告提示人工裁决；
+    - `robot_safety_lock` / `robot_safety_unlock`（L2 人工门）：显式锁存/解锁，
+      恢复流程 解锁→回 home→恢复；
+    - `moveit_move` 执行前查锁：LOCKED 恒拒绝（`SAFETY_LOCKED`）；监视器失联时
+      `safetyStrict: 'reject'`（fail-closed）拒绝 / `'warn'`（默认，兼容）放行并提示；
+    - `robot_register` 成功后自动拉起 safety_monitor（`startSafety: false` 可关）。
+  - **测试**：109 例全绿（+13：安全门拒绝/警告/fail-closed、状态解析、启动任务、
+    人工门服务、VLM 裁决映射、register 自动拉起）；`safety_core --selftest` 12 场景；
+    实机 ROS2 链路验证（发布→NORMAL→停发→LOCKED(feedback_loss)→解锁→恢复，
+    取证落盘）。
+  - 新增配置 `safetyStrict: 'warn' | 'reject'`（默认 warn，生产建议 reject）。
+
+### Changed
+
+- 工具数 45 → 50；测试 96 → 109；README/README_CN 同步安全章节（双语）；
+  `package.json` files 包含 `safety/` 包。
+
 ## [0.13.9] - 2026-08-23
 
 ### Changed

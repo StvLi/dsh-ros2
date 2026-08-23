@@ -35,6 +35,13 @@ export const Config = z.object({
     model: z.string().default(''),
     baseUrl: z.string().default(''),
   }).default({ provider: 'mock', apiKey: '', model: '', baseUrl: '' }),
+  /**
+   * Tool-layer safety posture when the safety_monitor is unreachable:
+   * 'warn' (default, backward compatible) proceeds with a warning;
+   * 'reject' fails closed. A LOCKED /safety/state always rejects motion
+   * tools in both modes (docs/safety-handover.md). Normalized in apply().
+   */
+  safetyStrict: z.string().default('warn'),
 })
 
 export interface Ros2Config {
@@ -47,4 +54,5 @@ export interface Ros2Config {
   screenshotDir: string
   screenshotCommand: string
   vision: { provider: string; apiKey: string; model: string; baseUrl: string }
+  safetyStrict: 'warn' | 'reject'
 }

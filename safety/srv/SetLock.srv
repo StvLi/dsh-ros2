@@ -1,0 +1,7 @@
+# Human-gated explicit lock (semantic layer / human judgment). The tool
+# layer performs the L2 approval BEFORE calling this service.
+string cause        # preset cause (semantic_unsafe / custom)
+string detail
+---
+bool accepted
+string message

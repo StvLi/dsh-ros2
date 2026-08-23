@@ -1,0 +1,151 @@
+#!/usr/bin/env python3
+"""safety_vlm_arbitrate — fixed-format VLM safety arbitration for dsh-ros2.
+
+Deterministically formats a safety prompt (default template from
+docs/safety-handover.md §5; the slots are filled by THIS script — no LLM
+participates in prompt assembly), sends it together with a fresh offscreen
+render frame to the existing /vlm/describe gateway, and prints
+{verdict, reason, evidence}.
+
+Any non-safe verdict (unsafe | uncertain) MUST escalate to a human — the
+tool layer `robot_safety_arbitrate` enforces that.
+
+Usage (built package, workspace sourced):
+
+    ros2 run dsh_ros2_safety safety_vlm_arbitrate \
+        --cause torque_spike \
+        --task-context '{"task": "pick A to B"}' \
+        --joints '{"left_shoulder_pitch": 0.1}' \
+        --frame /tmp/frame.jpg \
+        [--prompt 'raw prompt override (must keep the JSON contract)']
+"""
+
+import argparse
+import json
+import sys
+
+import rclpy
+from rclpy.node import Node
+
+from dsh_ros2_vlm.srv import VlmDescribe
+
+# Default arbitration prompt — the minimal professional contract. It is
+# configurable per robot via profile `safety.semantic.prompt`; if you
+# override it, keep the JSON output contract and the "uncertain => unsafe"
+# rule (docs/safety-handover.md §5).
+DEFAULT_PROMPT = """你是机器人安全裁决员。请基于以下信息判断机器人当前是否处于危险状态，需要立即停机或人工干预：
+
+- 任务上下文：{task_context}
+- 触发原因：{trigger_cause}
+- 机器人当前位形（关节角/末端位姿）：{joint_state}
+- 最新离屏渲染画面：<附带图像>
+
+重点核查：
+1. 是否即将发生或正在发生碰撞（与障碍物、人员或机器人自身）；
+2. 机械臂是否处于失稳、奇异或过伸等危险姿态；
+3. 画面中是否出现任务规划未预期的变化（新障碍、人员进入、物体被移动等）。
+
+只输出 JSON，不要任何其他文字：
+{{"verdict": "safe" | "unsafe" | "uncertain", "reason": "一句话原因", "evidence": "画面中支撑判断的依据"}}
+
+规则：verdict 为 uncertain 时一律按 unsafe 处理。"""
+
+CAUSE_LABELS = {
+    "plan_change": "任务方案整体变更",
+    "tracking_error": "轨迹跟踪偏差超限",
+    "stall": "堵转（有指令无运动）",
+    "feedback_loss": "关节反馈丢失",
+    "watchdog_critical": "关键节点/话题掉线",
+    "watchdog_observed": "非关键节点掉线（仅提示）",
+    "torque_spike": "力矩突变",
+    "torque_overload": "力矩持续超限",
+    "semantic_unsafe": "VLM 语义复核判定危险",
+}
+
+
+def build_prompt(task_context: str, cause: str, joints: str, template: str) -> str:
+    """Deterministic slot filling — fixed script, no LLM in the assembly."""
+    label = CAUSE_LABELS.get(cause, cause or "未知")
+    return template.format(
+        task_context=task_context or "（无）",
+        trigger_cause=label,
+        joint_state=joints or "（无）",
+    )
+
+
+def extract_json(text: str) -> dict:
+    """Pull the first JSON object out of the model reply (models sometimes
+    wrap it in prose)."""
+    start = text.find("{")
+    end = text.rfind("}")
+    if start < 0 or end <= start:
+        raise ValueError("no JSON object in reply: {}".format(text[:200]))
+    return json.loads(text[start:end + 1])
+
+
+class Arbitrator(Node):
+    def __init__(self, cause: str, task_context: str, joints: str,
+                 frame: str, prompt_template: str, model: str):
+        super().__init__("safety_vlm_arbitrate")
+        self.prompt = build_prompt(task_context, cause, joints, prompt_template)
+        self.frame = frame
+        self.model = model
+
+    def run(self) -> dict:
+        client = self.create_client(VlmDescribe, "/vlm/describe")
+        if not client.wait_for_service(timeout_sec=10.0):
+            return {"ok": False, "error": "/vlm/describe not available (start vlm_node)"}
+        req = VlmDescribe.Request()
+        req.image_path = self.frame
+        req.image_bytes_b64 = ""
+        req.prompt = self.prompt
+        req.model = self.model
+        future = client.call_async(req)
+        rclpy.spin_until_future_complete(self, future, timeout_sec=90.0)
+        if not future.done():
+            return {"ok": False, "error": "vlm call timed out"}
+        resp = future.result()
+        if not resp.success:
+            return {"ok": False, "error": resp.error or "vlm call failed"}
+        try:
+            parsed = extract_json(resp.description)
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": "unparseable verdict: {}".format(e),
+                    "raw": resp.description[:500]}
+        verdict = str(parsed.get("verdict", "uncertain")).lower()
+        if verdict not in ("safe", "unsafe", "uncertain"):
+            verdict = "uncertain"
+        return {
+            "ok": True,
+            "verdict": verdict,
+            "reason": parsed.get("reason", ""),
+            "evidence": parsed.get("evidence", ""),
+            "non_safe": verdict != "safe",
+            "prompt": self.prompt,
+            "elapsed_ms": round(resp.elapsed_ms, 1),
+        }
+
+
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(description="dsh-ros2 safety VLM arbitration")
+    ap.add_argument("--cause", default="", help="preset trigger cause (docs/safety-handover.md §4.7)")
+    ap.add_argument("--task-context", default="", help="task context JSON string")
+    ap.add_argument("--joints", default="", help="joint state JSON string")
+    ap.add_argument("--frame", default="", help="fresh offscreen render frame path")
+    ap.add_argument("--prompt", default="", help="prompt template override (raw text)")
+    ap.add_argument("--model", default="", help="VLM model override (default: vlm_node model)")
+    args = ap.parse_args(argv)
+
+    template = args.prompt if args.prompt.strip() else DEFAULT_PROMPT
+    rclpy.init()
+    node = Arbitrator(args.cause, args.task_context, args.joints,
+                      args.frame, template, args.model)
+    out = node.run()
+    node.destroy_node()
+    rclpy.shutdown()
+    print(json.dumps(out, ensure_ascii=False))
+    return 0 if out.get("ok") else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

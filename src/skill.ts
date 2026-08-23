@@ -167,14 +167,20 @@ structured profile so every later call is instant (no re-discovery).
      up/forward/down, or a customText description) and confirm it.
 3. **Register**: \`robot_register {name, urdf, srdf?, description?}\`
    (approval-gated; writes \`~/.dsh-ros2/robots/<name>.yaml\`) — it auto-includes
-   the zero-pose calibration file if present. Confirm the returned summary
-   (links/joints/cameras/groups counts) with the user.
+   the zero-pose calibration file if present, writes a generic \`safety\` section
+   (URDF-derived velocity/effort limits, see docs/safety-handover.md), and
+   auto-launches the safety_monitor (pass \`startSafety: false\` to skip).
+   Confirm the returned summary (links/joints/cameras/groups counts) with the user.
 4. **Topology baseline**: \`robot_topology {robot, action: "snapshot"}\`
    (approval) records the aggregate layer — current node/topic/service lists —
    so the profile is never "zero knowledge" about the comms graph without
    dumping its full verbosity.
-5. **Verify**: \`robot_load {name}\` returns the structured profile; sanity-check
-   TF root, camera list, groups, and the topology snapshot with the user.
+5. **Safety tuning** (optional but recommended): \`robot_profile.py safety set <key> <json>\`
+   calibrates the \`safety\` section (feedback topics, thresholds, watchdog
+   critical/observed lists, lock action) for the actual robot body.
+6. **Verify**: \`robot_load {name}\` returns the structured profile; sanity-check
+   TF root, camera list, groups, the topology snapshot, and \`robot_safety_state\`
+   with the user.
 
 ## Notes
 

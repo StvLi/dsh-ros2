@@ -287,7 +287,13 @@ describe('tool inventory', () => {
     expect(names).toContain('robot_register')
     expect(names).toContain('robot_load')
     expect(names).toContain('robot_topology')
-    expect(names).toHaveLength(45)
+    // safety framework tools
+    expect(names).toContain('robot_safety_start')
+    expect(names).toContain('robot_safety_state')
+    expect(names).toContain('robot_safety_arbitrate')
+    expect(names).toContain('robot_safety_lock')
+    expect(names).toContain('robot_safety_unlock')
+    expect(names).toHaveLength(50)
   })
 })
 
@@ -510,5 +516,158 @@ describe('moveit_discover / moveit_status / moveit_move', () => {
     const traj = (await tt.execute({ mode: 'trajectory', group: 'right_arm', trajectory: '/x.json' }, execStub)) as ToolResult
     expect(traj.ok).toBe(true)
     expect((traj.data as { mode: string }).mode).toBe('trajectory')
+  })
+})
+
+// ── safety framework: tool-layer gate + start/state/arbitrate/lock/unlock ──
+
+describe('safety framework tools', () => {
+  const lockedEcho = 'state: LOCKED\nseverity: CRITICAL\ncause: torque_spike\ndetail: 关节 a 力矩突变\n'
+
+  it('robot_safety_state parses NORMAL', async () => {
+    const run = makeRun(() => ({ stdout: 'state: NORMAL\nseverity: OK\ncause: \ndetail: \n' }))
+    const out = await call('robot_safety_state', run, {})
+    expect(out.ok).toBe(true)
+    expect(out.data).toMatchObject({ monitor_running: true, state: 'NORMAL' })
+  })
+
+  it('robot_safety_state reports monitor down', async () => {
+    const run = makeRun(() => ({ stdout: '' }))
+    const out = await call('robot_safety_state', run, {})
+    expect(out.ok).toBe(true)
+    expect(out.data).toMatchObject({ monitor_running: false, state: 'UNKNOWN' })
+  })
+
+  it('moveit_move rejects when /safety/state is LOCKED', async () => {
+    const run = makeRun((bin, args) => {
+      if (bin === 'ros2' && args.includes('/safety/state')) return { stdout: lockedEcho }
+      return { stdout: JSON.stringify({ ok: true, executed: true, mode: 'joint_abs' }) }
+    })
+    const approval = async () => 'allowed-once'
+    const t = createRos2Tools({ run, approval }).find((x) => x.name === 'moveit_move')
+    if (!t) throw new Error('not registered')
+    const out = (await t.execute({ mode: 'joint_abs', group: 'right_arm', joints: 'a:=0.1', srdf: '/x.srdf' }, execStub)) as ToolResult
+    expect(out.ok).toBe(false)
+    expect(out.error?.code).toBe('SAFETY_LOCKED')
+  })
+
+  it('moveit_move warns (not rejects) when monitor is down in warn mode', async () => {
+    const run = makeRun((bin, args) => {
+      if (bin === 'ros2' && args.includes('/safety/state')) return { stdout: '' }
+      return { stdout: JSON.stringify({ ok: true, executed: true, mode: 'joint_abs' }) }
+    })
+    const approval = async () => 'allowed-once'
+    const t = createRos2Tools({ run, approval }).find((x) => x.name === 'moveit_move')
+    if (!t) throw new Error('not registered')
+    const out = (await t.execute({ mode: 'joint_abs', group: 'right_arm', joints: 'a:=0.1', srdf: '/x.srdf' }, execStub)) as ToolResult
+    expect(out.ok).toBe(true)
+    expect(out.warnings?.[0]).toContain('warn')
+  })
+
+  it('moveit_move fails closed in reject mode when monitor is down', async () => {
+    const run = makeRun((bin, args) => {
+      if (bin === 'ros2' && args.includes('/safety/state')) return { stdout: '' }
+      return { stdout: JSON.stringify({ ok: true, executed: true, mode: 'joint_abs' }) }
+    })
+    const approval = async () => 'allowed-once'
+    const t = createRos2Tools({ run, approval, safetyStrict: 'reject' }).find((x) => x.name === 'moveit_move')
+    if (!t) throw new Error('not registered')
+    const out = (await t.execute({ mode: 'joint_abs', group: 'right_arm', joints: 'a:=0.1', srdf: '/x.srdf' }, execStub)) as ToolResult
+    expect(out.ok).toBe(false)
+    expect(out.error?.code).toBe('SAFETY_MONITOR_DOWN')
+  })
+
+  it('moveit_move planOnly skips the safety gate', async () => {
+    const run = makeRun(() => ({ stdout: JSON.stringify({ ok: true, planned: true, executed: false, mode: 'joint_abs' }) }))
+    const approval = async () => 'allowed-once'
+    const t = createRos2Tools({ run, approval, safetyStrict: 'reject' }).find((x) => x.name === 'moveit_move')
+    if (!t) throw new Error('not registered')
+    const out = (await t.execute({ mode: 'joint_abs', group: 'right_arm', joints: 'a:=0.1', srdf: '/x.srdf', planOnly: true }, execStub)) as ToolResult
+    expect(out.ok).toBe(true)
+  })
+
+  it('robot_safety_start launches the monitor as a background job', async () => {
+    const run = makeRun((bin, args) => {
+      if (bin === 'python3' && args.some((a) => String(a).includes('robot_profile.py'))) {
+        return { stdout: JSON.stringify({ ok: true, profile_path: '/tmp/testbot.yaml' }) }
+      }
+      return { stdout: '' }
+    })
+    const started: string[] = []
+    const jobs = {
+      start(spec: { label: string }) { started.push(spec.label); return 'job-1' },
+      list: () => [],
+      get: () => undefined,
+    }
+    const approval = async () => 'allowed-once'
+    const t = createRos2Tools({ run, approval, jobs }).find((x) => x.name === 'robot_safety_start')
+    if (!t) throw new Error('not registered')
+    const out = (await t.execute({ robot: 'testbot' }, execStub)) as ToolResult
+    expect(out.ok).toBe(true)
+    expect(out.data).toMatchObject({ jobId: 'job-1', status: 'started' })
+    expect(started).toContain('safety_monitor/testbot')
+  })
+
+  it('robot_safety_lock / unlock call the services with approval', async () => {
+    const run = makeRun(() => ({ stdout: "dsh_ros2_safety.srv.Unlock_Response(accepted=True, message='已解锁，回到 NORMAL')" }))
+    const approval = async () => 'allowed-once'
+    const t = createRos2Tools({ run, approval }).find((x) => x.name === 'robot_safety_unlock')
+    if (!t) throw new Error('not registered')
+    const out = (await t.execute({ requestId: 'r1' }, execStub)) as ToolResult
+    expect(out.ok).toBe(true)
+    expect(out.data).toMatchObject({ accepted: true })
+  })
+
+  it('robot_safety_lock fails closed without approval', async () => {
+    const run = makeRun(() => ({ stdout: '' }))
+    const out = await call('robot_safety_lock', run, {})
+    expect(out.error?.code).toBe('APPROVAL_DENIED')
+  })
+
+  it('robot_safety_arbitrate parses a safe verdict', async () => {
+    const run = makeRun(() => ({ stdout: JSON.stringify({ ok: true, verdict: 'safe', reason: '无碰撞风险', evidence: '画面空旷', non_safe: false }) }))
+    const out = await call('robot_safety_arbitrate', run, { cause: 'plan_change' })
+    expect(out.ok).toBe(true)
+    expect(out.data).toMatchObject({ verdict: 'safe' })
+    expect(out.warnings).toBeUndefined()
+  })
+
+  it('robot_safety_arbitrate flags non-safe verdicts for human arbitration', async () => {
+    const run = makeRun(() => ({ stdout: JSON.stringify({ ok: true, verdict: 'uncertain', reason: '画面模糊', evidence: '', non_safe: true }) }))
+    const out = await call('robot_safety_arbitrate', run, { cause: 'torque_spike' })
+    expect(out.ok).toBe(true)
+    expect(out.warnings?.[0]).toContain('非 safe')
+  })
+
+  it('robot_register auto-starts the safety monitor when jobs available', async () => {
+    const run = makeRun((bin, args) => {
+      if (bin === 'python3' && args.some((a) => String(a).includes('robot_profile.py'))) {
+        return { stdout: JSON.stringify({ ok: true, written: '/tmp/newbot.yaml', robot: { safety: { enabled: true } } }) }
+      }
+      return { stdout: '' }
+    })
+    const started: string[] = []
+    const jobs = {
+      start(spec: { label: string }) { started.push(spec.label); return 'job-9' },
+      list: () => [],
+      get: () => undefined,
+    }
+    const approval = async () => 'allowed-once'
+    const t = createRos2Tools({ run, approval, jobs }).find((x) => x.name === 'robot_register')
+    if (!t) throw new Error('not registered')
+    const out = (await t.execute({ name: 'newbot', urdf: '/x.urdf' }, execStub)) as ToolResult
+    expect(out.ok).toBe(true)
+    expect(out.data).toMatchObject({ safety_monitor: { jobId: 'job-9', status: 'started' } })
+    expect(started).toContain('safety_monitor/newbot')
+  })
+
+  it('robot_register skips auto-start when startSafety=false', async () => {
+    const run = makeRun(() => ({ stdout: JSON.stringify({ ok: true, written: '/tmp/newbot.yaml', robot: { safety: { enabled: true } } }) }))
+    const approval = async () => 'allowed-once'
+    const t = createRos2Tools({ run, approval }).find((x) => x.name === 'robot_register')
+    if (!t) throw new Error('not registered')
+    const out = (await t.execute({ name: 'newbot', urdf: '/x.urdf', startSafety: false }, execStub)) as ToolResult
+    expect(out.ok).toBe(true)
+    expect(out.data).toMatchObject({ safety_monitor: { status: 'skipped' } })
   })
 })

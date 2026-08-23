@@ -81,6 +81,159 @@ def parse_urdf(urdf_xml: str) -> dict:
     return {"links": links, "joints": joints}
 
 
+def parse_urdf_limits(urdf_xml: str) -> dict:
+    """Per-joint velocity/effort limits from the URDF (seed values for the
+    `safety` section; downstream may recalibrate)."""
+    root = ET.fromstring(urdf_xml)
+    limits = {"max_velocity": {}, "max_effort": {}}
+    for j in root.findall("joint"):
+        name = j.get("name")
+        lim = j.find("limit")
+        if not name or lim is None:
+            continue
+        try:
+            vel = float(lim.get("velocity"))
+            if vel > 0:
+                limits["max_velocity"][name] = vel
+        except (TypeError, ValueError):
+            pass
+        try:
+            eff = float(lim.get("effort"))
+            if eff > 0:
+                limits["max_effort"][name] = eff
+        except (TypeError, ValueError):
+            pass
+    return limits
+
+
+def default_safety(limits: dict) -> dict:
+    """Generic minimal `safety` section written at registration. All values
+    are overridable afterwards via `safety set` (L2 approval at tool layer).
+    See docs/safety-handover.md §4.1 for the full schema."""
+    return {
+        "enabled": True,
+        "control_frequency": 200,
+        "checkers": ["motion", "feedback_loss", "watchdog"],
+        "lock_action": "zero_velocity",  # minimal; robots may register damping/compliant
+        "lock_topic": "/safety/lock_active",
+        "feedback": {
+            "joint_state_topic": "/joint_states",
+            "torque_topic": "",          # empty = torque disabled until configured
+            "timeout_ms": 100,
+        },
+        "motion": {
+            "command_topic": "",         # empty = tracking/stall disabled (no command stream)
+            "tracking_error_rad": 0.05,
+            "stall": {"window_ms": 200, "min_cmd_vel": 0.02, "max_actual_vel": 0.005},
+            "hysteresis": {"min_frames": 3, "window": 5},
+            "max_velocity": limits.get("max_velocity", {}),
+            "max_acceleration": {},
+        },
+        "torque": {
+            "enabled": True,
+            "abs_limit": limits.get("max_effort", {}),
+            "dtau_limit": {},
+            "overload_ms": 500,
+            "feedforward_topic": "",     # 预留：计算力矩前馈（下游接入）
+        },
+        "watchdog": {
+            "critical_topics": [],       # 例: [{"topic": "/controller/status", "timeout_ms": 1000}]
+            "observed_topics": [],       # 非关键：掉线仅 WARNING，不锁
+            "critical_nodes": [],        # 例: ["controller_manager"]
+            "observed_nodes": [],
+            "node_scan_sec": 5.0,
+        },
+        "semantic": {
+            "enabled": True,
+            "trigger_on": ["plan_change", "tracking_error", "stall", "feedback_loss",
+                           "watchdog_critical", "torque_spike", "torque_overload"],
+        },
+        "forensics": {
+            "ring_buffer_s": 5,
+            "dump_dir": "~/.dsh-ros2/safety-events",
+        },
+        "estop": {"enabled": False, "path": ""},  # 仅接口，不实现（后续定义）
+    }
+
+
+KNOWN_LOCK_ACTIONS = {"zero_velocity", "damping"}
+KNOWN_CAUSES = {"plan_change", "tracking_error", "stall", "feedback_loss",
+                "watchdog_critical", "watchdog_observed", "torque_spike",
+                "torque_overload", "semantic_unsafe"}
+
+
+def validate_safety(cfg) -> list:
+    """Schema sanity check; returns a list of human-readable problems
+    (empty = OK). Does not enforce policy — just shape."""
+    problems = []
+    if not isinstance(cfg, dict):
+        return ["safety 段必须是对象"]
+    if cfg.get("lock_action") not in KNOWN_LOCK_ACTIONS:
+        problems.append("lock_action 应为 zero_velocity|damping，实际 {}".format(cfg.get("lock_action")))
+    try:
+        float(cfg.get("control_frequency", 200))
+    except (TypeError, ValueError):
+        problems.append("control_frequency 必须是数字")
+    fb = cfg.get("feedback") or {}
+    if not isinstance(fb.get("joint_state_topic", ""), str) or not fb.get("joint_state_topic"):
+        problems.append("feedback.joint_state_topic 必填")
+    for cause in cfg.get("semantic", {}).get("trigger_on", []):
+        if cause not in KNOWN_CAUSES:
+            problems.append("未知触发原因: {}".format(cause))
+    for key in ("critical_topics", "observed_topics"):
+        for e in cfg.get("watchdog", {}).get(key, []):
+            if not e.get("topic"):
+                problems.append("watchdog.{} 条目缺少 topic".format(key))
+    return problems
+
+
+def read_profile_yaml(name: str):
+    """Read a profile file and return (raw dict, path) or raise."""
+    path = os.path.join(DEFAULT_DIR, f"{name}.yaml")
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"未找到机器人档案 {name}")
+    import yaml as pyyaml
+    with open(path) as f:
+        data = pyyaml.safe_load(f) or {}
+    return data, path
+
+
+def safety_show(name: str) -> dict:
+    data, path = read_profile_yaml(name)
+    robot = data.get("robot", {})
+    safety = robot.get("safety", {})
+    problems = validate_safety(safety) if safety else ["safety 段缺失（可用 register 或 safety set 补齐）"]
+    return {"ok": True, "robot": name, "safety": safety, "problems": problems,
+            "profile_path": path}
+
+
+def safety_set(name: str, key: str, value_json: str) -> dict:
+    """Set one dotted safety key, e.g. key=feedback.torque_topic value='"..."'
+    or key=watchdog.critical_nodes value='[{"topic": "/x", "timeout_ms": 1000}]'.
+    Validates the result before writing (same merge pattern as topo_learn)."""
+    import yaml as pyyaml
+    data, path = read_profile_yaml(name)
+    robot = data.setdefault("robot", {})
+    safety = robot.setdefault("safety", default_safety({"max_velocity": {}, "max_effort": {}}))
+    try:
+        value = json.loads(value_json)
+    except json.JSONDecodeError as e:
+        return {"ok": False, "error": f"value 必须是合法 JSON: {e}"}
+    parts = key.split(".")
+    node = safety
+    for p in parts[:-1]:
+        node = node.setdefault(p, {})
+    node[parts[-1]] = value
+    problems = validate_safety(safety)
+    if problems:
+        return {"ok": False, "error": "safety 校验失败: " + "; ".join(problems)}
+    with open(path, "w") as f:
+        f.write(f"# robot body profile (written by dsh-ros2 robot_profile)\n")
+        pyyaml.safe_dump(data, f, allow_unicode=True, sort_keys=False)
+    return {"ok": True, "robot": name, "key": key, "value": value,
+            "problems": validate_safety(safety), "profile_path": path}
+
+
 def find_tf_root():
     """Best-effort TF root from tf_static sample (child of the first edge)."""
     ok, out, _ = ros2("topic", "echo", "/tf_static", "--once", "--field", "transforms")
@@ -266,6 +419,7 @@ def register(name: str, urdf: str, srdf: str, description: str) -> dict:
             return {"ok": False, "error": "no URDF: pass --urdf or have a live /robot_description"}
 
     body = parse_urdf(urdf_xml)
+    limits = parse_urdf_limits(urdf_xml)
     srdf_resolved = resolve_srdf(srdf)
     groups = parse_srdf_groups(srdf_resolved) if srdf_resolved else {}
     zero = read_zero_pose()
@@ -285,26 +439,14 @@ def register(name: str, urdf: str, srdf: str, description: str) -> dict:
                 "groups": groups,
             },
             "zero_pose": zero or {"note": "未校准；可用 ros2_zero_pose_semantics 校准"},
+            "safety": default_safety(limits),
         }
     }
     path = os.path.join(DEFAULT_DIR, f"{name}.yaml")
     with open(path, "w") as f:
-        def yaml_str(v):
-            return json.dumps(v, ensure_ascii=False)
+        import yaml as pyyaml
         f.write(f"# robot body profile (written by dsh-ros2 robot_profile)\n")
-        f.write(f"robot:\n")
-        f.write(f"  name: {name}\n")
-        f.write(f"  description: {yaml_str(description)}\n")
-        f.write(f"  registered_at: {profile['robot']['registered_at']}\n")
-        f.write(f"  urdf: {yaml_str(profile['robot']['urdf'])}\n")
-        f.write(f"  tf_root: {yaml_str(profile['robot']['tf_root'])}\n")
-        f.write(f"  cameras: {yaml_str(profile['robot']['cameras'])}\n")
-        f.write(f"  urdf_links: {yaml_str(body['links'])}\n")
-        f.write(f"  joints: {yaml_str(body['joints'])}\n")
-        f.write(f"  moveit:\n")
-        f.write(f"    srdf: {yaml_str(srdf_resolved)}\n")
-        f.write(f"    groups: {yaml_str(groups)}\n")
-        f.write(f"  zero_pose: {yaml_str(zero)}\n")
+        pyyaml.safe_dump(profile, f, allow_unicode=True, sort_keys=False)
     return {"ok": True, "written": path, "robot": profile["robot"]}
 
 
@@ -336,11 +478,14 @@ def list_profiles():
 def main():
     global DEFAULT_DIR
     ap = argparse.ArgumentParser()
-    ap.add_argument("action", choices=["register", "load", "list", "topology"])
+    ap.add_argument("action", choices=["register", "load", "list", "topology", "safety"])
     ap.add_argument("--name", default="")
     ap.add_argument("--urdf", default="")
     ap.add_argument("--srdf", default="")
     ap.add_argument("--topology-action", default="show", choices=["snapshot", "learn", "show"])
+    ap.add_argument("--safety-action", default="show", choices=["show", "set"])
+    ap.add_argument("--key", default="")
+    ap.add_argument("--value", default="")
     ap.add_argument("--node", default="")
     ap.add_argument("--role", default="")
     ap.add_argument("--pub", default="")
@@ -352,7 +497,18 @@ def main():
     args = ap.parse_args()
     DEFAULT_DIR = args.dir
 
-    if args.action == "topology":
+    if args.action == "safety":
+        if not args.name:
+            print(json.dumps({"ok": False, "error": "safety 需要 --name"}))
+            return 1
+        if args.safety_action == "set":
+            if not args.key or not args.value:
+                print(json.dumps({"ok": False, "error": "safety set 需要 --key 与 --value（value 为 JSON）"}))
+                return 1
+            out = safety_set(args.name, args.key, args.value)
+        else:
+            out = safety_show(args.name)
+    elif args.action == "topology":
         topo_action = args.topology_action
         if topo_action == "snapshot":
             out = topo_snapshot(args.name)

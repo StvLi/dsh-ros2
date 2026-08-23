@@ -21,6 +21,9 @@ export { Config }
 export type { Ros2Config }
 
 export function apply(ctx: Context, config: Ros2Config): void {
+  // safetyStrict is a string in the schema (schemastery has no enum);
+  // normalize here so the tool layer always sees 'warn' | 'reject'.
+  const safetyStrict: 'warn' | 'reject' = config.safetyStrict === 'reject' ? 'reject' : 'warn'
   const run: RunFn = (bin, args, opts = {}) => runCommand(bin, args, {
     timeoutMs: opts.timeoutMs ?? config.timeoutMs,
     rosLogDir: opts.rosLogDir ?? config.rosLogDir,
@@ -61,6 +64,7 @@ export function apply(ctx: Context, config: Ros2Config): void {
     workspaceRoot: config.workspaceRoot,
     gui,
     vision,
+    safetyStrict,
   })
 
   ctx.effect(() => {

@@ -1,0 +1,7 @@
+# Human-gated unlock request. The tool layer performs the L2 approval
+# (ctx.approval.request) BEFORE calling this service.
+string request_id
+string cause        # human-confirmed unlock reason
+---
+bool accepted
+string message

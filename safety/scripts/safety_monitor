@@ -1,0 +1,305 @@
+#!/usr/bin/env python3
+"""safety_monitor — generic real-time safety node for dsh-ros2.
+
+Bridges ROS2 topics/services <-> the pure SafetyCore logic (safety_core.py):
+
+  * subscribes the robot's joint feedback (and optionally a commanded
+    joint stream + a separate torque stream);
+  * runs the checkers on a `control_frequency` timer (non-blocking,
+    parallel, end-to-end response budget <= 100 ms);
+  * latches LOCKED on any CRITICAL event, publishes /safety/state
+    (transient-local, latched) and fires /safety/lock_active once;
+  * publishes /safety/heartbeat so consumers can detect monitor death
+    (fail-closed posture is enforced by the tool layer / downstream);
+  * slow scanner (node_scan_sec) polls watchdog topics (`ros2 topic echo`)
+    and node names (`ros2 node list`);
+  * services /safety/get_state (L1), /safety/unlock and /safety/set_lock
+    (both human-gated at the tool layer via L2 approval).
+
+Usage (built package, workspace sourced):
+
+    ros2 run dsh_ros2_safety safety_monitor --profile ~/.dsh-ros2/robots/lite.yaml
+
+The profile `safety` section carries all robot-specific values
+(see docs/safety-handover.md §4.1).
+"""
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+import threading
+import time
+
+import rclpy
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
+from rclpy.executors import MultiThreadedExecutor
+from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
+from sensor_msgs.msg import JointState
+from std_msgs.msg import Bool
+
+# safety_core lives next to this executable in the install dir.
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+from safety_core import SafetyCore, STATE_LOCKED, SEVERITY_WARNING  # noqa: E402
+
+from dsh_ros2_safety.msg import SafetyEvent, SafetyState  # noqa: E402
+from dsh_ros2_safety.srv import GetSafetyState, SetLock, Unlock  # noqa: E402
+
+TRANSIENT_LOCAL = QoSProfile(
+    depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL,
+    reliability=ReliabilityPolicy.RELIABLE)
+VOLATILE = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
+
+
+def _load_profile(path: str) -> dict:
+    """Load the `safety` section from a robot profile YAML (or a plain JSON
+    safety config)."""
+    if not path or not os.path.exists(path):
+        raise SystemExit("profile not found: {}".format(path))
+    data = None
+    try:
+        import yaml as pyyaml
+        with open(path) as f:
+            data = pyyaml.safe_load(f) or {}
+        if "robot" in data and isinstance(data.get("robot"), dict):
+            data = data["robot"]
+        if "safety" in data:
+            data = data["safety"]
+    except Exception as e:  # noqa: BLE001
+        raise SystemExit("cannot parse profile {}: {}".format(path, e))
+    if not isinstance(data, dict) or "control_frequency" not in data and "feedback" not in data:
+        raise SystemExit("profile {} has no usable `safety` section".format(path))
+    return data
+
+
+class SafetyMonitorNode(Node):
+    def __init__(self, cfg: dict):
+        super().__init__("safety_monitor")
+        self.core = SafetyCore(cfg)
+        fb = cfg.get("feedback", {}) or {}
+        m = cfg.get("motion", {}) or {}
+        w = cfg.get("watchdog", {}) or {}
+        self.control_hz = max(1.0, float(cfg.get("control_frequency", 200)))
+        self.joint_topic = str(fb.get("joint_state_topic", "/joint_states"))
+        self.cmd_topic = str(m.get("command_topic", ""))
+        self.torque_topic = str(fb.get("torque_topic", ""))
+        self.node_scan_sec = max(1.0, float(w.get("node_scan_sec", 5.0)))
+        self.watchdog_topics = [str(e.get("topic", "")) for e in
+                                w.get("critical_topics", []) + w.get("observed_topics", [])
+                                if e.get("topic")]
+        self.watchdog_nodes = list(w.get("critical_nodes", []) or []) + \
+            list(w.get("observed_nodes", []) or [])
+        self.lock_topic = str(cfg.get("lock_topic", "/safety/lock_active"))
+        self._locked_published = False
+        self._stop = threading.Event()
+
+        # -- subscriptions -------------------------------------------------
+        self._joint_sub = self.create_subscription(JointState, self.joint_topic,
+                                                   self._on_joint, VOLATILE)
+        if self.cmd_topic:
+            self.create_subscription(JointState, self.cmd_topic, self._on_cmd, VOLATILE)
+        if self.torque_topic and self.torque_topic != self.joint_topic:
+            self.create_subscription(JointState, self.torque_topic, self._on_torque, VOLATILE)
+
+        # -- publishers ----------------------------------------------------
+        self._state_pub = self.create_publisher(SafetyState, "/safety/state", TRANSIENT_LOCAL)
+        self._event_pub = self.create_publisher(SafetyEvent, "/safety/event", VOLATILE)
+        self._heartbeat_pub = self.create_publisher(Bool, "/safety/heartbeat", VOLATILE)
+        self._lock_pub = self.create_publisher(Bool, self.lock_topic, TRANSIENT_LOCAL)
+
+        # -- services (separate callback group so they never block the timer)
+        srv_group = MutuallyExclusiveCallbackGroup()
+        self.create_service(GetSafetyState, "/safety/get_state", self._svc_get_state,
+                            callback_group=srv_group)
+        self.create_service(Unlock, "/safety/unlock", self._svc_unlock,
+                            callback_group=srv_group)
+        self.create_service(SetLock, "/safety/set_lock", self._svc_set_lock,
+                            callback_group=srv_group)
+
+        # -- timers --------------------------------------------------------
+        self.create_timer(1.0 / self.control_hz, self._on_tick)
+        self.create_timer(1.0, self._on_heartbeat)
+        if self.watchdog_topics or self.watchdog_nodes:
+            self.create_timer(self.node_scan_sec, self._on_scan)
+
+        self.get_logger().info(
+            "safety_monitor up: joint={} cmd={} torque={} hz={} watchdog_topics={} nodes={}".format(
+                self.joint_topic, self.cmd_topic or "-", self.torque_topic or "-",
+                self.control_hz, self.watchdog_topics, self.watchdog_nodes))
+
+    # -- ROS2 callbacks ---------------------------------------------------
+
+    def _on_joint(self, msg: JointState) -> None:
+        joints = {}
+        for i, name in enumerate(msg.name):
+            joints[name] = {
+                "position": msg.position[i] if i < len(msg.position) else 0.0,
+                "velocity": msg.velocity[i] if i < len(msg.velocity) else 0.0,
+                "effort": msg.effort[i] if i < len(msg.effort) else 0.0,
+            }
+        self.core.on_joint_state(joints, int(time.time() * 1000))
+
+    def _on_cmd(self, msg: JointState) -> None:
+        joints = {}
+        for i, name in enumerate(msg.name):
+            joints[name] = {
+                "position": msg.position[i] if i < len(msg.position) else 0.0,
+                "velocity": msg.velocity[i] if i < len(msg.velocity) else 0.0,
+            }
+        self.core.on_command(joints, int(time.time() * 1000))
+
+    def _on_torque(self, msg: JointState) -> None:
+        # dedicated torque stream: {name: effort}, fed straight to the
+        # TorqueChecker (does NOT overwrite the joint position view)
+        tau = {}
+        for i, name in enumerate(msg.name):
+            tau[name] = msg.effort[i] if i < len(msg.effort) else 0.0
+        self.core.on_torque(tau, int(time.time() * 1000))
+
+    def _on_tick(self) -> None:
+        events, locked_now = self.core.tick(int(time.time() * 1000))
+        for e in events:
+            ev = SafetyEvent()
+            ev.cause, ev.severity, ev.detail, ev.stamp_ms = \
+                e.cause, e.severity, e.detail, e.stamp_ms
+            self._event_pub.publish(ev)
+            if e.severity == SEVERITY_WARNING:
+                self.get_logger().warn("[safety:{}] {}".format(e.cause, e.detail))
+            else:
+                self.get_logger().error("[safety:{}] {}".format(e.cause, e.detail))
+        if locked_now:
+            self._fire_lock()
+        self._publish_state()
+
+    def _on_heartbeat(self) -> None:
+        hb = Bool()
+        hb.data = True
+        self._heartbeat_pub.publish(hb)
+
+    def _on_scan(self) -> None:
+        """Slow watchdog scan: node names via `ros2 node list`, watchdog
+        topics via `timeout N ros2 topic echo --once` (subprocesses; runs in
+        its own timer callback — never blocks the fast tick)."""
+        now = int(time.time() * 1000)
+        if self.watchdog_nodes:
+            try:
+                out = subprocess.run(["ros2", "node", "list"], capture_output=True,
+                                     text=True, timeout=max(10, self.node_scan_sec - 1))
+                alive = [l.strip() for l in out.stdout.splitlines() if l.strip()]
+            except Exception:  # noqa: BLE001
+                alive = []
+            events, locked_now = self.core.on_node_scan(alive, now)
+            for e in events:
+                self._emit_event(e)
+            if locked_now:
+                self._fire_lock()
+                self._publish_state()
+        for topic in self.watchdog_topics:
+            try:
+                out = subprocess.run(["bash", "-lc",
+                                      "timeout {} ros2 topic echo {} --once >/dev/null 2>&1".format(
+                                          max(1, self.node_scan_sec - 1), topic)],
+                                     timeout=max(10, self.node_scan_sec))
+                if out.returncode == 0:
+                    self.core.on_watchdog_activity(topic, now)
+            except Exception:  # noqa: BLE001
+                pass
+
+    # -- lock action ------------------------------------------------------
+
+    def _fire_lock(self) -> None:
+        if self._locked_published:
+            return
+        self._locked_published = True
+        lock = Bool()
+        lock.data = True
+        self._lock_pub.publish(lock)
+        self.get_logger().error("=== SAFETY LOCKED (cause={}, latch) ===".format(
+            self.core.latch.cause))
+        try:
+            dumped = self.core.forensics.dump(self.core.dump_dir, self.core.latch.cause,
+                                              extra={"state": self.core.latch.as_dict()})
+            self.get_logger().info("forensics dumped: {}".format(dumped))
+        except Exception as e:  # noqa: BLE001
+            self.get_logger().warn("forensics dump failed: {}".format(e))
+
+    def _publish_state(self) -> None:
+        st = SafetyState()
+        st.state = self.core.latch.state
+        st.severity = self.core.latch.severity
+        st.cause = self.core.latch.cause
+        st.detail = self.core.latch.detail
+        st.stamp_ms = int(time.time() * 1000)
+        self._state_pub.publish(st)
+
+    def _emit_event(self, e) -> None:
+        ev = SafetyEvent()
+        ev.cause, ev.severity, ev.detail, ev.stamp_ms = \
+            e.cause, e.severity, e.detail, e.stamp_ms
+        self._event_pub.publish(ev)
+        if e.severity == SEVERITY_WARNING:
+            self.get_logger().warn("[safety:{}] {}".format(e.cause, e.detail))
+        else:
+            self.get_logger().error("[safety:{}] {}".format(e.cause, e.detail))
+
+    # -- services ---------------------------------------------------------
+
+    def _svc_get_state(self, request, response):
+        st = self.core.get_state()
+        response.state.state = st["state"]
+        response.state.severity = st["severity"]
+        response.state.cause = st["cause"]
+        response.state.detail = st["detail"]
+        response.state.stamp_ms = st["stamp_ms"]
+        return response
+
+    def _svc_unlock(self, request, response):
+        # Human-gated at the tool layer (L2 approval) BEFORE this call.
+        res = self.core.unlock(request.request_id, request.cause,
+                               int(time.time() * 1000))
+        response.accepted = bool(res["accepted"])
+        response.message = res["message"]
+        if res["accepted"]:
+            self._locked_published = False
+            lock = Bool()
+            lock.data = False
+            self._lock_pub.publish(lock)
+            self.get_logger().warn("=== SAFETY UNLOCKED (request_id={}) ===".format(request.request_id))
+        self._publish_state()
+        return response
+
+    def _svc_set_lock(self, request, response):
+        # Human-gated at the tool layer (L2 approval) BEFORE this call.
+        res = self.core.set_lock(request.cause, request.detail,
+                                 int(time.time() * 1000))
+        response.accepted = bool(res["accepted"])
+        response.message = res["message"]
+        if response.accepted:
+            self._fire_lock()
+        self._publish_state()
+        return response
+
+
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(description="dsh-ros2 safety_monitor node")
+    ap.add_argument("--profile", default="", help="robot profile YAML (safety section) or plain safety JSON")
+    args, _ = ap.parse_known_args(argv)
+    cfg = _load_profile(args.profile)
+    rclpy.init()
+    node = SafetyMonitorNode(cfg)
+    executor = MultiThreadedExecutor()
+    executor.add_node(node)
+    try:
+        executor.spin()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

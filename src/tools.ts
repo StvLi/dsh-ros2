@@ -67,6 +67,13 @@ export interface ToolDeps {
   gui?: GuiManager
   /** L3 pluggable multimodal vision (ros2_vision_describe / ros2_gui_observe). */
   vision?: VisionProvider
+  /**
+   * Tool-layer safety posture when the safety_monitor is unreachable:
+   * 'warn' (default, backward compatible) proceeds with a warning;
+   * 'reject' fails closed. A LOCKED /safety/state always rejects motion
+   * tools in both modes.
+   */
+  safetyStrict?: 'warn' | 'reject'
 }
 
 /** Canonical result value shared by every tool (validated against `resultSchema`). */
@@ -185,6 +192,11 @@ function deniedResult(tool: string, command: string, outcome: string): ToolResul
   return { ok: false, tool, command, data: null, error: { code: 'APPROVAL_DENIED', message: `approval ${outcome}` } }
 }
 
+/** Safety-gate rejection with a distinct error code (SAFETY_LOCKED / SAFETY_MONITOR_DOWN). */
+function safetyDenied(tool: string, command: string, code: string, message: string): ToolResult {
+  return { ok: false, tool, command, data: null, error: { code, message } }
+}
+
 function toolError(tool: string, command: string, code: string, message: string): ToolResult {
   return { ok: false, tool, command, data: null, error: { code, message } }
 }
@@ -194,6 +206,83 @@ function okResult(tool: string, command: string, data: JsonValue): ToolResult {
 }
 
 const renderResult = (_args: unknown, value: JsonValue) => [{ type: 'text' as const, text: JSON.stringify(value) }]
+
+// ── safety framework helpers ─────────────────────────────────────────────
+// Contract: docs/safety-handover.md — /safety/state is published by the
+// safety_monitor node (SafetyState.msg, transient-local). Motion tools gate
+// on it before executing.
+
+const SAFETY_STATE_TOPIC = '/safety/state'
+
+interface SafetyFields {
+  state?: string
+  severity?: string
+  cause?: string
+  detail?: string
+}
+
+/** Parse the flat `field: value` echo output of SafetyState.msg. */
+function parseSafetyEcho(stdout: string): SafetyFields {
+  const out: SafetyFields = {}
+  for (const line of stdout.split('\n')) {
+    const m = /^(\w+):\s*(.*)$/.exec(line.trim())
+    if (m && (m[1] === 'state' || m[1] === 'severity' || m[1] === 'cause' || m[1] === 'detail')) {
+      out[m[1] as keyof SafetyFields] = m[2]
+    }
+  }
+  return out
+}
+
+/**
+ * Tool-layer safety gate for motion tools. A LOCKED /safety/state always
+ * rejects (with the trigger cause); an unreachable monitor rejects in
+ * 'reject' mode (fail-closed) or warns in 'warn' mode (backward compatible).
+ */
+async function enforceSafetyLock(
+  deps: ToolDeps,
+  tool: string,
+  command: string,
+  opts: { skip?: boolean } = {},
+): Promise<{ denied?: ToolResult; warning?: string }> {
+  if (opts.skip) return {}
+  const res = await deps.run('ros2', ['topic', 'echo', SAFETY_STATE_TOPIC, '--once'], { timeoutMs: 3000 })
+  if (!res.ok || !res.stdout.trim()) {
+    const strict = deps.safetyStrict ?? 'warn'
+    if (strict === 'reject') {
+      return {
+        denied: safetyDenied(tool, command, 'SAFETY_MONITOR_DOWN',
+          `safety_monitor 未运行（${SAFETY_STATE_TOPIC} 无响应），fail-closed 拒绝执行。请先 robot_safety_start 启动监视器，或配置 safetyStrict: 'warn' 放行。`),
+      }
+    }
+    return { warning: `safety_monitor 未运行（${SAFETY_STATE_TOPIC} 无响应）——已按 warn 模式放行；生产环境建议 safetyStrict: 'reject'。` }
+  }
+  const fields = parseSafetyEcho(res.stdout)
+  if (fields.state === 'LOCKED') {
+    return {
+      denied: safetyDenied(tool, command, 'SAFETY_LOCKED',
+        `机器人已锁死（cause=${fields.cause ?? 'unknown'}，severity=${fields.severity ?? '?'}）：${fields.detail ?? ''}。需人工确认后经 robot_safety_unlock 解锁。`),
+    }
+  }
+  return {}
+}
+
+/** Read the current latched /safety/state (monitor may be offline). */
+async function readSafetyState(deps: ToolDeps): Promise<{ running: boolean; fields: SafetyFields }> {
+  const res = await deps.run('ros2', ['topic', 'echo', SAFETY_STATE_TOPIC, '--once'], { timeoutMs: 3000 })
+  if (!res.ok || !res.stdout.trim()) return { running: false, fields: {} }
+  return { running: true, fields: parseSafetyEcho(res.stdout) }
+}
+
+/** Locate a robot profile path (explicit path, or via robot_profile load). */
+async function resolveProfilePath(deps: ToolDeps, robot: string, profile: string): Promise<string> {
+  if (profile) return profile
+  const res = await deps.run('python3', [scriptPath('robot_profile.py'), 'load', '--name', robot], { timeoutMs: 30000 })
+  if (res.ok && res.stdout.trim()) {
+    const data = parseJsonOrRaw(res.stdout) as { profile_path?: string; ok?: boolean }
+    if (data?.ok && data.profile_path) return data.profile_path
+  }
+  return ''
+}
 
 /**
  * Build the L1 (read-only diagnostics) tool set.
@@ -436,6 +525,13 @@ export function createRos2Tools(deps: ToolDeps) {
   tools.push(makeRobotRegisterTool(deps))
   tools.push(makeRobotLoadTool(deps))
   tools.push(makeRobotTopologyTool(deps))
+  // Safety framework (generic; robot-specific values come from the profile
+  // `safety` section — see docs/safety-handover.md).
+  tools.push(makeRobotSafetyStartTool(deps))
+  tools.push(makeRobotSafetyStateTool(deps))
+  tools.push(makeRobotSafetyArbitrateTool(deps))
+  tools.push(makeRobotSafetyLockTool(deps))
+  tools.push(makeRobotSafetyUnlockTool(deps))
   // L3 visualization tools (GUI lifecycle + screenshot + multimodal vision).
   tools.push(makeGuiStartTool(deps))
   tools.push(makeGuiListTool(deps))
@@ -1716,13 +1812,15 @@ function makeRobotRegisterTool(deps: ToolDeps) {
     name: 'robot_register',
     description:
       'Register a robot body profile (approval-gated; writes ~/.dsh-ros2/robots/<name>.yaml). ' +
-      'Collects the robot\'s body info for fast reuse: URDF (--urdf path or live /robot_description) links/joints, TF root, image/camera topics, MoveIt SRDF groups (from --srdf or package scan), and zero-pose semantics (from ~/.dsh-ros2/zero-pose.yaml if calibrated). Use once per robot; afterwards robot_load returns it instantly.',
+      'Collects the robot\'s body info for fast reuse: URDF (--urdf path or live /robot_description) links/joints, TF root, image/camera topics, MoveIt SRDF groups (from --srdf or package scan), and zero-pose semantics (from ~/.dsh-ros2/zero-pose.yaml if calibrated). ' +
+      'Also writes a generic `safety` section (URDF-derived velocity/effort limits; see docs/safety-handover.md) and, when startSafety is on, auto-launches the safety_monitor for the new profile. Use once per robot; afterwards robot_load returns it instantly.',
     parameters: {
       name: { type: 'string', description: 'Robot profile name (e.g. lite).' },
       urdf: { type: 'string', default: '', description: 'URDF file path (empty = fetch live /robot_description).' },
       srdf: { type: 'string', default: '', description: 'MoveIt SRDF path (empty = auto package scan).' },
       description: { type: 'string', default: '', description: 'Optional one-line robot description.' },
       dir: { type: 'string', default: '', description: 'Profiles directory (default ~/.dsh-ros2/robots).' },
+      startSafety: { type: 'boolean', default: true, description: 'Auto-launch the safety_monitor after registration (needs the dsh_ros2_safety package built + jobs service).' },
     },
     output: { schema: resultSchema, render: renderResult },
     async execute(args, exec) {
@@ -1731,7 +1829,7 @@ function makeRobotRegisterTool(deps: ToolDeps) {
       if (!name) return toolError('robot_register', 'robot_register', 'MISSING_PARAM', 'name 必填')
       const command = `robot_register name=${name}`
       const approval = await requestApproval(deps, exec, 'robot_register',
-        `将采集机器人「${name}」本体信息（URDF/关节/相机/MoveIt/零位语义）并写入档案（~/.dsh-ros2/robots/${name}.yaml）。`)
+        `将采集机器人「${name}」本体信息（URDF/关节/相机/MoveIt/零位语义）并写入档案（~/.dsh-ros2/robots/${name}.yaml）${params.startSafety === false ? '' : '，随后自动拉起 safety_monitor'}。`)
       if (!approval.allowed) return deniedResult('robot_register', command, approval.outcome)
       const helperArgs = [scriptPath('robot_profile.py'), 'register', '--name', name]
       if (strOrUndefined(params.urdf)) helperArgs.push('--urdf', strOrUndefined(params.urdf)!)
@@ -1743,7 +1841,41 @@ function makeRobotRegisterTool(deps: ToolDeps) {
         return toolError('robot_register', command, res.error ?? 'COMMAND_FAILED',
           res.stderr.trim() || `exit ${res.exitCode ?? 'unknown'}`)
       }
-      return okResult('robot_register', command, parseJsonOrRaw(res.stdout))
+      const data = parseJsonOrRaw(res.stdout) as {
+        ok?: boolean
+        written?: string
+        robot?: { safety?: { enabled?: boolean } }
+      }
+      // Auto-launch the safety monitor (contract: register -> launch ->
+      // guard -> lock chain). Best effort: if jobs are unavailable or the
+      // safety section is disabled, skip with a note.
+      let jobId = ''
+      if (data?.ok && params.startSafety !== false && data.robot?.safety?.enabled !== false) {
+        if (deps.jobs) {
+          const profilePath = data.written ?? ''
+          if (profilePath) {
+            try {
+              jobId = deps.jobs.start({
+                owner: exec.agent,
+                kind: 'safety-monitor',
+                label: `safety_monitor/${name}`,
+                outputLimitBytes: 8 * 1024 * 1024,
+                run: () => spawnJob('bash', ['-lc', `ros2 run dsh_ros2_safety safety_monitor --profile '${profilePath}'`],
+                  { outputLimitBytes: 8 * 1024 * 1024 }),
+              })
+            } catch {
+              jobId = ''
+            }
+          }
+        }
+      }
+      const out = data ?? parseJsonOrRaw(res.stdout)
+      return okResult('robot_register', command, {
+        ...(out as Record<string, unknown>),
+        ...(jobId ? { safety_monitor: { jobId, status: 'started' } }
+          : params.startSafety === false ? { safety_monitor: { status: 'skipped' } }
+          : { safety_monitor: { status: 'not_started', note: 'jobs 服务不可用或 safety 未启用——用 robot_safety_start 手动启动' } }),
+      })
     },
   })
 }
@@ -1843,6 +1975,224 @@ function makeRobotTopologyTool(deps: ToolDeps) {
   })
 }
 
+// ── safety framework tools ───────────────────────────────────────────────
+// Contract: docs/safety-handover.md — the safety_monitor node (dsh_ros2_safety
+// package) owns the latched /safety/state machine; these tools start/query/
+// arbitrate/lock/unlock it. Everything goes over ROS2 topics/services.
+
+/**
+ * L2: start the safety_monitor node for a registered robot as a background
+ * job (approval-gated). Reads the profile's `safety` section — all
+ * robot-specific values (topics, thresholds, watchdog lists, lock action)
+ * come from there, never from this tool.
+ */
+function makeRobotSafetyStartTool(deps: ToolDeps) {
+  return defineTool({
+    name: 'robot_safety_start',
+    description:
+      'Start the generic safety_monitor node for a registered robot as a background job (approval-gated; long-running, stop with DSH job controls). ' +
+      'Reads the profile `safety` section (~/.dsh-ros2/robots/<name>.yaml): joint feedback topic, optional command/torque topics, thresholds, watchdog lists, lock action. ' +
+      'The monitor latches LOCKED on CRITICAL events, publishes /safety/state (transient-local) + /safety/heartbeat, and fires /safety/lock_active once. Requires the dsh_ros2_safety package built and sourced. ' +
+      'Motion tools gate on /safety/state before executing.',
+    parameters: {
+      robot: { type: 'string', description: 'Robot profile name (registered via robot_register).' },
+      profile: { type: 'string', default: '', description: 'Explicit profile YAML path (default: load from robot profile).' },
+    },
+    output: { schema: resultSchema, render: renderResult },
+    async execute(args, exec) {
+      const params = args as Record<string, unknown>
+      const robot = strOrUndefined(params.robot) ?? ''
+      if (!robot) return toolError('robot_safety_start', 'robot_safety_start', 'MISSING_PARAM', 'robot 必填')
+      const profilePath = await resolveProfilePath(deps, robot, strOrUndefined(params.profile) ?? '')
+      if (!profilePath) {
+        return toolError('robot_safety_start', 'robot_safety_start', 'PROFILE_NOT_FOUND',
+          `未找到机器人「${robot}」的档案（先 robot_register）或显式 --profile 路径`)
+      }
+      const command = `robot_safety_start robot=${robot}`
+      const approval = await requestApproval(deps, exec, 'robot_safety_start',
+        `将以后台任务启动 safety_monitor（profile=${profilePath}，持续运行监视机器人安全状态）。`)
+      if (!approval.allowed) return deniedResult('robot_safety_start', command, approval.outcome)
+      if (!deps.jobs) return toolError('robot_safety_start', command, 'JOBS_UNAVAILABLE', '后台任务服务不可用（需要 DSH jobs 支持）')
+      let jobId: string
+      try {
+        jobId = deps.jobs.start({
+          owner: exec.agent,
+          kind: 'safety-monitor',
+          label: `safety_monitor/${robot}`,
+          outputLimitBytes: 8 * 1024 * 1024,
+          run: () => spawnJob('bash', ['-lc', `ros2 run dsh_ros2_safety safety_monitor --profile '${profilePath}'`],
+            { outputLimitBytes: 8 * 1024 * 1024 }),
+        })
+      } catch (error) {
+        return toolError('robot_safety_start', command, 'JOB_START_FAILED', error instanceof Error ? error.message : String(error))
+      }
+      return okResult('robot_safety_start', command, { jobId, kind: 'safety-monitor', label: `safety_monitor/${robot}`, status: 'started', note: '查询用 robot_safety_state，停止用 DSH job 控制' })
+    },
+  })
+}
+
+/**
+ * L1: read the latched /safety/state (monitor may be offline).
+ */
+function makeRobotSafetyStateTool(deps: ToolDeps) {
+  return defineTool({
+    name: 'robot_safety_state',
+    description:
+      'Read the current latched safety state from the safety_monitor (/safety/state, transient-local): NORMAL or LOCKED with severity, trigger cause and detail. ' +
+      'If the monitor is not running, returns monitor_running: false. Read-only, no approval.',
+    parameters: {},
+    output: { schema: resultSchema, render: renderResult },
+    async execute() {
+      const { running, fields } = await readSafetyState(deps)
+      if (!running) {
+        return okResult('robot_safety_state', 'ros2 topic echo /safety/state --once', {
+          monitor_running: false, state: 'UNKNOWN',
+          note: 'safety_monitor 未运行——用 robot_safety_start 启动（运动工具在 safetyStrict=reject 下会 fail-closed 拒绝）',
+        })
+      }
+      return okResult('robot_safety_state', 'ros2 topic echo /safety/state --once', {
+        monitor_running: true, state: fields.state ?? 'UNKNOWN', severity: fields.severity ?? '',
+        cause: fields.cause ?? '', detail: fields.detail ?? '',
+      })
+    },
+  })
+}
+
+/**
+ * L1: VLM semantic safety arbitration on demand (plan change / anomaly
+ * follow-up). Fixed-format prompt + fresh frame via /vlm/describe; any
+ * non-safe verdict must escalate to a human (robot_safety_lock / unlock).
+ */
+function makeRobotSafetyArbitrateTool(deps: ToolDeps) {
+  return defineTool({
+    name: 'robot_safety_arbitrate',
+    description:
+      'Semantic safety arbitration (event-driven, slow layer — only pull up when needed): formats a fixed safety prompt (task context + trigger cause + joint state + fresh render frame) and asks the VLM (via /vlm/describe) whether the robot is in a dangerous state. ' +
+      'Returns {verdict: safe|unsafe|uncertain, reason, evidence}. ANY non-safe verdict must be escalated to a human — use robot_safety_lock to latch the robot if the danger is confirmed, then robot_safety_unlock after recovery. ' +
+      'Requires vlm_node running; the frame should be a fresh offscreen render.',
+    parameters: {
+      cause: { type: 'string', default: '', description: 'Preset trigger cause (plan_change/tracking_error/stall/feedback_loss/watchdog_critical/torque_spike/torque_overload/semantic_unsafe).' },
+      taskContext: { type: 'string', default: '', description: 'Task context (JSON or text), e.g. {"task": "pick A to B"}.' },
+      joints: { type: 'string', default: '', description: 'Joint state JSON, e.g. {"left_shoulder_pitch": 0.1}.' },
+      frame: { type: 'string', default: '', description: 'Fresh offscreen render frame path (recommended; empty = text-only arbitration).' },
+      prompt: { type: 'string', default: '', description: 'Prompt template override (default: docs/safety-handover.md §5; keep the JSON verdict contract).' },
+    },
+    output: { schema: resultSchema, render: renderResult },
+    async execute(args) {
+      const params = args as Record<string, unknown>
+      const cause = strOrUndefined(params.cause) ?? ''
+      const rosArgs = ['run', 'dsh_ros2_safety', 'safety_vlm_arbitrate', '--cause', cause]
+      if (strOrUndefined(params.taskContext)) rosArgs.push('--task-context', strOrUndefined(params.taskContext)!)
+      if (strOrUndefined(params.joints)) rosArgs.push('--joints', strOrUndefined(params.joints)!)
+      if (strOrUndefined(params.frame)) rosArgs.push('--frame', strOrUndefined(params.frame)!)
+      if (strOrUndefined(params.prompt)) rosArgs.push('--prompt', strOrUndefined(params.prompt)!)
+      const command = `robot_safety_arbitrate cause=${cause}`
+      const res = await deps.run('ros2', rosArgs, { timeoutMs: 120000 })
+      if (!res.ok && res.stdout.trim().length === 0) {
+        return toolError('robot_safety_arbitrate', command, res.error ?? 'COMMAND_FAILED',
+          res.stderr.trim() || `exit ${res.exitCode ?? 'unknown'}`)
+      }
+      const data = parseJsonOrRaw(res.stdout) as { ok?: boolean; verdict?: string; non_safe?: boolean; error?: string }
+      const result = okResult('robot_safety_arbitrate', command, data as JsonValue)
+      if (data && data.ok && data.non_safe) {
+        result.warnings = [`verdict=${data.verdict}（非 safe）——需人工裁决：确认危险请 robot_safety_lock，安全请忽略/robot_safety_state 复核。`]
+      }
+      return result
+    },
+  })
+}
+
+/** Shared lock/unlock service call (both human-gated at the tool layer). */
+async function callSafetyService(deps: ToolDeps, service: string, type: string, request: Record<string, string>): Promise<{ ok: boolean; stdout: string; command: string }> {
+  // ros2 service call takes the request as a YAML-ish map string; execFile
+  // passes it literally, so no shell quoting is involved.
+  const req = `{${Object.entries(request).map(([k, v]) => `${k}: "${v}"`).join(', ')}}`
+  const command = `ros2 service call ${service} ${type} ${req}`
+  const res = await deps.run('ros2', ['service', 'call', service, type, req], { timeoutMs: 15000 })
+  return { ok: res.ok, stdout: res.stdout, command }
+}
+
+function parseServiceCall(stdout: string): Record<string, JsonValue> {
+  // `ros2 service call` prints the response as a Python repr, e.g.
+  //   dsh_ros2_safety.srv.Unlock_Response(accepted=True, message='已解锁')
+  const out: Record<string, JsonValue> = {}
+  const m = /Response\(([^)]*)\)/.exec(stdout)
+  if (m && m[1] !== undefined) {
+    for (const part of m[1].split(',')) {
+      const kv = /^(\w+)=(.+)$/.exec(part.trim())
+      if (kv && kv[1] !== undefined && kv[2] !== undefined) {
+        let value: JsonValue = kv[2]
+        if (kv[2] === 'True') value = true
+        else if (kv[2] === 'False') value = false
+        else if (kv[2].length >= 2 && ((kv[2].startsWith("'") && kv[2].endsWith("'")) || (kv[2].startsWith('"') && kv[2].endsWith('"')))) {
+          value = kv[2].slice(1, -1)
+        }
+        out[kv[1]] = value
+      }
+    }
+  }
+  return out
+}
+
+/**
+ * L2: human-gated explicit lock (semantic layer / human judgment).
+ */
+function makeRobotSafetyLockTool(deps: ToolDeps) {
+  return defineTool({
+    name: 'robot_safety_lock',
+    description:
+      'Human-gated explicit lock (approval required): latch the robot into LOCKED via the safety_monitor /safety/set_lock service. ' +
+      'Use after a VLM non-safe verdict (robot_safety_arbitrate) or any human judgment that the robot must stop. ' +
+      'The latch persists until a human unlocks via robot_safety_unlock.',
+    parameters: {
+      cause: { type: 'string', default: 'semantic_unsafe', description: 'Preset cause (semantic_unsafe or custom).' },
+      detail: { type: 'string', default: '', description: 'Human-readable reason.' },
+    },
+    output: { schema: resultSchema, render: renderResult },
+    async execute(args, exec) {
+      const params = args as Record<string, unknown>
+      const cause = strOrUndefined(params.cause) ?? 'semantic_unsafe'
+      const detail = strOrUndefined(params.detail) ?? ''
+      const command = `robot_safety_lock cause=${cause}`
+      const approval = await requestApproval(deps, exec, 'robot_safety_lock',
+        `将锁死机器人（cause=${cause}：${detail || '人工判定需要停机'}）。锁存后需人工确认并经 robot_safety_unlock 才能恢复。`)
+      if (!approval.allowed) return deniedResult('robot_safety_lock', command, approval.outcome)
+      const res = await callSafetyService(deps, '/safety/set_lock', 'dsh_ros2_safety/srv/SetLock', { cause, detail })
+      if (!res.ok) return toolError('robot_safety_lock', command, 'SERVICE_FAILED', res.stdout.trim() || 'set_lock 调用失败（safety_monitor 在运行吗？）')
+      return okResult('robot_safety_lock', command, parseServiceCall(res.stdout))
+    },
+  })
+}
+
+/**
+ * L2: human-gated unlock (recovery flow: unlock -> re-home -> resume).
+ */
+function makeRobotSafetyUnlockTool(deps: ToolDeps) {
+  return defineTool({
+    name: 'robot_safety_unlock',
+    description:
+      'Human-gated unlock (approval required): clear the LOCKED latch via the safety_monitor /safety/unlock service. ' +
+      'Recovery flow: unlock -> re-home the robot -> resume the task. Only meaningful when the monitor is running and LOCKED.',
+    parameters: {
+      requestId: { type: 'string', default: '', description: 'A request id for the audit trail.' },
+      cause: { type: 'string', default: 'human confirmed safe', description: 'Human-confirmed unlock reason.' },
+    },
+    output: { schema: resultSchema, render: renderResult },
+    async execute(args, exec) {
+      const params = args as Record<string, unknown>
+      const requestId = strOrUndefined(params.requestId) ?? `req-${Date.now()}`
+      const cause = strOrUndefined(params.cause) ?? 'human confirmed safe'
+      const command = `robot_safety_unlock requestId=${requestId}`
+      const approval = await requestApproval(deps, exec, 'robot_safety_unlock',
+        `将解锁机器人（requestId=${requestId}，原因：${cause}）。请确认现场安全；解锁后建议先回 home 再恢复任务。`)
+      if (!approval.allowed) return deniedResult('robot_safety_unlock', command, approval.outcome)
+      const res = await callSafetyService(deps, '/safety/unlock', 'dsh_ros2_safety/srv/Unlock', { request_id: requestId, cause })
+      if (!res.ok) return toolError('robot_safety_unlock', command, 'SERVICE_FAILED', res.stdout.trim() || 'unlock 调用失败（safety_monitor 在运行吗？）')
+      return okResult('robot_safety_unlock', command, parseServiceCall(res.stdout))
+    },
+  })
+}
+
 function makeMoveitStatusTool(deps: ToolDeps) {
   return defineTool({
     name: 'moveit_status',
@@ -1924,6 +2274,10 @@ function makeMoveitMoveTool(deps: ToolDeps) {
       }
       const planOnly = params.planOnly === true
       const command = `moveit_move mode=${mode} group=${group}`
+      // Safety gate: LOCKED /safety/state always rejects execution modes
+      // (plan-only and dry trajectory-out runs do not move the robot).
+      const gate = await enforceSafetyLock(deps, 'moveit_move', command, { skip: planOnly })
+      if (gate.denied) return gate.denied
       const approval = await requestApproval(deps, exec, 'moveit_move',
         `将调用 move_group 规划并${planOnly ? '（仅规划）' : '执行'} ${mode}：组 ${group}（${key ? `${key}=${String(params[key] ?? '')}` : ''}）。${planOnly ? '' : '将真实移动机器人。'}`)
       if (!approval.allowed) return deniedResult('moveit_move', command, approval.outcome)
@@ -1946,7 +2300,9 @@ function makeMoveitMoveTool(deps: ToolDeps) {
         return toolError('moveit_move', command, res.error ?? 'COMMAND_FAILED',
           res.stderr.trim() || `exit ${res.exitCode ?? 'unknown'}`)
       }
-      return okResult('moveit_move', command, parseJsonOrRaw(res.stdout))
+      const result = okResult('moveit_move', command, parseJsonOrRaw(res.stdout))
+      if (gate.warning) result.warnings = [gate.warning]
+      return result
     },
   })
 }

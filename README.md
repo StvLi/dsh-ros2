@@ -7,14 +7,14 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![ROS2](https://img.shields.io/badge/ROS2-Jazzy-orange)]()
 ![Node](https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-brightgreen)
-![Tools](https://img.shields.io/badge/tools-45-blue)
+![Tools](https://img.shields.io/badge/tools-50-blue)
 
 **dsh-ros2** gives a DSH agent full robot development / debugging capabilities on any host with ROS2, organized in four capability tiers:
 
 | Tier | Capability | Safety boundary |
 | --- | --- | --- |
-| **L1** | Read-only diagnostics: package/workspace/dependency checks, node/topic/service/action/param/interface enumeration, one-shot topic sampling, TF tree queries, whole-graph topology JSON, `ros2doctor`, bag summaries, MoveIt discovery, robot-profile load | Pure read-only, no approval |
-| **L2** | Approval-gated management: `colcon build` (background job), `rosdep install`, message skeleton generation, `param set`, bounded `bag record`, one-click ROS2 install, launch management, rosbag replay, MoveIt motion, zero-pose calibration, robot registration & topology learning | Writes always ask first (fail-closed) |
+| **L1** | Read-only diagnostics: package/workspace/dependency checks, node/topic/service/action/param/interface enumeration, one-shot topic sampling, TF tree queries, whole-graph topology JSON, `ros2doctor`, bag summaries, MoveIt discovery, robot-profile load, safety-state read & VLM semantic arbitration | Pure read-only, no approval |
+| **L2** | Approval-gated management: `colcon build` (background job), `rosdep install`, message skeleton generation, `param set`, bounded `bag record`, one-click ROS2 install, launch management, rosbag replay, MoveIt motion, zero-pose calibration, robot registration & topology learning, **safety_monitor start / human-gated lock / unlock** | Writes always ask first (fail-closed) |
 | **L3** | Visualization: RViz2 / rqt lifecycle management, screenshots, multimodal vision description, xdotool-level window interaction | Local session operations |
 | **L4** | Realtime vision: parallel VLM ROS2 node + image-topic acquisition (headless; `vision_bringup` periodically refreshes per-topic bridges), plus **RViz2 offscreen rendering** (OGRE kernel → `/rviz/scene` topic) | Pure software/GPU rendering, no display needed |
 
@@ -34,12 +34,13 @@ All tools run plain `ros2` / `colcon` / `rosdep` CLI commands on the host; L1 ne
 
 ## Features
 
-- **Zero-intrusion diagnostics**: 45 tools cover most ROS2 debugging scenarios — from "is the package installed?" to "what is on this topic right now?", one command, one answer;
+- **Zero-intrusion diagnostics**: 50 tools cover most ROS2 debugging scenarios — from "is the package installed?" to "what is on this topic right now?", one command, one answer;
 - **Whole-graph topology**: `ros2_graph` folds nodes/publishers/subscribers/services/actions into one JSON — see the system structure in seconds;
 - **Approval-gated writes**: builds, dependency installs, message scaffolding etc. go through the DSH approval service; fail-closed, denial = failure;
 - **Visualization as a service**: "see" headlessly — screenshots / multimodal description / window interaction are fully local, no remote display;
 - **Parallel realtime vision**: the VLM runs in a separate ROS2 process (`vlm_node`, service `/vlm/describe`); images come from topics (`sensor_msgs/Image` / `CompressedImage`); `vision_bringup` auto-creates one bridge per image topic, headless-ready;
 - **RViz2 offscreen rendering (motion render ~22 Hz on llvmpipe; 30 Hz full rate with GPU)**: the real rviz render kernel (`rviz_common` + OGRE) renders any `.rviz` scene on a virtual display and publishes it as an image topic — no screenshots, no X11 window-stacking dependency. **Performance optimizations**: open3d low-poly meshes (`scripts/simplify_visual_meshes.py`) + direct OGRE pixel read (no PNG round-trip) + double-render elimination → motion rendering 1.9 → ~22 Hz on llvmpipe (11×), and **30 Hz full rate with NVIDIA GPU passthrough** (v0.9.3), memory −2.5×;
+- **Real-time safety framework** (`safety_monitor` node + `robot_safety_*` tools, see [Safety framework](#safety-framework)): layered defense — geometric pre-check → reactive monitors (motion tracking/stall with hysteresis, joint-feedback loss, watchdog, optional torque) → event-driven VLM semantic arbitration → human arbitration. Latched `NORMAL`/`LOCKED` state machine (fail-closed, non-fatal events never lock); every threshold/topic/lock-action is registered per robot in the profile `safety` section;
 - **Bundled skills (4)**: `ros2-diagnostics` (which tool to use when, narrow-down methodology), `robot-state-vision-analysis` (status → offscreen render → VLM → cross-check), `robot-registration` (first-contact body profile + topology baseline) and `robot-retrieval` (instant profile load and bring-up).
 
 ---
@@ -109,6 +110,8 @@ ros2_doctor                         # system health report
 | `ros2_doctor` | `ros2 doctor` | System health report |
 | `ros2_bag_info` | `ros2 bag info <path>` | Bag summary |
 | `moveit_discover` | scans MoveIt packages + parses SRDF + probes move_group | Discover MoveIt2 config packages (any package shipping an SRDF), their planning groups and named poses, and whether `/move_action` / `/execute_trajectory` / `/compute_cartesian_path` are online. Pass `srdf` to parse a specific file directly — generic, not bound to a specific package |
+| `robot_safety_state` | `ros2 topic echo /safety/state --once` | Read the latched safety state (NORMAL / LOCKED + severity + trigger cause + detail); reports `monitor_running: false` when the monitor is offline |
+| `robot_safety_arbitrate` | `ros2 run dsh_ros2_safety safety_vlm_arbitrate ...` | Event-driven VLM semantic arbitration (plan change / post-anomaly): fixed-format prompt + fresh offscreen frame via `/vlm/describe`; any non-safe verdict flags human arbitration |
 
 ### L2 management (approval-gated)
 
@@ -130,7 +133,9 @@ Every L2 tool performs a **write operation** and asks the user first via the DSH
 | `robot_register` | collects URDF/TF/cameras/MoveIt/zero-pose → writes `~/.dsh-ros2/robots/<name>.yaml` | Register a robot body profile on first contact (approval-gated) for instant later reuse |
 | `robot_load` | reads `~/.dsh-ros2/robots/<name>.yaml` | Load a registered robot profile as structured JSON (fast path — no discovery); empty name lists all profiles |
 | `robot_topology` | aggregate snapshot + progressive node learning (strict schema) | Robot comms topology trade-off: `snapshot` (approval) records node/topic/service lists (light, not verbose); `learn` (approval) records ONE important node's role/description + pub/sub/srv/act; `show` (read-only) reads them back |
-| `moveit_move` | unified: `/move_action` + `/execute_trajectory` | **One tool, five essential modes** (approval-gated): `joint_abs` (关节角绝对), `joint_rel` (关节角相对增量), `pose_abs` (末端位姿绝对), `pose_rel` (末端位姿相对增量, frame ee/world), `trajectory` (轨迹执行). Generic: standard moveit_msgs + SRDF only; `planOnly` + `trajectoryOut` split plan/execute |
+| `moveit_move` | unified: `/move_action` + `/execute_trajectory` | **One tool, five essential modes** (approval-gated): `joint_abs` (关节角绝对), `joint_rel` (关节角相对增量), `pose_abs` (末端位姿绝对), `pose_rel` (末端位姿相对增量, frame ee/world), `trajectory` (轨迹执行). Generic: standard moveit_msgs + SRDF only; `planOnly` + `trajectoryOut` split plan/execute. **Gates on `/safety/state` before executing**: LOCKED always rejected; monitor-down rejects under `safetyStrict: reject` |
+| `robot_safety_start` | `ros2 run dsh_ros2_safety safety_monitor --profile <yaml>` | Start the generic safety monitor as a **background job** (approval-gated); all robot-specific values come from the profile `safety` section |
+| `robot_safety_lock` / `robot_safety_unlock` | `ros2 service call /safety/set_lock|unlock ...` | **Human-gated** explicit lock / unlock (L2 approval before the call); lock is latched until a human unlocks (recovery: unlock → re-home → resume) |
 | `moveit_status` | probes move_group interfaces + samples `/joint_states` | Runtime status: online probe + current joint state + SRDF planning frame (read-only) |
 
 ### L3 visualization
@@ -226,6 +231,49 @@ matters (auto-resolved by package scan, or explicit `srdf`/`package`).
 
 ---
 
+## Safety framework
+
+**Design intent.** A two-tier strategy that keeps real-time and semantic
+judgment apart (full contract: `docs/safety-handover.md`, the handover doc for
+downstream robot-adaptation agents — generic framework/interfaces belong here,
+body-specific data sources/schemes/algorithms belong downstream):
+
+```
+geometric pre-check (pre-execution, µs-ms)
+  → reactive monitors (in-execution: motion tracking/stall + hysteresis,
+    joint-feedback loss, watchdog, optional torque; detect 1-10ms, respond ≤100ms)
+  → VLM semantic arbitration (post plan-change / anomaly, seconds — pulled up only when needed)
+  → human arbitration (non-safe verdicts always escalate; human-gated unlock)
+```
+
+- **`safety_monitor` node** (`dsh_ros2_safety` package): subscribes the joint
+  feedback (+ optional commanded stream / torque stream), runs the checkers on
+  a `control_frequency` timer, and latches **`LOCKED`** on any CRITICAL event —
+  the latch persists until a human unlocks (no auto-reset into the same danger).
+  Publishes `/safety/state` (transient-local), `/safety/event`,
+  `/safety/heartbeat`, `/safety/lock_active`; services `/safety/get_state`,
+  `/safety/unlock`, `/safety/set_lock`.
+- **Fail-closed, non-fatal never locks**: watchdog separates `critical` (down →
+  lock) from `observed` (down → WARNING only); single-frame noise is filtered
+  by M-of-K hysteresis; a `WARNING` never latches.
+- **Per-robot registration**: `robot_register` writes a generic `safety`
+  section (URDF-derived velocity/effort limits) and auto-launches the monitor;
+  `robot_profile.py safety set <key> <json>` updates any threshold/topic/list
+  (schema-validated). Torque checking auto-disables when no effort feedback
+  exists; the computed-torque feedforward input, YOLO triggers and the
+  non-ROS estop path are reserved interfaces (not implemented).
+- **Tool-layer gate**: `moveit_move` consults `/safety/state` before executing
+  — LOCKED always rejected (`SAFETY_LOCKED`); if the monitor is unreachable,
+  `safetyStrict: 'reject'` (fail-closed) or `'warn'` (default) proceed-with-
+  warning. `robot_safety_arbitrate` runs the fixed-format VLM arbitration and
+  flags any non-safe verdict for human arbitration.
+- **Forensics**: a ring buffer of joint/torque samples is dumped to
+  `forensics.dump_dir` on every CRITICAL lock, for post-hoc / VLM diagnosis.
+
+The `safety_core` pure logic ships with a fault-injection self test
+(`python3 safety/scripts/safety_core.py --selftest`, 12 scenarios) — no ROS2
+needed to verify the state machine.
+
 ## Robot profiles & communication topology
 
 **Design intent.** A robot's body (URDF links/joints, cameras, MoveIt groups,
@@ -239,7 +287,7 @@ important nodes as you actually work with them.
 
 | Tool | Role |
 | --- | --- |
-| `robot_register` (L2) | Collect body info (URDF links/joints, TF root, cameras, MoveIt SRDF groups, **auto-links the zero-pose calibration**) into the profile |
+| `robot_register` (L2) | Collect body info (URDF links/joints, TF root, cameras, MoveIt SRDF groups, **auto-links the zero-pose calibration** and a generic **`safety` section** with URDF-derived limits) into the profile; auto-launches the safety monitor (`startSafety: false` to skip) |
 | `robot_load` (L1) | Load the profile as structured JSON — the fast path, no rediscovery; empty name lists all |
 | `robot_topology` (L1/L2) | Comms graph: `snapshot` (L2, aggregate lists), `learn` (L2, one important node's role/description + pub/sub/srv/act, strict schema), `show` (L1, read back) |
 | `ros2_zero_pose_semantics` (L2) | Calibrate zero pose via render + VLM + user confirm (arm/elbow/palm combos or free text); the profile auto-includes it |
@@ -296,7 +344,7 @@ them back instantly — one call instead of N discovery calls.
 ```
 dsh-ros2/
 ├── src/                  # DSH plugin core (TypeScript)
-│   ├── index.ts          # entry: registers 45 tools + 4 skills
+│   ├── index.ts          # entry: registers 50 tools + 4 skills
 │   ├── tools.ts          # tool definitions (L1/L2/L3 params & command mapping)
 │   ├── vision.ts         # L4 vision tools (snapshot / analyze / topics)
 │   ├── gui.ts            # L3 GUI lifecycle & interaction
@@ -305,8 +353,9 @@ dsh-ros2/
 │   └── config.ts         # configuration read & validation
 ├── vlm/                  # ROS2 package dsh_ros2_vlm (Python): vlm_node / vision_bringup / vlm_bridge_node / image_snapshot / vlm_call / vlm_bridge_call
 ├── offscreen/            # ROS2 package dsh_ros2_rviz_offscreen (C++): rviz_offscreen_node (OGRE offscreen render → /rviz/scene)
-├── docs/                 # architecture.md, compatibility.md, robot-state-vision-test.md, gpu-passthrough-test.md, screenshots
-├── tests/                # vitest (96 cases; CLI outputs mocked)
+├── safety/               # ROS2 package dsh_ros2_safety (Python): safety_monitor node + safety_core (pure logic, --selftest) + safety_vlm_arbitrate + SafetyState/Event msgs + Unlock/SetLock srvs
+├── docs/                 # architecture.md, compatibility.md, robot-state-vision-test.md, gpu-passthrough-test.md, **safety-handover.md**, screenshots
+├── tests/                # vitest (109 cases; CLI outputs mocked)
 ├── .github/workflows/    # CI: Node 22/24 → typecheck/test/build/pack validation
 ├── PUBLISH.md            # open-source publishing checklist (GitHub + npm + DSH community)
 └── CHANGELOG.md          # version history (Keep a Changelog)
@@ -332,7 +381,7 @@ dsh-ros2/
 ```bash
 pnpm install
 pnpm run typecheck   # tsc --noEmit
-pnpm run test        # vitest (96 cases; CLI outputs mocked)
+pnpm run test        # vitest (109 cases; CLI outputs mocked)
 pnpm run build       # tsc -> lib/ + lib/types/
 ```
 
