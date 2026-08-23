@@ -40,7 +40,7 @@
 - **可视化即服务**：无头也能"看"——截图/多模态描述/窗口交互全部本地化，不依赖远程显示；
 - **并行实时视觉**：VLM 跑在独立 ROS2 进程（`vlm_node`，服务 `/vlm/describe`），图像来自话题（`sensor_msgs/Image` / `CompressedImage`），`vision_bringup` 自动为每个图像话题建桥，无头可用；
 - **RViz2 离屏渲染（llvmpipe ~22 Hz，GPU 直通 30 Hz 满帧）**：真实 rviz 渲染内核（`rviz_common` + OGRE）在虚拟显示器下渲染任意 `.rviz` 场景并发布为图像话题——不截图、不依赖 X11 窗口层级。**性能优化**：open3d 低模 mesh（`scripts/simplify_visual_meshes.py`）+ OGRE 直接读像素（跳过 PNG 中转）+ 消除双重渲染 → 动作渲染 1.9 → llvmpipe ~22 Hz（11×），NVIDIA GPU 直通达 **30 Hz 满帧**（v0.9.3），内存 -2.5×；
-- **实时安全框架**（`safety_monitor` 节点 + `robot_safety_*` 工具，详见[安全框架](#安全框架)）：分层防御——几何预检 → 反应式监视（轨迹跟踪/堵转 + 迟滞、关节反馈丢失、看门狗、可选力矩）→ 事件驱动 VLM 语义仲裁 → 人工仲裁。锁存 `NORMAL`/`LOCKED` 状态机（fail-closed，非致命事件永不锁死）；阈值/话题/锁动作全部按机器人在档案 `safety` 段注册；
+- **实时安全框架**（`safety_monitor` 节点 + `robot_safety_*` 工具，详见[安全框架](#安全框架)）：分层防御——工具层安全门（执行前查 `/safety/state`）→ 反应式监视（轨迹跟踪/堵转 + 迟滞、关节反馈丢失、看门狗、可选力矩）→ 事件驱动 VLM 语义仲裁 → 人工仲裁。锁存 `NORMAL`/`LOCKED` 状态机（锁存直至人工解锁；非致命事件永不锁死）；阈值/话题/锁动作全部按机器人在档案 `safety` 段注册；几何预检（关节限位/速度/FK 自碰撞）为预留层；
 - **内置技能**：`ros2-diagnostics`（何时用哪个工具、如何由宽到窄排查）与 `robot-state-vision-analysis`（状态读取 → 离屏渲染 → VLM → 交叉验证的完整流水线）。
 
 ---
@@ -72,6 +72,7 @@ dsh plugin --profile <profile> add dsh-ros2
         vision:
           provider: gemini                               # mock | gemini | openai
           apiKey: ${GEMINI_API_KEY}                      # 经环境变量/密钥管理注入，勿写死
+        safetyStrict: warn                               # 安全监视器失联时运动工具的安全门策略：'warn'（默认）| 'reject'（fail-closed）；LOCKED 一律拒绝
 ```
 
 ### 三分钟体验
@@ -232,8 +233,8 @@ MoveIt 包——只需 SRDF 路径（包扫描自动解析，或显式 `srdf`/`p
 ——本体适配交接文档：通用框架/接口归本仓库，本体数据源/方案/算法归下游）：
 
 ```
-几何预检（执行前，µs-ms）
-  → 反应式监视（执行中：轨迹跟踪/堵转 + 迟滞、关节反馈丢失、看门狗、可选力矩；检测 1-10ms，响应 ≤100ms）
+工具层安全门（执行前：/safety/state 是否 LOCKED；监视器失联按 safetyStrict）
+  → 反应式监视（执行中：轨迹跟踪/堵转 + 迟滞、关节反馈丢失、看门狗、可选力矩；控制频率检测，响应 ≤100ms 预算）
   → VLM 语义仲裁（方案变更/异常后，秒级——不必要时不拉起）
   → 人工仲裁（非 safe 一律升级人工；人工门解锁）
 ```
@@ -243,18 +244,28 @@ MoveIt 包——只需 SRDF 路径（包扫描自动解析，或显式 `srdf`/`p
   不因条件消失自动恢复，必须人工解锁（避免重新撞进同一危险）。发布
   `/safety/state`（transient-local）、`/safety/event`、`/safety/heartbeat`、
   `/safety/lock_active`；服务 `/safety/get_state`、`/safety/unlock`、`/safety/set_lock`。
-- **Fail-closed，非致命不锁**：看门狗区分 `critical`（掉线即锁）与 `observed`
-  （掉线仅 WARNING）；单帧噪声由 M-of-K 迟滞过滤；WARNING 永不锁存。
+- **锁存，非致命不锁**：任何 CRITICAL 事件锁存 `LOCKED`（锁存不因条件消失自动
+  恢复，必须人工解锁——避免重新撞进同一危险）；看门狗区分 `critical`（掉线即锁）
+  与 `observed`（掉线仅 WARNING）；单帧噪声由 M-of-K 迟滞过滤；WARNING 永不锁存。
+  监视器失联时工具层的 fail-closed 按 `safetyStrict: 'reject'`（默认 `'warn'` 放行并提示）。
 - **按机器人注册**：`robot_register` 写入通用 `safety` 段（URDF 派生速度/力矩限位）
   并自动拉起监视器；`robot_profile.py safety set <key> <json>` 可改任意阈值/话题/名单
-  （schema 校验）。无力矩反馈时力矩检查自动禁用；计算力矩前馈输入、YOLO 触发、
-  非 ROS 急停均为预留接口（不实现）。
+  （schema 校验）。无力矩反馈时力矩检查自动禁用。**预留层**（接口已注册，不实现）：
+  几何预检（指令路径上的关节限位/速度/FK 自碰撞——`motion.max_velocity` /
+  `max_acceleration`）、计算力矩前馈输入（`torque.feedforward_topic`）、YOLO 类
+  轻量触发、非 ROS 急停通路（`estop`）。
 - **工具层安全门**：`moveit_move` 执行前查 `/safety/state`——LOCKED 恒拒绝
   （`SAFETY_LOCKED`）；监视器失联时 `safetyStrict: 'reject'`（fail-closed）拒绝 /
   `'warn'`（默认）放行并提示。`robot_safety_arbitrate` 跑固定格式化 VLM 仲裁，
   非 safe 一律提示人工裁决。
 - **取证**：关节/力矩环形缓冲在每次 CRITICAL 锁死时落盘到 `forensics.dump_dir`，
   供事后 / VLM 诊断。
+
+```bash
+# 构建 safety 包（与 vlm/、offscreen/ 同一 colcon 工作区）
+ln -s <repo>/safety /tmp/vlm_ws/src/dsh_ros2_safety
+cd /tmp/vlm_ws && colcon build --symlink-install && source install/setup.bash
+```
 
 `safety_core` 纯逻辑自带故障注入自测（`python3 safety/scripts/safety_core.py
 --selftest`，12 个场景）——无需 ROS2 即可验证状态机。

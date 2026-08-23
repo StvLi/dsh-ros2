@@ -40,7 +40,7 @@ All tools run plain `ros2` / `colcon` / `rosdep` CLI commands on the host; L1 ne
 - **Visualization as a service**: "see" headlessly — screenshots / multimodal description / window interaction are fully local, no remote display;
 - **Parallel realtime vision**: the VLM runs in a separate ROS2 process (`vlm_node`, service `/vlm/describe`); images come from topics (`sensor_msgs/Image` / `CompressedImage`); `vision_bringup` auto-creates one bridge per image topic, headless-ready;
 - **RViz2 offscreen rendering (motion render ~22 Hz on llvmpipe; 30 Hz full rate with GPU)**: the real rviz render kernel (`rviz_common` + OGRE) renders any `.rviz` scene on a virtual display and publishes it as an image topic — no screenshots, no X11 window-stacking dependency. **Performance optimizations**: open3d low-poly meshes (`scripts/simplify_visual_meshes.py`) + direct OGRE pixel read (no PNG round-trip) + double-render elimination → motion rendering 1.9 → ~22 Hz on llvmpipe (11×), and **30 Hz full rate with NVIDIA GPU passthrough** (v0.9.3), memory −2.5×;
-- **Real-time safety framework** (`safety_monitor` node + `robot_safety_*` tools, see [Safety framework](#safety-framework)): layered defense — geometric pre-check → reactive monitors (motion tracking/stall with hysteresis, joint-feedback loss, watchdog, optional torque) → event-driven VLM semantic arbitration → human arbitration. Latched `NORMAL`/`LOCKED` state machine (fail-closed, non-fatal events never lock); every threshold/topic/lock-action is registered per robot in the profile `safety` section;
+- **Real-time safety framework** (`safety_monitor` node + `robot_safety_*` tools, see [Safety framework](#safety-framework)): layered defense — tool-layer safety gate (pre-execution `/safety/state` check) → reactive monitors (motion tracking/stall with hysteresis, joint-feedback loss, watchdog, optional torque) → event-driven VLM semantic arbitration → human arbitration. Latched `NORMAL`/`LOCKED` state machine (lock persists until a human unlocks; non-fatal events never lock); every threshold/topic/lock-action is registered per robot in the profile `safety` section; the geometric pre-check (joint limits / velocity / FK self-collision) is a reserved layer;
 - **Bundled skills (4)**: `ros2-diagnostics` (which tool to use when, narrow-down methodology), `robot-state-vision-analysis` (status → offscreen render → VLM → cross-check), `robot-registration` (first-contact body profile + topology baseline) and `robot-retrieval` (instant profile load and bring-up).
 
 ---
@@ -72,6 +72,7 @@ dsh plugin --profile <profile> add dsh-ros2
         vision:
           provider: gemini                               # mock | gemini | openai
           apiKey: ${GEMINI_API_KEY}                      # inject via env/secret manager, never hard-code
+        safetyStrict: warn                               # motion-tool gate when the safety monitor is unreachable: 'warn' (default) | 'reject' (fail-closed); LOCKED always rejects
 ```
 
 ### Three-minute taste
@@ -239,9 +240,10 @@ downstream robot-adaptation agents — generic framework/interfaces belong here,
 body-specific data sources/schemes/algorithms belong downstream):
 
 ```
-geometric pre-check (pre-execution, µs-ms)
+tool-layer safety gate (pre-execution: /safety/state LOCKED; monitor-down per safetyStrict)
   → reactive monitors (in-execution: motion tracking/stall + hysteresis,
-    joint-feedback loss, watchdog, optional torque; detect 1-10ms, respond ≤100ms)
+    joint-feedback loss, watchdog, optional torque; detect at control frequency,
+    response budget ≤100 ms)
   → VLM semantic arbitration (post plan-change / anomaly, seconds — pulled up only when needed)
   → human arbitration (non-safe verdicts always escalate; human-gated unlock)
 ```
@@ -253,15 +255,21 @@ geometric pre-check (pre-execution, µs-ms)
   Publishes `/safety/state` (transient-local), `/safety/event`,
   `/safety/heartbeat`, `/safety/lock_active`; services `/safety/get_state`,
   `/safety/unlock`, `/safety/set_lock`.
-- **Fail-closed, non-fatal never locks**: watchdog separates `critical` (down →
-  lock) from `observed` (down → WARNING only); single-frame noise is filtered
-  by M-of-K hysteresis; a `WARNING` never latches.
+- **Latched lock, non-fatal never locks**: any CRITICAL event latches `LOCKED`
+  (the latch persists until a human unlocks — no auto-reset into the same
+  danger); watchdog separates `critical` (down → lock) from `observed` (down →
+  WARNING only); single-frame noise is filtered by M-of-K hysteresis; a
+  `WARNING` never latches. Tool-layer fail-closed on monitor-down is per
+  `safetyStrict: 'reject'` (default `'warn'` proceeds with a warning).
 - **Per-robot registration**: `robot_register` writes a generic `safety`
   section (URDF-derived velocity/effort limits) and auto-launches the monitor;
   `robot_profile.py safety set <key> <json>` updates any threshold/topic/list
   (schema-validated). Torque checking auto-disables when no effort feedback
-  exists; the computed-torque feedforward input, YOLO triggers and the
-  non-ROS estop path are reserved interfaces (not implemented).
+  exists. **Reserved layers** (interfaces registered, not implemented): the
+  geometric pre-check (joint-limit / velocity / FK self-collision on the command
+  path — `motion.max_velocity` / `max_acceleration`), the computed-torque
+  feedforward input (`torque.feedforward_topic`), YOLO-style lightweight
+  triggers, and the non-ROS estop path (`estop`).
 - **Tool-layer gate**: `moveit_move` consults `/safety/state` before executing
   — LOCKED always rejected (`SAFETY_LOCKED`); if the monitor is unreachable,
   `safetyStrict: 'reject'` (fail-closed) or `'warn'` (default) proceed-with-
@@ -269,6 +277,12 @@ geometric pre-check (pre-execution, µs-ms)
   flags any non-safe verdict for human arbitration.
 - **Forensics**: a ring buffer of joint/torque samples is dumped to
   `forensics.dump_dir` on every CRITICAL lock, for post-hoc / VLM diagnosis.
+
+```bash
+# build the safety package (same colcon workspace as vlm/ and offscreen/)
+ln -s <repo>/safety /tmp/vlm_ws/src/dsh_ros2_safety
+cd /tmp/vlm_ws && colcon build --symlink-install && source install/setup.bash
+```
 
 The `safety_core` pure logic ships with a fault-injection self test
 (`python3 safety/scripts/safety_core.py --selftest`, 12 scenarios) — no ROS2
