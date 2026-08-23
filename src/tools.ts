@@ -419,6 +419,7 @@ export function createRos2Tools(deps: ToolDeps) {
   // SRDF; motion uses only standard moveit_msgs, never a specific package).
   tools.push(makeMoveitDiscoverTool(deps))
   tools.push(makeMoveitMoveToPoseTool(deps))
+  tools.push(makeMoveitCartesianTool(deps))
   // L2 management tools (write operations, approval-gated).
   tools.push(makeBuildTool(deps))
   tools.push(makeRosdepInstallTool(deps))
@@ -1609,6 +1610,97 @@ function makeMoveitMoveToPoseTool(deps: ToolDeps) {
       }
       const data = parseJsonOrRaw(res.stdout)
       return okResult('moveit_move_to_pose', command, data)
+    },
+  })
+}
+
+/**
+ * L2: translate a MoveIt group's end-effector along a Cartesian path
+ * (approval-gated; moves the real robot when move_group is online).
+ * Generic: uses only standard moveit_msgs (/compute_cartesian_path +
+ * /execute_trajectory) and the SRDF (planning frame from virtual_joint, EE
+ * link from the group chain tip) — never a specific MoveIt package.
+ */
+function makeMoveitCartesianTool(deps: ToolDeps) {
+  return defineTool({
+    name: 'moveit_cartesian',
+    description:
+      'Translate a MoveIt group\'s end-effector by (dx, dy, dz) meters along a Cartesian path (approval-gated; moves the real robot). ' +
+      'Generic: uses only standard moveit_msgs (/compute_cartesian_path + /execute_trajectory) and the SRDF (planning frame from virtual_joint, EE link from the group chain tip, both overridable). ' +
+      'frame=ee offsets in the end-effector frame (default), frame=world in the planning frame. Long translations are split into segments. planOnly plans without executing.',
+    parameters: {
+      group: { type: 'string', description: 'MoveIt planning group name (e.g. right_arm, from moveit_discover).' },
+      dx: { type: 'number', default: 0, description: 'Translation along X (m).' },
+      dy: { type: 'number', default: 0, description: 'Translation along Y (m).' },
+      dz: { type: 'number', default: 0, description: 'Translation along Z (m).' },
+      frame: { type: 'string', default: 'ee', description: 'Offset frame: ee (end-effector, default) or world (planning frame).' },
+      link: { type: 'string', default: '', description: 'EE link (default: group chain tip from the SRDF).' },
+      srdf: { type: 'string', default: '', description: 'SRDF file path (default: discovered via package scan).' },
+      package: { type: 'string', default: '', description: 'MoveIt config package name to load the SRDF from.' },
+      eefStep: { type: 'number', default: 0.005, description: 'Cartesian waypoint spacing (m).' },
+      jumpThreshold: { type: 'number', default: 0, description: 'Jump threshold for the Cartesian planner.' },
+      avoidCollisions: { type: 'boolean', default: false, description: 'Enable collision avoidance.' },
+      minFraction: { type: 'number', default: 0.95, description: 'Minimum achieved path fraction per segment.' },
+      planOnly: { type: 'boolean', default: false, description: 'Plan only, do not execute.' },
+      timeoutMs: { type: 'number', default: 90000, description: 'Action timeout in ms.' },
+    },
+    output: { schema: resultSchema, render: renderResult },
+    async execute(args, exec) {
+      const params = args as Record<string, unknown>
+      const group = strOrUndefined(params.group) ?? ''
+      const dx = numOrUndefined(params.dx) ?? 0
+      const dy = numOrUndefined(params.dy) ?? 0
+      const dz = numOrUndefined(params.dz) ?? 0
+      if (!group) {
+        return toolError('moveit_cartesian', 'moveit_cartesian', 'MISSING_PARAM', 'group 必填（先用 moveit_discover 查询）')
+      }
+      if (Math.abs(dx) + Math.abs(dy) + Math.abs(dz) < 1e-9) {
+        return toolError('moveit_cartesian', 'moveit_cartesian', 'MISSING_PARAM', 'dx/dy/dz 不能全为 0')
+      }
+      // Resolve SRDF (same as moveit_move_to_pose).
+      const srdf = strOrUndefined(params.srdf) ?? ''
+      const pkg = strOrUndefined(params.package) ?? ''
+      let srdfResolved = srdf
+      if (!srdfResolved) {
+        const scan = await deps.run('python3', [scriptPath('moveit_discover.py'), ...(pkg ? ['--package', pkg] : [])], { timeoutMs: 90000 })
+        const info = scan.ok ? (parseJsonOrRaw(scan.stdout) as { packages?: { package: string; srdf: string }[] }) : { packages: [] }
+        const hit = (info.packages ?? []).find((p) => !pkg || p.package === pkg)
+        if (hit) srdfResolved = hit.srdf
+      }
+      if (!srdfResolved) {
+        return toolError('moveit_cartesian', 'moveit_cartesian', 'SRDF_NOT_FOUND',
+          '未找到 SRDF（请安装/构建 moveit 配置包，或显式传 srdf 路径）')
+      }
+      const planOnly = params.planOnly === true
+      const command = `moveit_cartesian group=${group} dx=${dx} dy=${dy} dz=${dz} frame=${strOrUndefined(params.frame) ?? 'ee'}${planOnly ? ' (plan-only)' : ''}`
+      const approval = await requestApproval(deps, exec, 'moveit_cartesian',
+        `将调用 move_group 规划并${planOnly ? '（仅规划）' : '执行'}笛卡尔平移：组 ${group} 末端沿 ${strOrUndefined(params.frame) ?? 'ee'} 系 (${dx}, ${dy}, ${dz}) m。${planOnly ? '' : '将真实移动机器人。'}`)
+      if (!approval.allowed) return deniedResult('moveit_cartesian', command, approval.outcome)
+
+      const helperArgs = [
+        scriptPath('moveit_cartesian.py'),
+        '--srdf', srdfResolved,
+        '--group', group,
+        '--dx', String(dx),
+        '--dy', String(dy),
+        '--dz', String(dz),
+        ...(strOrUndefined(params.frame) ? ['--frame', strOrUndefined(params.frame)!] : []),
+        ...(strOrUndefined(params.link) ? ['--link', strOrUndefined(params.link)!] : []),
+        ...(params.avoidCollisions ? ['--avoid-collisions'] : []),
+        ...(planOnly ? ['--plan-only'] : []),
+        '--eef-step', String(numOrUndefined(params.eefStep) ?? 0.005),
+        '--jump-threshold', String(numOrUndefined(params.jumpThreshold) ?? 0),
+        '--min-fraction', String(numOrUndefined(params.minFraction) ?? 0.95),
+        '--timeout', String(Math.max(10, Math.floor(numOrUndefined(params.timeoutMs) ?? 90000) / 1000)),
+      ]
+      const timeoutMs = Math.max(30000, numOrUndefined(params.timeoutMs) ?? 90000) + 10000
+      const res = await deps.run('python3', helperArgs, { timeoutMs })
+      if (!res.ok && res.stdout.trim().length === 0) {
+        return toolError('moveit_cartesian', command, res.error ?? 'COMMAND_FAILED',
+          res.stderr.trim() || `exit ${res.exitCode ?? 'unknown'}`)
+      }
+      const data = parseJsonOrRaw(res.stdout)
+      return okResult('moveit_cartesian', command, data)
     },
   })
 }

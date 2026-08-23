@@ -4,6 +4,25 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [SemVer](https://semver.org/).
 
+## [0.12.0] - 2026-08-23
+
+### Added
+
+- **`moveit_cartesian`（第 41 个工具，L2 审批）**——沿笛卡尔路径平移规划组末端
+  (dx, dy, dz) 米，通用（不绑定具体 moveit 包）：
+  - 仅用标准 moveit_msgs（`/compute_cartesian_path` 服务 + `/execute_trajectory`
+    action）+ SRDF；**规划帧取自 `virtual_joint` 的 parent_frame、EE link 取自
+    组 chain 的 tip_link**（均可参数覆盖）；
+  - `frame=ee`（末端系偏移，默认）/ `frame=world`（规划帧）；长平移按段拆分
+    （默认 0.02m/段）逐段规划执行，任一段 fraction 低于 `minFraction` 即中止；
+  - `planOnly` 仅规划不执行、`avoidCollisions`、`eefStep`、`jumpThreshold`、
+    `timeout` 等参数。
+- `moveit_discover` 增强：规划组解析输出 chain 的 base/tip（EE link 来源）。
+- 测试：91 例全绿（新增 moveit_cartesian 参数校验/审批 fail-closed/结果解析）。
+  本机 smoke：discover 输出 right_arm chain tip；cartesian 在 move_group 未运行时
+  明确报"接口不可用"。
+- 文档：README/README_CN L2 表、CHANGELOG。
+
 ## [0.11.0] - 2026-08-23
 
 ### Added

@@ -282,7 +282,8 @@ describe('tool inventory', () => {
     expect(names).toContain('ros2_install')
     expect(names).toContain('moveit_discover')
     expect(names).toContain('moveit_move_to_pose')
-    expect(names).toHaveLength(40)
+    expect(names).toContain('moveit_cartesian')
+    expect(names).toHaveLength(41)
   })
 })
 
@@ -391,5 +392,44 @@ describe('moveit_discover / moveit_move_to_pose', () => {
     )) as ToolResult
     expect(out.ok).toBe(true)
     expect(out.data).toMatchObject({ ok: true, planned: true, executed: true })
+  })
+})
+
+describe('moveit_cartesian', () => {
+  it('requires a group', async () => {
+    const run = makeRun(() => ({ stdout: '' }))
+    const out = await call('moveit_cartesian', run, { dx: 0.01 })
+    expect(out.ok).toBe(false)
+    expect(out.error?.code).toBe('MISSING_PARAM')
+  })
+
+  it('rejects zero translation', async () => {
+    const run = makeRun(() => ({ stdout: '' }))
+    const out = await call('moveit_cartesian', run, { group: 'right_arm' })
+    expect(out.ok).toBe(false)
+    expect(out.error?.code).toBe('MISSING_PARAM')
+  })
+
+  it('fails closed without approval', async () => {
+    const run = makeRun(() => ({ stdout: '' }))
+    const out = await call('moveit_cartesian', run, { group: 'right_arm', dx: 0.01, srdf: '/x.srdf' })
+    expect(out.ok).toBe(false)
+    expect(out.error?.code).toBe('APPROVAL_DENIED')
+  })
+
+  it('parses helper result with approval + srdf', async () => {
+    const run = makeRun(() => ({
+      stdout: JSON.stringify({ ok: true, executed_segments: 2, total_fraction: 1.0, planning_frame: 'world', link: 'right_gripper_tip_middle_link' }),
+    }))
+    const approval = async () => 'allowed-once'
+    const toolsList = createRos2Tools({ run, approval })
+    const t = toolsList.find((x) => x.name === 'moveit_cartesian')
+    if (!t) throw new Error('moveit_cartesian not registered')
+    const out = (await t.execute(
+      { group: 'right_arm', dx: 0.04, dy: 0, dz: 0, srdf: '/x.srdf' },
+      execStub,
+    )) as ToolResult
+    expect(out.ok).toBe(true)
+    expect(out.data).toMatchObject({ ok: true, executed_segments: 2 })
   })
 })

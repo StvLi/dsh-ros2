@@ -26,7 +26,8 @@ import xml.etree.ElementTree as ET
 
 
 def parse_srdf(path):
-    """Return {groups: {name: {type, joints[]}}, named_states: {group: {name: {joint: value}}}}."""
+    """Return {groups: {name: {type, joints[], chain?{base,tip}}},
+               named_states: {group: {name: {joint: value}}}}."""
     root = ET.parse(path).getroot()
     groups = {}
     for group in root.findall('group'):
@@ -34,7 +35,14 @@ def parse_srdf(path):
         if not name:
             continue
         joints = [j.get('name') for j in group.findall('joint') if j.get('name')]
-        groups[name] = {'type': group.get('type', ''), 'joints': joints}
+        info = {'type': group.get('type', ''), 'joints': joints}
+        chain = group.find('chain')
+        if chain is not None and (chain.get('base_link') or chain.get('tip_link')):
+            info['chain'] = {
+                'base': chain.get('base_link', ''),
+                'tip': chain.get('tip_link', ''),
+            }
+        groups[name] = info
     named_states = {}
     for gs in root.findall('group_state'):
         group = gs.get('group')
