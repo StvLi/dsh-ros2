@@ -4,6 +4,25 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [SemVer](https://semver.org/).
 
+## [0.13.6] - 2026-08-23
+
+### Fixed
+
+- **`ros2_zero_pose_semantics` analyze 链路修复**：`ensure_rsp` 之前只发布 URDF
+  描述（供 RobotModel 加载 mesh），缺少 `robot_state_publisher` 生成 TF——离屏
+  渲染无法摆放姿态。改为拉起完整的 `robot_state_publisher`（内联 URDF + remap
+  描述话题，订阅 `/joint_states` 生成零位 TF）。
+
+### Verified（lite 静态链路，不带真机）
+
+- `analyze` 全链路：发布全零关节角 → rsp 生成 TF → 离屏渲染 /rviz/scene →
+  VLM 描述 → 三维推断，**端到端可用**：
+  - VLM：*"T-pose, arms raised horizontally to the sides (lateral raise)"*
+  - 推断：`{arm: lateral_raise, elbow: forward, palm: up}`（与 lite 零位=侧平举一致）
+  - 12 组合候选完整输出；
+  - 渲染帧像素与零位基准一致（fg 73331 / red 3508 / orange 3329）；
+- `confirm` 三维组合写入 `zero-pose.yaml` 结构化字段验证通过。
+
 ## [0.13.5] - 2026-08-23
 
 ### Changed

@@ -54,35 +54,24 @@ def ros2(*args, timeout=30):
 
 
 def ensure_rsp(urdf: str):
-    """Ensure a robot_state_publisher is publishing an SRDF-agnostic description."""
+    """Ensure a robot_state_publisher is publishing the description + TF
+    (TF is what places the meshes; the zero-pose joint states feed it)."""
     ok, out, _ = ros2("topic", "info", "/robot_description_abs")
     if ok and "Publisher count: 1" in out:
         return True, "/robot_description_abs (already live)"
     if not urdf:
         return False, "no live /robot_description_abs publisher and no --urdf given"
-    # spawn a transient-local publisher on a dedicated topic (mirrors the
-    # renderer's expectation; stays alive for the calibration duration)
-    script = f"""
-import rclpy, threading
-from rclpy.node import Node
-from std_msgs.msg import String
-from rclpy.qos import QoSProfile, DurabilityPolicy
-rclpy.init(); n = Node('zero_pose_rsp')
-q = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL, reliability=1)
-p = n.create_publisher(String, '/robot_description_abs', q)
-data = open('{urdf}').read()
-msg = String(); msg.data = data
-def tick():
-    p.publish(msg); threading.Timer(1.0, tick).start()
-tick(); rclpy.spin(n)
-"""
-    path = "/tmp/zero_pose_rsp.py"
-    with open(path, "w") as f:
-        f.write(script)
-    subprocess.Popen(["python3", path],
-                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    time.sleep(1.5)
-    return True, f"spawned description publisher for {urdf}"
+    # spawn robot_state_publisher with the URDF, remap description to the
+    # topic the renderer reads; it subscribes /joint_states for the TF.
+    cmd = (
+        f"ros2 run robot_state_publisher robot_state_publisher --ros-args "
+        f"-p robot_description:='{open(urdf).read()}' "
+        f"-r /robot_description:=/robot_description_abs"
+    )
+    proc = subprocess.Popen(["bash", "-lc", cmd],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    time.sleep(2.0)
+    return True, f"spawned robot_state_publisher for {urdf} (pid {proc.pid})"
 
 
 def load_joint_names(urdf: str) -> list[str]:
