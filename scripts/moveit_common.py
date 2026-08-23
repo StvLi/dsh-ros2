@@ -129,3 +129,88 @@ class MoveGroupClient:
         res = res_f.result().result if res_f.done() else None
         if res is None or res.error_code.val != SUCCESS:
             raise RuntimeError('ExecuteTrajectory failed')
+
+
+def build_pose_goal(
+    group: str,
+    link: str,
+    position: tuple,
+    orientation: tuple,
+    *,
+    plan_only: bool = False,
+    max_velocity: float = 0.2,
+    max_acceleration: float = 0.2,
+    planning_time: float = 5.0,
+    pos_tolerance: float = 0.005,
+    ori_tolerance: float = 0.01,
+) -> MoveGroup.Goal:
+    """Build a MoveGroup goal with a position + orientation constraint for a
+    link (absolute pose in the planning frame; the robot's IK must reach it)."""
+    from geometry_msgs.msg import Pose, Quaternion
+    from moveit_msgs.msg import OrientationConstraint, PositionConstraint
+
+    goal = MoveGroup.Goal()
+    goal.planning_options.plan_only = plan_only
+    goal.planning_options.replan = True
+    goal.planning_options.replan_attempts = 3
+    req = goal.request
+    req.group_name = group
+    req.num_planning_attempts = 5
+    req.allowed_planning_time = planning_time
+    req.max_velocity_scaling_factor = max_velocity
+    req.max_acceleration_scaling_factor = max_acceleration
+    req.start_state = RobotState()
+    req.start_state.is_diff = True
+
+    constraints = Constraints()
+    pc = PositionConstraint()
+    pc.link_name = link
+    pc.target_point_offset.x = position[0]
+    pc.target_point_offset.y = position[1]
+    pc.target_point_offset.z = position[2]
+    pc.weight = 1.0
+    for v in (pos_tolerance, pos_tolerance, pos_tolerance):
+        pc.constraint_region.primitive_poses.append(Pose())
+        # primitive_poses default identity; tolerance via box size below
+    pc.constraint_region.primitives.append(shape_msgs.msg.SolidPrimitive())
+    pc.constraint_region.primitives[0].type = shape_msgs.msg.SolidPrimitive.BOX
+    pc.constraint_region.primitives[0].dimensions = [
+        2 * pos_tolerance, 2 * pos_tolerance, 2 * pos_tolerance,
+    ]
+    constraints.position_constraints.append(pc)
+
+    oc = OrientationConstraint()
+    oc.link_name = link
+    oc.orientation = Quaternion(x=orientation[0], y=orientation[1], z=orientation[2], w=orientation[3])
+    oc.absolute_x_axis_tolerance = ori_tolerance
+    oc.absolute_y_axis_tolerance = ori_tolerance
+    oc.absolute_z_axis_tolerance = ori_tolerance
+    oc.weight = 1.0
+    constraints.orientation_constraints.append(oc)
+    req.goal_constraints.append(constraints)
+    return goal
+
+
+def rpy_to_quat(rx, ry, rz):
+    """RPY (rad) -> quaternion (x, y, z, w)."""
+    import math
+    cx, cy, cz = math.cos(rx / 2), math.cos(ry / 2), math.cos(rz / 2)
+    sx, sy, sz = math.sin(rx / 2), math.sin(ry / 2), math.sin(rz / 2)
+    return (
+        sx * cy * cz - cx * sy * sz,
+        cx * sy * cz + sx * cy * sz,
+        cx * cy * sz - sx * sy * cz,
+        cx * cy * cz + sx * sy * sz,
+    )
+
+
+def quat_multiply(q1, q2):
+    """q1 * q2 (Hamilton)."""
+    x1, y1, z1, w1 = q1
+    x2, y2, z2, w2 = q2
+    return (
+        w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
+        w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
+        w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,
+        w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
+    )

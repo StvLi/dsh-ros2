@@ -67,12 +67,17 @@ You have a read-only ROS2 tool set (all commands run as \`ros2\`/\`colcon\`/\`ro
   the planning **groups** and their **named poses** (from the SRDF), and reports
   whether the standard interfaces (\`/move_action\`, \`/execute_trajectory\`,
   \`/compute_cartesian_path\`, controller_manager) are online.
-- To move: \`moveit_move_to_pose {group, pose}\` (approval-gated — it really moves
-  the robot when move_group is online). Pick group/pose from \`moveit_discover\`
-  (e.g. group \`right_arm\`, pose \`home\` / \`ready\` / \`selfie\`). Use
-  \`planOnly: true\` to dry-run the plan without executing. The SRDF is resolved
-  automatically (package scan) or via explicit \`srdf\`/ \`package\` parameters —
-  the tools use only standard moveit_msgs, never a specific MoveIt package.`,
+- To move, use the **unified \`moveit_move\`** (approval-gated — it really moves
+  the robot when move_group is online). One tool, five essential modes:
+  \`mode: "joint_abs"\` (关节角绝对, joints "j1:=v1 j2:=v2"),
+  \`"joint_rel"\` (关节角相对增量, deltaJoints "j1:=dv1 ..." = current + delta),
+  \`"pose_abs"\` (末端位姿绝对, pose "x y z rx ry rz" in the planning frame),
+  \`"pose_rel"\` (末端位姿相对增量, deltaPose "dx dy dz drx dry drz", frame ee|world),
+  \`"trajectory"\` (轨迹执行, trajectory path from planOnly + trajectoryOut).
+  Pick group from \`moveit_discover\` (e.g. \`right_arm\`); SRDF resolves
+  automatically or via \`srdf\`/ \`package\`. Use \`planOnly: true\` to dry-run;
+  with \`trajectoryOut\` it saves the planned trajectory for later
+  \`mode: "trajectory"\` execution (plan → execute separation).`,
 }
 
 /**

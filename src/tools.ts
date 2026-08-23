@@ -419,10 +419,7 @@ export function createRos2Tools(deps: ToolDeps) {
   // SRDF; motion uses only standard moveit_msgs, never a specific package).
   tools.push(makeMoveitDiscoverTool(deps))
   tools.push(makeMoveitStatusTool(deps))
-  tools.push(makeMoveitMoveToPoseTool(deps))
-  tools.push(makeMoveitCartesianTool(deps))
-  tools.push(makeMoveitPlanTool(deps))
-  tools.push(makeMoveitTrajectoryTool(deps))
+  tools.push(makeMoveitMoveTool(deps))
   // L2 management tools (write operations, approval-gated).
   tools.push(makeBuildTool(deps))
   tools.push(makeRosdepInstallTool(deps))
@@ -1542,282 +1539,6 @@ function makeMoveitDiscoverTool(deps: ToolDeps) {
  * Uses only standard moveit_msgs (/move_action + /execute_trajectory) and the
  * SRDF named state — generic, never bound to a specific MoveIt package.
  */
-function makeMoveitMoveToPoseTool(deps: ToolDeps) {
-  return defineTool({
-    name: 'moveit_move_to_pose',
-    description:
-      'Move a MoveIt planning group to a named SRDF pose (approval-gated; moves the real robot when move_group is online). ' +
-      'Generic: uses only standard moveit_msgs (move_group /move_action + /execute_trajectory) and an SRDF named state, never a specific MoveIt package. ' +
-      'Discover groups and poses first with moveit_discover. plan_only plans without executing.',
-    parameters: {
-      group: { type: 'string', description: 'MoveIt planning group name (e.g. right_arm, from moveit_discover).' },
-      pose: { type: 'string', description: 'SRDF named pose for the group (e.g. home, ready, selfie, from moveit_discover).' },
-      srdf: { type: 'string', default: '', description: 'SRDF file path (default: discovered automatically via package scan).' },
-      package: { type: 'string', default: '', description: 'MoveIt config package name to load the SRDF from (fallback when srdf empty).' },
-      planOnly: { type: 'boolean', default: false, description: 'Plan only, do not execute.' },
-      timeoutMs: { type: 'number', default: 90000, description: 'Action timeout in ms.' },
-    },
-    output: { schema: resultSchema, render: renderResult },
-    async execute(args, exec) {
-      const params = args as Record<string, unknown>
-      const group = strOrUndefined(params.group) ?? ''
-      const pose = strOrUndefined(params.pose) ?? ''
-      if (!group || !pose) {
-        return toolError('moveit_move_to_pose', 'moveit_move_to_pose', 'MISSING_PARAM', 'group 与 pose 必填（先用 moveit_discover 查询）')
-      }
-      // Resolve SRDF: explicit path > package scan > auto
-      const srdf = strOrUndefined(params.srdf) ?? ''
-      const pkg = strOrUndefined(params.package) ?? ''
-      let srdfResolved = srdf
-      if (!srdfResolved) {
-        const scan = await deps.run('python3', [scriptPath('moveit_discover.py'), ...(pkg ? ['--package', pkg] : [])], { timeoutMs: 90000 })
-        const info = scan.ok ? (parseJsonOrRaw(scan.stdout) as { packages?: { package: string; srdf: string }[] }) : { packages: [] }
-        const hit = (info.packages ?? []).find((p) => !pkg || p.package === pkg)
-        if (hit) srdfResolved = hit.srdf
-      }
-      if (!srdfResolved) {
-        return toolError('moveit_move_to_pose', 'moveit_move_to_pose', 'SRDF_NOT_FOUND',
-          '未找到 SRDF（请安装/构建 moveit 配置包，或显式传 srdf 路径）')
-      }
-      const command = `moveit_move_to_pose group=${group} pose=${pose}${params.planOnly ? ' (plan-only)' : ''}`
-      const approval = await requestApproval(deps, exec, 'moveit_move_to_pose',
-        `将调用 move_group 规划并${params.planOnly ? '（仅规划）' : '执行'}：规划组 ${group} → 命名姿态 ${pose}（SRDF: ${srdfResolved}）。${params.planOnly ? '' : '将真实移动机器人。'}`)
-      if (!approval.allowed) return deniedResult('moveit_move_to_pose', command, approval.outcome)
-
-      const helperArgs = [
-        scriptPath('moveit_move.py'),
-        '--srdf', srdfResolved,
-        '--group', group,
-        '--pose', pose,
-        ...(params.planOnly ? ['--plan-only'] : []),
-        '--timeout', String(Math.max(10, Math.floor(numOrUndefined(params.timeoutMs) ?? 90000) / 1000)),
-      ]
-      const res = await deps.run('python3', helperArgs, { timeoutMs: Math.max(30000, numOrUndefined(params.timeoutMs) ?? 90000) + 10000 })
-      if (!res.ok && res.stdout.trim().length === 0) {
-        return toolError('moveit_move_to_pose', command, res.error ?? 'COMMAND_FAILED',
-          res.stderr.trim() || `exit ${res.exitCode ?? 'unknown'}`)
-      }
-      const data = parseJsonOrRaw(res.stdout)
-      return okResult('moveit_move_to_pose', command, data)
-    },
-  })
-}
-
-/**
- * L2: translate a MoveIt group's end-effector along a Cartesian path
- * (approval-gated; moves the real robot when move_group is online).
- * Generic: uses only standard moveit_msgs (/compute_cartesian_path +
- * /execute_trajectory) and the SRDF (planning frame from virtual_joint, EE
- * link from the group chain tip) — never a specific MoveIt package.
- */
-function makeMoveitCartesianTool(deps: ToolDeps) {
-  return defineTool({
-    name: 'moveit_cartesian',
-    description:
-      'Translate a MoveIt group\'s end-effector by (dx, dy, dz) meters along a Cartesian path (approval-gated; moves the real robot). ' +
-      'Generic: uses only standard moveit_msgs (/compute_cartesian_path + /execute_trajectory) and the SRDF (planning frame from virtual_joint, EE link from the group chain tip, both overridable). ' +
-      'frame=ee offsets in the end-effector frame (default), frame=world in the planning frame. Long translations are split into segments. planOnly plans without executing.',
-    parameters: {
-      group: { type: 'string', description: 'MoveIt planning group name (e.g. right_arm, from moveit_discover).' },
-      dx: { type: 'number', default: 0, description: 'Translation along X (m).' },
-      dy: { type: 'number', default: 0, description: 'Translation along Y (m).' },
-      dz: { type: 'number', default: 0, description: 'Translation along Z (m).' },
-      frame: { type: 'string', default: 'ee', description: 'Offset frame: ee (end-effector, default) or world (planning frame).' },
-      link: { type: 'string', default: '', description: 'EE link (default: group chain tip from the SRDF).' },
-      srdf: { type: 'string', default: '', description: 'SRDF file path (default: discovered via package scan).' },
-      package: { type: 'string', default: '', description: 'MoveIt config package name to load the SRDF from.' },
-      eefStep: { type: 'number', default: 0.005, description: 'Cartesian waypoint spacing (m).' },
-      jumpThreshold: { type: 'number', default: 0, description: 'Jump threshold for the Cartesian planner.' },
-      avoidCollisions: { type: 'boolean', default: false, description: 'Enable collision avoidance.' },
-      minFraction: { type: 'number', default: 0.95, description: 'Minimum achieved path fraction per segment.' },
-      planOnly: { type: 'boolean', default: false, description: 'Plan only, do not execute.' },
-      timeoutMs: { type: 'number', default: 90000, description: 'Action timeout in ms.' },
-    },
-    output: { schema: resultSchema, render: renderResult },
-    async execute(args, exec) {
-      const params = args as Record<string, unknown>
-      const group = strOrUndefined(params.group) ?? ''
-      const dx = numOrUndefined(params.dx) ?? 0
-      const dy = numOrUndefined(params.dy) ?? 0
-      const dz = numOrUndefined(params.dz) ?? 0
-      if (!group) {
-        return toolError('moveit_cartesian', 'moveit_cartesian', 'MISSING_PARAM', 'group 必填（先用 moveit_discover 查询）')
-      }
-      if (Math.abs(dx) + Math.abs(dy) + Math.abs(dz) < 1e-9) {
-        return toolError('moveit_cartesian', 'moveit_cartesian', 'MISSING_PARAM', 'dx/dy/dz 不能全为 0')
-      }
-      // Resolve SRDF (same as moveit_move_to_pose).
-      const srdf = strOrUndefined(params.srdf) ?? ''
-      const pkg = strOrUndefined(params.package) ?? ''
-      let srdfResolved = srdf
-      if (!srdfResolved) {
-        const scan = await deps.run('python3', [scriptPath('moveit_discover.py'), ...(pkg ? ['--package', pkg] : [])], { timeoutMs: 90000 })
-        const info = scan.ok ? (parseJsonOrRaw(scan.stdout) as { packages?: { package: string; srdf: string }[] }) : { packages: [] }
-        const hit = (info.packages ?? []).find((p) => !pkg || p.package === pkg)
-        if (hit) srdfResolved = hit.srdf
-      }
-      if (!srdfResolved) {
-        return toolError('moveit_cartesian', 'moveit_cartesian', 'SRDF_NOT_FOUND',
-          '未找到 SRDF（请安装/构建 moveit 配置包，或显式传 srdf 路径）')
-      }
-      const planOnly = params.planOnly === true
-      const command = `moveit_cartesian group=${group} dx=${dx} dy=${dy} dz=${dz} frame=${strOrUndefined(params.frame) ?? 'ee'}${planOnly ? ' (plan-only)' : ''}`
-      const approval = await requestApproval(deps, exec, 'moveit_cartesian',
-        `将调用 move_group 规划并${planOnly ? '（仅规划）' : '执行'}笛卡尔平移：组 ${group} 末端沿 ${strOrUndefined(params.frame) ?? 'ee'} 系 (${dx}, ${dy}, ${dz}) m。${planOnly ? '' : '将真实移动机器人。'}`)
-      if (!approval.allowed) return deniedResult('moveit_cartesian', command, approval.outcome)
-
-      const helperArgs = [
-        scriptPath('moveit_cartesian.py'),
-        '--srdf', srdfResolved,
-        '--group', group,
-        '--dx', String(dx),
-        '--dy', String(dy),
-        '--dz', String(dz),
-        ...(strOrUndefined(params.frame) ? ['--frame', strOrUndefined(params.frame)!] : []),
-        ...(strOrUndefined(params.link) ? ['--link', strOrUndefined(params.link)!] : []),
-        ...(params.avoidCollisions ? ['--avoid-collisions'] : []),
-        ...(planOnly ? ['--plan-only'] : []),
-        '--eef-step', String(numOrUndefined(params.eefStep) ?? 0.005),
-        '--jump-threshold', String(numOrUndefined(params.jumpThreshold) ?? 0),
-        '--min-fraction', String(numOrUndefined(params.minFraction) ?? 0.95),
-        '--timeout', String(Math.max(10, Math.floor(numOrUndefined(params.timeoutMs) ?? 90000) / 1000)),
-      ]
-      const timeoutMs = Math.max(30000, numOrUndefined(params.timeoutMs) ?? 90000) + 10000
-      const res = await deps.run('python3', helperArgs, { timeoutMs })
-      if (!res.ok && res.stdout.trim().length === 0) {
-        return toolError('moveit_cartesian', command, res.error ?? 'COMMAND_FAILED',
-          res.stderr.trim() || `exit ${res.exitCode ?? 'unknown'}`)
-      }
-      const data = parseJsonOrRaw(res.stdout)
-      return okResult('moveit_cartesian', command, data)
-    },
-  })
-}
-
-/**
- * L1: runtime status of the MoveIt stack (generic): online probe of the
- * standard interfaces + current joint state + SRDF planning frame.
- */
-function makeMoveitStatusTool(deps: ToolDeps) {
-  return defineTool({
-    name: 'moveit_status',
-    description:
-      'Runtime status of the MoveIt stack (generic, read-only): whether the standard move_group interfaces (/move_action, /execute_trajectory, /compute_cartesian_path, controller_manager) are online, the current joint state (sample of /joint_states), and the SRDF planning frame. Optional srdf path.',
-    parameters: {
-      srdf: { type: 'string', default: '', description: 'SRDF file path (optional; used for the planning frame).' },
-    },
-    output: { schema: resultSchema, render: renderResult },
-    async execute(args) {
-      const params = args as Record<string, unknown>
-      const helperArgs = [scriptPath('moveit_status.py')]
-      if (strOrUndefined(params.srdf)) helperArgs.push('--srdf', strOrUndefined(params.srdf)!)
-      const command = `python3 ${helperArgs.join(' ')}`
-      const res = await deps.run('python3', helperArgs, { timeoutMs: 45000 })
-      if (!res.ok && res.stdout.trim().length === 0) {
-        return toolError('moveit_status', command, res.error ?? 'COMMAND_FAILED',
-          res.stderr.trim() || `exit ${res.exitCode ?? 'unknown'}`)
-      }
-      return okResult('moveit_status', command, parseJsonOrRaw(res.stdout))
-    },
-  })
-}
-
-/**
- * L2: plan (and optionally execute) an arbitrary joint goal via move_group
- * (approval-gated). With planOnly + trajectoryOut, saves the planned
- * trajectory as JSON for later moveit_trajectory execution.
- */
-function makeMoveitPlanTool(deps: ToolDeps) {
-  return defineTool({
-    name: 'moveit_plan',
-    description:
-      'Plan (and optionally execute) an arbitrary joint goal through move_group (approval-gated; moves the real robot). Generic: standard moveit_msgs + SRDF only. joints is space-separated "name:=value" pairs (from moveit_discover named states or joint_states). planOnly plans without executing; trajectoryOut saves the planned trajectory JSON for moveit_trajectory.',
-    parameters: {
-      group: { type: 'string', description: 'MoveIt planning group name (e.g. right_arm).' },
-      joints: { type: 'string', description: 'Joint goal as space-separated "name:=value" pairs, e.g. "right_shoulder_roll:=0.5 right_elbow_pitch:=-0.3".' },
-      srdf: { type: 'string', default: '', description: 'SRDF file path (default: discovered via package scan).' },
-      package: { type: 'string', default: '', description: 'MoveIt config package name to load the SRDF from.' },
-      planOnly: { type: 'boolean', default: false, description: 'Plan only, do not execute.' },
-      trajectoryOut: { type: 'string', default: '', description: 'Path to save the planned trajectory JSON (with planOnly).' },
-      timeoutMs: { type: 'number', default: 90000, description: 'Action timeout in ms.' },
-    },
-    output: { schema: resultSchema, render: renderResult },
-    async execute(args, exec) {
-      const params = args as Record<string, unknown>
-      const group = strOrUndefined(params.group) ?? ''
-      const joints = strOrUndefined(params.joints) ?? ''
-      if (!group || !joints.trim()) {
-        return toolError('moveit_plan', 'moveit_plan', 'MISSING_PARAM', 'group 与 joints 必填（joints 形如 "j1:=v1 j2:=v2"）')
-      }
-      const srdf = await resolveSrdf(deps, strOrUndefined(params.srdf) ?? '', strOrUndefined(params.package) ?? '')
-      if (!srdf) {
-        return toolError('moveit_plan', 'moveit_plan', 'SRDF_NOT_FOUND',
-          '未找到 SRDF（请安装/构建 moveit 配置包，或显式传 srdf 路径）')
-      }
-      const planOnly = params.planOnly === true
-      const command = `moveit_plan group=${group} joints=${joints}${planOnly ? ' (plan-only)' : ''}`
-      const approval = await requestApproval(deps, exec, 'moveit_plan',
-        `将调用 move_group 规划并${planOnly ? '（仅规划）' : '执行'}关节目标：组 ${group} → {${joints}}。${planOnly ? '' : '将真实移动机器人。'}`)
-      if (!approval.allowed) return deniedResult('moveit_plan', command, approval.outcome)
-
-      const helperArgs = [
-        scriptPath('moveit_plan.py'),
-        '--srdf', srdf,
-        '--group', group,
-        '--joints', joints,
-        ...(planOnly ? ['--plan-only'] : []),
-        ...(strOrUndefined(params.trajectoryOut) ? ['--out', strOrUndefined(params.trajectoryOut)!] : []),
-        '--timeout', String(Math.max(10, Math.floor(numOrUndefined(params.timeoutMs) ?? 90000) / 1000)),
-      ]
-      const timeoutMs = Math.max(30000, numOrUndefined(params.timeoutMs) ?? 90000) + 10000
-      const res = await deps.run('python3', helperArgs, { timeoutMs })
-      if (!res.ok && res.stdout.trim().length === 0) {
-        return toolError('moveit_plan', command, res.error ?? 'COMMAND_FAILED',
-          res.stderr.trim() || `exit ${res.exitCode ?? 'unknown'}`)
-      }
-      return okResult('moveit_plan', command, parseJsonOrRaw(res.stdout))
-    },
-  })
-}
-
-/**
- * L2: execute a saved joint trajectory JSON via /execute_trajectory
- * (approval-gated; moves the real robot). Trajectories come from
- * moveit_plan --plan-only --trajectoryOut.
- */
-function makeMoveitTrajectoryTool(deps: ToolDeps) {
-  return defineTool({
-    name: 'moveit_trajectory',
-    description:
-      'Execute a saved joint trajectory JSON via /execute_trajectory (approval-gated; moves the real robot). The trajectory is produced by moveit_plan with planOnly + trajectoryOut.',
-    parameters: {
-      trajectory: { type: 'string', description: 'Path to the trajectory JSON file (from moveit_plan trajectoryOut).' },
-      timeoutMs: { type: 'number', default: 90000, description: 'Action timeout in ms.' },
-    },
-    output: { schema: resultSchema, render: renderResult },
-    async execute(args, exec) {
-      const params = args as Record<string, unknown>
-      const trajectory = strOrUndefined(params.trajectory) ?? ''
-      if (!trajectory) {
-        return toolError('moveit_trajectory', 'moveit_trajectory', 'MISSING_PARAM', 'trajectory 路径必填（来自 moveit_plan trajectoryOut）')
-      }
-      const command = `moveit_trajectory trajectory=${trajectory}`
-      const approval = await requestApproval(deps, exec, 'moveit_trajectory',
-        `将通过 /execute_trajectory 执行轨迹文件 ${trajectory}（真实移动机器人）。`)
-      if (!approval.allowed) return deniedResult('moveit_trajectory', command, approval.outcome)
-      const timeoutMs = Math.max(30000, numOrUndefined(params.timeoutMs) ?? 90000) + 10000
-      const res = await deps.run('python3', [scriptPath('moveit_trajectory.py'), '--trajectory', trajectory,
-        '--timeout', String(Math.max(10, Math.floor(numOrUndefined(params.timeoutMs) ?? 90000) / 1000))], { timeoutMs })
-      if (!res.ok && res.stdout.trim().length === 0) {
-        return toolError('moveit_trajectory', command, res.error ?? 'COMMAND_FAILED',
-          res.stderr.trim() || `exit ${res.exitCode ?? 'unknown'}`)
-      }
-      return okResult('moveit_trajectory', command, parseJsonOrRaw(res.stdout))
-    },
-  })
-}
-
-/** Resolve an SRDF path: explicit > package scan > auto (shared by MoveIt tools). */
 async function resolveSrdf(deps: ToolDeps, srdf: string, pkg: string): Promise<string> {
   if (srdf) return srdf
   const scan = await deps.run('python3', [scriptPath('moveit_discover.py'), ...(pkg ? ['--package', pkg] : [])], { timeoutMs: 90000 })
@@ -2118,6 +1839,114 @@ function makeRobotTopologyTool(deps: ToolDeps) {
       const res = await deps.run('python3', helperArgs, { timeoutMs: 60000 })
       if (!res.ok && res.stdout.trim().length === 0) return toolError('robot_topology', command, res.error ?? 'COMMAND_FAILED', res.stderr.trim())
       return okResult('robot_topology', command, parseJsonOrRaw(res.stdout))
+    },
+  })
+}
+
+function makeMoveitStatusTool(deps: ToolDeps) {
+  return defineTool({
+    name: 'moveit_status',
+    description:
+      'Runtime status of the MoveIt stack (generic, read-only): whether the standard move_group interfaces (/move_action, /execute_trajectory, /compute_cartesian_path, controller_manager) are online, the current joint state (sample of /joint_states), and the SRDF planning frame. Optional srdf path.',
+    parameters: {
+      srdf: { type: 'string', default: '', description: 'SRDF file path (optional; used for the planning frame).' },
+    },
+    output: { schema: resultSchema, render: renderResult },
+    async execute(args) {
+      const params = args as Record<string, unknown>
+      const helperArgs = [scriptPath('moveit_status.py')]
+      if (strOrUndefined(params.srdf)) helperArgs.push('--srdf', strOrUndefined(params.srdf)!)
+      const command = `python3 ${helperArgs.join(' ')}`
+      const res = await deps.run('python3', helperArgs, { timeoutMs: 45000 })
+      if (!res.ok && res.stdout.trim().length === 0) {
+        return toolError('moveit_status', command, res.error ?? 'COMMAND_FAILED',
+          res.stderr.trim() || `exit ${res.exitCode ?? 'unknown'}`)
+      }
+      return okResult('moveit_status', command, parseJsonOrRaw(res.stdout))
+    },
+  })
+}
+
+/**
+ * L2: unified MoveIt motion interface — five essential modes behind one tool
+ * (approval-gated; moves the real robot). Generic: standard moveit_msgs +
+ * SRDF only, never a specific MoveIt package.
+ *   joint_abs: absolute joint positions   "j1:=v1 j2:=v2"
+ *   joint_rel: relative joint deltas      "j1:=dv1 ..." (current + delta)
+ *   pose_abs:  absolute EE pose           "x y z rx ry rz" (planning frame, RPY)
+ *   pose_rel:  relative EE delta          "dx dy dz drx dry drz" (frame ee|world)
+ *   trajectory: execute a saved trajectory JSON (from planOnly+trajectoryOut)
+ */
+function makeMoveitMoveTool(deps: ToolDeps) {
+  return defineTool({
+    name: 'moveit_move',
+    description:
+      'Unified MoveIt motion interface (approval-gated; moves the real robot). Five essential modes behind one tool — generic (standard moveit_msgs + SRDF, never a specific package): ' +
+      'joint_abs (关节角绝对位置规划执行, joints "j1:=v1 j2:=v2"), ' +
+      'joint_rel (关节角相对增量规划执行, deltaJoints "j1:=dv1 ..." = current + delta), ' +
+      'pose_abs (末端位姿绝对规划执行, pose "x y z rx ry rz" in the planning frame), ' +
+      'pose_rel (末端位姿相对增量规划执行, deltaPose "dx dy dz drx dry drz", frame ee|world), ' +
+      'trajectory (轨迹执行, trajectory path from planOnly+trajectoryOut). planOnly plans without executing; trajectoryOut saves the planned trajectory JSON.',
+    parameters: {
+      mode: { type: 'string', enum: ['joint_abs', 'joint_rel', 'pose_abs', 'pose_rel', 'trajectory'], description: 'Motion mode: joint_abs | joint_rel | pose_abs | pose_rel | trajectory.' },
+      group: { type: 'string', description: 'MoveIt planning group name (e.g. right_arm, from moveit_discover).' },
+      joints: { type: 'string', default: '', description: 'joint_abs: space-separated "name:=value" pairs, e.g. "right_shoulder_roll:=0.5 right_elbow_pitch:=-0.3".' },
+      deltaJoints: { type: 'string', default: '', description: 'joint_rel: space-separated "name:=delta" pairs, added to the current joint state.' },
+      pose: { type: 'string', default: '', description: 'pose_abs: "x y z rx ry rz" (meters + RPY rad) in the planning frame.' },
+      deltaPose: { type: 'string', default: '', description: 'pose_rel: "dx dy dz drx dry drz" relative offset.' },
+      frame: { type: 'string', default: 'ee', description: 'pose_rel reference frame: ee (end-effector, default) or world.' },
+      link: { type: 'string', default: '', description: 'EE link for pose modes (default: group chain tip from the SRDF).' },
+      trajectory: { type: 'string', default: '', description: 'trajectory: path to a trajectory JSON (from moveit_move planOnly + trajectoryOut).' },
+      srdf: { type: 'string', default: '', description: 'SRDF file path (default: discovered via package scan).' },
+      package: { type: 'string', default: '', description: 'MoveIt config package name to load the SRDF from.' },
+      planOnly: { type: 'boolean', default: false, description: 'Plan only, do not execute.' },
+      trajectoryOut: { type: 'string', default: '', description: 'Save the planned trajectory JSON here (with planOnly).' },
+      timeoutMs: { type: 'number', default: 90000, description: 'Action timeout in ms.' },
+    },
+    output: { schema: resultSchema, render: renderResult },
+    async execute(args, exec) {
+      const params = args as Record<string, unknown>
+      const mode = String(params.mode ?? '')
+      const group = strOrUndefined(params.group) ?? ''
+      if (!mode || !group) {
+        return toolError('moveit_move', 'moveit_move', 'MISSING_PARAM', 'mode 与 group 必填（mode: joint_abs/joint_rel/pose_abs/pose_rel/trajectory）')
+      }
+      // mode-specific required params
+      const need = { joint_abs: 'joints', joint_rel: 'deltaJoints', pose_abs: 'pose', pose_rel: 'deltaPose', trajectory: 'trajectory' } as const
+      const key = need[mode as keyof typeof need]
+      if (key && !(strOrUndefined(params[key]) ?? '').trim()) {
+        return toolError('moveit_move', 'moveit_move', 'MISSING_PARAM', `${mode} 需要 ${key}`)
+      }
+      const srdf = await resolveSrdf(deps, strOrUndefined(params.srdf) ?? '', strOrUndefined(params.package) ?? '')
+      if (!srdf && mode !== 'trajectory') {
+        return toolError('moveit_move', 'moveit_move', 'SRDF_NOT_FOUND',
+          '未找到 SRDF（请安装/构建 moveit 配置包，或显式传 srdf 路径）')
+      }
+      const planOnly = params.planOnly === true
+      const command = `moveit_move mode=${mode} group=${group}`
+      const approval = await requestApproval(deps, exec, 'moveit_move',
+        `将调用 move_group 规划并${planOnly ? '（仅规划）' : '执行'} ${mode}：组 ${group}（${key ? `${key}=${String(params[key] ?? '')}` : ''}）。${planOnly ? '' : '将真实移动机器人。'}`)
+      if (!approval.allowed) return deniedResult('moveit_move', command, approval.outcome)
+
+      const helperArgs = [scriptPath('moveit_move.py'), '--mode', mode, '--group', group]
+      if (srdf) helperArgs.push('--srdf', srdf)
+      if (strOrUndefined(params.joints)) helperArgs.push('--joints', strOrUndefined(params.joints)!)
+      if (strOrUndefined(params.deltaJoints)) helperArgs.push('--delta-joints', strOrUndefined(params.deltaJoints)!)
+      if (strOrUndefined(params.pose)) helperArgs.push('--pose', strOrUndefined(params.pose)!)
+      if (strOrUndefined(params.deltaPose)) helperArgs.push('--delta-pose', strOrUndefined(params.deltaPose)!)
+      if (strOrUndefined(params.frame) && mode === 'pose_rel') helperArgs.push('--frame', strOrUndefined(params.frame)!)
+      if (strOrUndefined(params.link)) helperArgs.push('--link', strOrUndefined(params.link)!)
+      if (strOrUndefined(params.trajectory)) helperArgs.push('--trajectory', strOrUndefined(params.trajectory)!)
+      if (planOnly) helperArgs.push('--plan-only')
+      if (strOrUndefined(params.trajectoryOut)) helperArgs.push('--out', strOrUndefined(params.trajectoryOut)!)
+      helperArgs.push('--timeout', String(Math.max(10, Math.floor(numOrUndefined(params.timeoutMs) ?? 90000) / 1000)))
+      const timeoutMs = Math.max(30000, numOrUndefined(params.timeoutMs) ?? 90000) + 10000
+      const res = await deps.run('python3', helperArgs, { timeoutMs })
+      if (!res.ok && res.stdout.trim().length === 0) {
+        return toolError('moveit_move', command, res.error ?? 'COMMAND_FAILED',
+          res.stderr.trim() || `exit ${res.exitCode ?? 'unknown'}`)
+      }
+      return okResult('moveit_move', command, parseJsonOrRaw(res.stdout))
     },
   })
 }

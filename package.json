@@ -1,6 +1,6 @@
 {
   "name": "dsh-ros2",
-  "version": "0.13.8",
+  "version": "0.14.0",
   "description": "ROS2 debugging tools and diagnostics skills for DeepSeek Harness (DSH): package/workspace/dependency inspection, node/topic/service/action/param/interface enumeration, topic sampling, TF tree, graph topology JSON, approval-gated builds and message scaffolding, GUI screenshot and multimodal vision observation, headless realtime vision (parallel VLM ROS2 node + image-topic acquisition) and offscreen RViz2 scene rendering.",
   "type": "module",
   "main": "./lib/index.js",

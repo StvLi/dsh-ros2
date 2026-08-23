@@ -4,6 +4,27 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [SemVer](https://semver.org/).
 
+## [0.14.0] - 2026-08-23
+
+### Changed
+
+- **MoveIt 运动接口统一抽象**（`moveit_move`，45 工具）：原四个命名不一的运动
+  工具（`moveit_move_to_pose` / `moveit_cartesian` / `moveit_plan` /
+  `moveit_trajectory`）合并为**一个工具 + `mode` 参数**，对应五种本质模式：
+  1. `joint_abs` 关节角绝对位置模式规划执行（joints "j1:=v1 j2:=v2"）；
+  2. `joint_rel` 关节角相对增量模式规划执行（deltaJoints "j1:=dv1 ..." = 当前 + 增量；
+     **新增**，此前缺失）；
+  3. `pose_abs` 末端位姿绝对模式规划执行（pose "x y z rx ry rz" 规划帧，RPY）；
+     **新增**，此前只有命名姿态；
+  4. `pose_rel` 末端位姿相对增量规划执行（deltaPose "dx dy dz drx dry drz"，
+     frame ee/world——ee 系含旋转增量四元数合成）；**替代**原笛卡尔平移并支持旋转；
+  5. `trajectory` 轨迹执行（`planOnly` + `trajectoryOut` 保存的 JSON）。
+- 统一 helper `scripts/moveit_move.py`（mode 分派）+ `moveit_common.py` 扩展
+  （位姿目标构造 PositionConstraint/OrientationConstraint、RPY/四元数工具）；
+  删除旧三个 helper。
+- skill `ros2-diagnostics` MoveIt 章节、README/README_CN 同步为五模式表述。
+- 测试：96 例全绿（五模式参数/审批/结果 + 模式特定参数校验）。
+
 ## [0.13.8] - 2026-08-23
 
 ### Added
