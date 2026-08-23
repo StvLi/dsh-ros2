@@ -97,12 +97,15 @@ One headless pipeline: **status data → offscreen RViz render → parallel VLM 
    - \`ros2_node_list\` / \`ros2_graph\`: confirm \`robot_state_publisher\`, \`controller_manager\`, cameras are up.
    - \`ros2_topic_echo <joint_states>\` (field \`position\`): joint configuration — all-zeros usually means a parked/home pose. Note: custom message types (e.g. \`bar_msgs\`) need the right environment; if the tool reports an invalid type, fall back to a host shell that sources the workspace.
    - \`ros2_tf_list\` / \`ros2_tf_echo\`: TF tree sanity (child/parent chains).
-   - **Zero-pose semantics (per-robot, ask or infer):** the all-zero joint pose is NOT
-     automatically "arms down" — on the DeepCybo Lite it is a **lateral raise with elbows
-     forward**, while the current non-zero pose is **arms hanging**. VLM cannot infer joint
-     angles from a TF-skeleton render; always treat \`joint_states\` as authoritative and
-     interpret the visual against the robot's documented zero pose. Update this note when a
-     different robot's zero-pose calibration is known.
+   - **Zero-pose semantics (calibrate, do NOT assume):** the all-zero joint pose is
+     NOT automatically "arms down" — it differs per robot (e.g. lateral raise vs
+     hanging). VLM cannot infer joint angles from a TF-skeleton render; always treat
+     \`joint_states\` as authoritative. To learn a robot's zero-pose semantics use
+     \`ros2_zero_pose_semantics {action: "analyze"}\`: it publishes all-zero joints,
+     renders the URDF offscreen, asks the VLM what posture that is, then
+     \`{action: "confirm", choice, description}\` records the user-approved semantics
+     to \`~/.dsh-ros2/zero-pose.yaml\` — read that file (or the returned choice) when
+     interpreting renders. If a calibration file exists, use it instead of guessing.
 
 2. **Offscreen render (L4, headless).**
    - If \`/rviz/scene\` has no publisher, start the offscreen renderer under Xvfb:

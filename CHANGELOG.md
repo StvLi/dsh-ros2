@@ -4,6 +4,21 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [SemVer](https://semver.org/).
 
+## [0.13.4] - 2026-08-23
+
+### Changed
+
+- **零位语义改为通用交互校准**（不绑定任何机器人）：新增
+  `ros2_zero_pose_semantics`（L2 审批，第 45 个工具）——
+  - `analyze`：发布全零关节角 → 抓取离屏渲染帧（/rviz/scene）→ VLM 描述姿态 →
+    输出候选语义（`lateral_raise` / `arms_hanging` / `other`）+ 描述，交使用者确认；
+  - `confirm`：把使用者确认的选择 + 描述写入 `~/.dsh-ros2/zero-pose.yaml`
+    （可 `--out` 指定），skill/agent 读取使用；
+  - 通用：URDF 可指定或复用在线描述；零位关节名从 URDF 提取，无任何机器人专有名称。
+- skill `robot-state-vision-analysis`：零位语义章节改为"先校准、勿假设"，引用
+  `ros2_zero_pose_semantics` 流程，不再硬编码 DeepCybo Lite。
+- 测试：100 例全绿；confirm 实测写入 YAML 验证通过。
+
 ## [0.13.3] - 2026-08-23
 
 ### Added

@@ -286,7 +286,8 @@ describe('tool inventory', () => {
     expect(names).toContain('moveit_trajectory')
     expect(names).toContain('ros2_bag_play')
     expect(names).toContain('ros2_launch')
-    expect(names).toHaveLength(44)
+    expect(names).toContain('ros2_zero_pose_semantics')
+    expect(names).toHaveLength(45)
   })
 })
 
@@ -518,5 +519,34 @@ describe('ros2_bag_play / ros2_launch', () => {
     const out = (await t.execute({ package: 'lite_moveit2', launch: 'demo.launch.py' }, execStub)) as ToolResult
     expect(out.ok).toBe(true)
     expect(out.data).toMatchObject({ jobId: 'job-42', kind: 'ros2-launch' })
+  })
+})
+
+describe('ros2_zero_pose_semantics', () => {
+  it('analyze parses the helper JSON', async () => {
+    const approval = async () => 'allowed-once'
+    const run = makeRun(() => ({
+      stdout: JSON.stringify({ ok: true, description: 'Arms raised horizontally to the sides', candidate: 'lateral_raise', candidates: ['lateral_raise', 'arms_hanging', 'other'], image: '/tmp/x.jpg' }),
+    }))
+    const t = createRos2Tools({ run, approval }).find((x) => x.name === 'ros2_zero_pose_semantics')
+    if (!t) throw new Error('ros2_zero_pose_semantics not registered')
+    const out = (await t.execute({ action: 'analyze' }, execStub)) as ToolResult
+    expect(out.ok).toBe(true)
+    expect(out.data).toMatchObject({ candidate: 'lateral_raise' })
+  })
+
+  it('confirm requires a choice and writes config via helper', async () => {
+    const run = makeRun(() => ({ stdout: '' }))
+    const denied = await call('ros2_zero_pose_semantics', run, { action: 'confirm' })
+    expect(denied.error?.code).toBe('APPROVAL_DENIED')
+    const approval = async () => 'allowed-once'
+    const run2 = makeRun(() => ({
+      stdout: JSON.stringify({ ok: true, written: '/tmp/zp.yaml', choice: 'arms_hanging' }),
+    }))
+    const t = createRos2Tools({ run: run2, approval }).find((x) => x.name === 'ros2_zero_pose_semantics')
+    if (!t) throw new Error('not registered')
+    const out = (await t.execute({ action: 'confirm', choice: 'arms_hanging', out: '/tmp/zp.yaml' }, execStub)) as ToolResult
+    expect(out.ok).toBe(true)
+    expect(out.data).toMatchObject({ choice: 'arms_hanging', written: '/tmp/zp.yaml' })
   })
 })

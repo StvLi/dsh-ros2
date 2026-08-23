@@ -435,6 +435,7 @@ export function createRos2Tools(deps: ToolDeps) {
   // L2: one-click ROS2 install via FishROS when ROS2 is missing (interactive PTY session).
   tools.push(makeRos2InstallTool(deps))
   tools.push(makeLaunchTool(deps))
+  tools.push(makeZeroPoseSemanticsTool(deps))
   // L3 visualization tools (GUI lifecycle + screenshot + multimodal vision).
   tools.push(makeGuiStartTool(deps))
   tools.push(makeGuiListTool(deps))
@@ -1912,6 +1913,63 @@ function makeLaunchTool(deps: ToolDeps) {
         return toolError('ros2_launch', command, 'JOB_START_FAILED', error instanceof Error ? error.message : String(error))
       }
       return okResult('ros2_launch', command, { jobId, kind: 'ros2-launch', label: `${pkg}/${launch}`, status: 'started', note: '查询用 ros2_job_status，停止用 DSH job 控制' })
+    },
+  })
+}
+
+/**
+ * L2: calibrate the robot's zero-pose semantics interactively (approval-gated).
+ * analyze: publishes all-zero joint angles, renders the URDF offscreen, asks
+ * the VLM what posture that is, returns the description + candidate semantics
+ * (lateral_raise / arms_hanging / other) for the user to confirm.
+ * confirm: writes the user-approved choice to a YAML file for skills to read.
+ * Generic — no robot-specific names anywhere.
+ */
+function makeZeroPoseSemanticsTool(deps: ToolDeps) {
+  return defineTool({
+    name: 'ros2_zero_pose_semantics',
+    description:
+      'Calibrate the robot\'s zero-pose semantics interactively (generic, approval-gated; may publish all-zero joint angles / write a config file). ' +
+      'analyze: publish all-zero joints, capture the offscreen render (/rviz/scene), ask the VLM to describe the posture, and return the description + candidate semantics (lateral_raise / arms_hanging / other) for the user to confirm. ' +
+      'confirm: record the user-approved choice (choice + description) to a YAML file (~/.dsh-ros2/zero-pose.yaml by default) that skills read back. Requires robot_state_publisher, the offscreen renderer publishing /rviz/scene, and vlm_node.',
+    parameters: {
+      action: { type: 'string', enum: ['analyze', 'confirm'], description: 'analyze: VLM-render calibration | confirm: record the user-approved choice.' },
+      urdf: { type: 'string', default: '', description: 'URDF file path for the description publisher (if /robot_description_abs is not already live).' },
+      duration: { type: 'number', default: 8, description: 'Seconds to publish all-zero joints (analyze).' },
+      choice: { type: 'string', default: '', description: 'confirm: lateral_raise | arms_hanging | other.' },
+      description: { type: 'string', default: '', description: 'confirm: description recorded alongside the choice.' },
+      out: { type: 'string', default: '', description: 'confirm: output YAML path (default ~/.dsh-ros2/zero-pose.yaml).' },
+    },
+    output: { schema: resultSchema, render: renderResult },
+    async execute(args, exec) {
+      const params = args as Record<string, unknown>
+      const action = String(params.action ?? '')
+      const command = `ros2_zero_pose_semantics action=${action}`
+      const reason = action === 'analyze'
+        ? '将发布全零关节角、抓取离屏渲染帧并调用 VLM 分析零位姿态（需 /rviz/scene 与 vlm_node 在线）。'
+        : `将把零位语义（choice=${String(params.choice ?? '')}）写入配置文件（${strOrUndefined(params.out) ?? '~/.dsh-ros2/zero-pose.yaml'}）。`
+      const approval = await requestApproval(deps, exec, 'ros2_zero_pose_semantics', reason)
+      if (!approval.allowed) return deniedResult('ros2_zero_pose_semantics', command, approval.outcome)
+
+      const helperArgs = [scriptPath('zero_pose_semantics.py'), '--action', action]
+      if (action === 'analyze') {
+        if (strOrUndefined(params.urdf)) helperArgs.push('--urdf', strOrUndefined(params.urdf)!)
+        helperArgs.push('--duration', String(numOrUndefined(params.duration) ?? 8))
+      } else if (action === 'confirm') {
+        const choice = strOrUndefined(params.choice) ?? ''
+        if (!choice) return toolError('ros2_zero_pose_semantics', command, 'MISSING_PARAM', 'confirm 需要 choice（lateral_raise/arms_hanging/other）')
+        helperArgs.push('--choice', choice)
+        if (strOrUndefined(params.description)) helperArgs.push('--description', strOrUndefined(params.description)!)
+        if (strOrUndefined(params.out)) helperArgs.push('--out', strOrUndefined(params.out)!)
+      } else {
+        return toolError('ros2_zero_pose_semantics', command, 'BAD_ACTION', `action 必须为 analyze|confirm`)
+      }
+      const res = await deps.run('python3', helperArgs, { timeoutMs: 120000 })
+      if (!res.ok && res.stdout.trim().length === 0) {
+        return toolError('ros2_zero_pose_semantics', command, res.error ?? 'COMMAND_FAILED',
+          res.stderr.trim() || `exit ${res.exitCode ?? 'unknown'}`)
+      }
+      return okResult('ros2_zero_pose_semantics', command, parseJsonOrRaw(res.stdout))
     },
   })
 }
