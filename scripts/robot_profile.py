@@ -73,11 +73,27 @@ def parse_urdf(urdf_xml: str) -> dict:
         name = j.get("name")
         if not name:
             continue
-        joints.append({
+        entry = {
             "name": name, "type": j.get("type", ""),
             "parent": (j.find("parent").get("link") if j.find("parent") is not None else ""),
             "child": (j.find("child").get("link") if j.find("child") is not None else ""),
-        })
+        }
+        # per-joint limits from the URDF <limit> element — the source of
+        # truth for motion_validator (position/velocity/effort bounds)
+        lim = j.find("limit")
+        if lim is not None:
+            def _num(key):
+                try:
+                    v = float(lim.get(key))
+                    return v
+                except (TypeError, ValueError):
+                    return None
+            entry["limits"] = {
+                "lower": _num("lower"), "upper": _num("upper"),
+                "velocity": _num("velocity"), "effort": _num("effort"),
+                "continuous": j.get("type") == "continuous",
+            }
+        joints.append(entry)
     return {"links": links, "joints": joints}
 
 
@@ -152,6 +168,14 @@ def default_safety(limits: dict) -> dict:
             "ring_buffer_s": 5,
             "dump_dir": "~/.dsh-ros2/safety-events",
         },
+        # pre-execution motion validation (motion_validator, see safety-todo.md)
+        "max_state_age_ms": 500,
+        "validation_ttl_ms": 2000,
+        "workspace": {},              # 可选策略边界: {x:[lo,hi], y:[...], z:[...]}（pose 目标）
+        "execution": {"max_duration_ms": 30000},
+        "require_controller_ready": True,
+        "require_post_execution_verification": True,
+        "require_limits": False,      # 未注册/无限位时：False=警告跳过；True=fail-closed
         "estop": {"enabled": False, "path": ""},  # 仅接口，不实现（后续定义）
     }
 
@@ -184,6 +208,22 @@ def validate_safety(cfg) -> list:
         for e in cfg.get("watchdog", {}).get(key, []):
             if not e.get("topic"):
                 problems.append("watchdog.{} 条目缺少 topic".format(key))
+    # pre-execution validation fields (motion_validator)
+    for num_key in ("max_state_age_ms", "validation_ttl_ms"):
+        try:
+            float(cfg.get(num_key, 0))
+        except (TypeError, ValueError):
+            problems.append("{} 必须是数字".format(num_key))
+    try:
+        float((cfg.get("execution") or {}).get("max_duration_ms", 0))
+    except (TypeError, ValueError):
+        problems.append("execution.max_duration_ms 必须是数字")
+    ws = cfg.get("workspace") or {}
+    if ws and not isinstance(ws, dict):
+        problems.append("workspace 必须是 {x:[lo,hi], y:[...], z:[...]}")
+    for axis, bounds in (ws or {}).items():
+        if not (isinstance(bounds, (list, tuple)) and len(bounds) == 2):
+            problems.append("workspace.{} 需为 [lo, hi]".format(axis))
     return problems
 
 

@@ -31,6 +31,62 @@ async function call(name: string, run: RunFn, args: Record<string, unknown>): Pr
   return (await tool(name, run).execute(args, execStub)) as ToolResult
 }
 
+  // Full-flow fake for the moveit_move contract
+  // (plan → validate → approve → execute → verify).
+  function moveitFlowRun(opts: {
+    monitorDown?: boolean
+    planStdout?: string
+    executeStdout?: string
+    validator?: Record<string, unknown>
+    jointState?: Record<string, number>
+    online?: Record<string, boolean>
+  } = {}) {
+    const planStdout = opts.planStdout ?? JSON.stringify({ ok: true, planned: true, executed: false, mode: 'joint_abs' })
+    const executeStdout = opts.executeStdout ?? JSON.stringify({ ok: true, executed: true, mode: 'trajectory' })
+    const validator = opts.validator ?? {
+      safe: true, status: 'pass', checks: { joint_limits: 'pass', state_freshness: 'pass' }, errors: [], fingerprint: 'fp-1', validated_at_ms: 1, ttl_ms: 2000,
+    }
+    return makeRun((bin, args) => {
+      const cmd = args.join(' ')
+      if (bin === 'ros2' && args.includes('/safety/state')) {
+        return opts.monitorDown ? { stdout: '' } : { stdout: 'state: NORMAL\nseverity: OK\ncause: \ndetail: \n' }
+      }
+      if (bin === 'python3' && cmd.includes('motion_validator.py')) return { stdout: JSON.stringify(validator) }
+      if (bin === 'python3' && cmd.includes('moveit_status.py')) {
+        return {
+          stdout: JSON.stringify({
+            online: opts.online ?? { move_action: true, execute_trajectory: true, compute_cartesian_path: true, controller_manager: true },
+            joint_state: opts.jointState ?? { a: 0.0 },
+            planning_frame: 'world',
+          }),
+        }
+      }
+      if (bin === 'python3' && cmd.includes('moveit_discover.py')) {
+        return { stdout: JSON.stringify({ ok: true, packages: [] }) }
+      }
+      if (bin === 'python3' && cmd.includes('robot_profile.py')) {
+        return {
+          stdout: JSON.stringify({
+            ok: true,
+            robot: {
+              joints: [{ name: 'a', limits: { lower: -3.14, upper: 3.14, velocity: 1.0, effort: 1.0, continuous: false } }],
+              moveit: { groups: { right_arm: { joints: ['a'] } } },
+              safety: { motion: { tracking_error_rad: 0.05 } },
+            },
+          }),
+        }
+      }
+      if (bin === 'python3' && cmd.includes('moveit_move.py')) {
+        return { stdout: cmd.includes('--plan-only') ? planStdout : executeStdout }
+      }
+      return { stdout: '' }
+    })
+  }
+
+
+
+
+
 describe('ros2_pkg_list', () => {
   it('lists and filters packages client-side', async () => {
     const run = makeRun(() => ({ stdout: 'ament_cmake\nbar_msgs\nusb_cam\n' }))
@@ -293,7 +349,8 @@ describe('tool inventory', () => {
     expect(names).toContain('robot_safety_arbitrate')
     expect(names).toContain('robot_safety_lock')
     expect(names).toContain('robot_safety_unlock')
-    expect(names).toHaveLength(50)
+    expect(names).toContain('motion_validate')
+    expect(names).toHaveLength(51)
   })
 })
 
@@ -482,40 +539,94 @@ describe('moveit_discover / moveit_status / moveit_move', () => {
     expect(out.error?.code).toBe('MISSING_PARAM')
   })
 
-  it('moveit_move fails closed without approval', async () => {
-    const run = makeRun(() => ({ stdout: '' }))
-    const out = await call('moveit_move', run, { mode: 'joint_abs', group: 'right_arm', joints: 'a:=0.1', srdf: '/x.srdf' })
+  it('moveit_move fails closed without approval (approval comes after validation)', async () => {
+    const out = await call('moveit_move', moveitFlowRun(), { mode: 'joint_abs', group: 'right_arm', joints: 'a:=0.1', srdf: '/x.srdf' })
     expect(out.error?.code).toBe('APPROVAL_DENIED')
   })
 
-  it('moveit_move parses helper result for joint_abs', async () => {
-    const run = makeRun(() => ({
-      stdout: JSON.stringify({ ok: true, planned: true, planning_time: 0.3, executed: true, mode: 'joint_abs', error_code: 1 }),
-    }))
+  it('moveit_move rejects when deterministic validation fails', async () => {
+    const run = moveitFlowRun({ validator: { safe: false, status: 'fail', errors: ['关节 a 位置超出限位'], checks: { joint_limits: 'fail' } } })
     const approval = async () => 'allowed-once'
     const t = createRos2Tools({ run, approval }).find((x) => x.name === 'moveit_move')
     if (!t) throw new Error('moveit_move not registered')
-    const out = (await t.execute({ mode: 'joint_abs', group: 'right_arm', joints: 'a:=0.1 b:=-0.2', srdf: '/x.srdf' }, execStub)) as ToolResult
+    const out = (await t.execute({ mode: 'joint_abs', group: 'right_arm', joints: 'a:=0.1', srdf: '/x.srdf' }, execStub)) as ToolResult
+    expect(out.ok).toBe(false)
+    expect(out.error?.code).toBe('VALIDATION_FAILED')
+  })
+
+  it('moveit_move plans → validates → executes the validated trajectory', async () => {
+    const approval = async () => 'allowed-once'
+    const run = moveitFlowRun({ jointState: { a: 0.1 } })
+    const t = createRos2Tools({ run, approval }).find((x) => x.name === 'moveit_move')
+    if (!t) throw new Error('moveit_move not registered')
+    const out = (await t.execute({ mode: 'joint_abs', group: 'right_arm', robot: 'lite', joints: 'a:=0.1', srdf: '/x.srdf' }, execStub)) as ToolResult
     expect(out.ok).toBe(true)
-    expect(out.data).toMatchObject({ ok: true, executed: true, mode: 'joint_abs' })
+    expect(out.data).toMatchObject({ executed: true, planned: true })
+    expect((out.data as { validation: Record<string, unknown> }).validation).toMatchObject({ safe: true })
   })
 
   it('moveit_move supports pose_rel and trajectory modes', async () => {
     const approval = async () => 'allowed-once'
-    const run = makeRun(() => ({
-      stdout: JSON.stringify({ ok: true, planned: true, executed: true, mode: 'pose_rel' }),
-    }))
-    const t = createRos2Tools({ run, approval }).find((x) => x.name === 'moveit_move')
+    const t = createRos2Tools({ run: moveitFlowRun(), approval }).find((x) => x.name === 'moveit_move')
     if (!t) throw new Error('moveit_move not registered')
     const pose = (await t.execute({ mode: 'pose_rel', group: 'right_arm', deltaPose: '0.05 0 0 0 0 0', frame: 'ee', srdf: '/x.srdf' }, execStub)) as ToolResult
     expect(pose.ok).toBe(true)
-    expect((pose.data as { mode: string }).mode).toBe('pose_rel')
-    const runTraj = makeRun(() => ({ stdout: JSON.stringify({ ok: true, executed: true, mode: 'trajectory' }) }))
-    const tt = createRos2Tools({ run: runTraj, approval }).find((x) => x.name === 'moveit_move')
+    const tt = createRos2Tools({ run: moveitFlowRun(), approval }).find((x) => x.name === 'moveit_move')
     if (!tt) throw new Error('not registered')
     const traj = (await tt.execute({ mode: 'trajectory', group: 'right_arm', trajectory: '/x.json' }, execStub)) as ToolResult
     expect(traj.ok).toBe(true)
     expect((traj.data as { mode: string }).mode).toBe('trajectory')
+  })
+
+  it('moveit_move rejects on fingerprint change before execution (TOCTOU)', async () => {
+    let calls = 0
+    const run = makeRun((bin, args) => {
+      const cmd = args.join(' ')
+      if (bin === 'ros2' && args.includes('/safety/state')) return { stdout: 'state: NORMAL\n' }
+      if (bin === 'python3' && cmd.includes('motion_validator.py')) {
+        calls += 1
+        return {
+          stdout: JSON.stringify(calls === 1
+            ? { safe: true, status: 'pass', checks: {}, errors: [], fingerprint: 'fp-1' }
+            : { safe: true, status: 'pass', checks: {}, errors: [], fingerprint: 'fp-CHANGED' }),
+        }
+      }
+      if (bin === 'python3' && cmd.includes('moveit_status.py')) return { stdout: JSON.stringify({ online: { execute_trajectory: true }, joint_state: { a: 0.0 } }) }
+      if (bin === 'python3' && cmd.includes('robot_profile.py')) return { stdout: JSON.stringify({ ok: true, robot: { joints: [], moveit: { groups: {} }, safety: {} } }) }
+      if (bin === 'python3' && cmd.includes('moveit_move.py')) {
+        return { stdout: cmd.includes('--plan-only') ? JSON.stringify({ ok: true, planned: true }) : JSON.stringify({ ok: true, executed: true }) }
+      }
+      return { stdout: '' }
+    })
+    const approval = async () => 'allowed-once'
+    const t = createRos2Tools({ run, approval }).find((x) => x.name === 'moveit_move')
+    if (!t) throw new Error('moveit_move not registered')
+    const out = (await t.execute({ mode: 'joint_abs', group: 'right_arm', robot: 'lite', joints: 'a:=0.1', srdf: '/x.srdf' }, execStub)) as ToolResult
+    expect(out.ok).toBe(false)
+    expect(out.error?.code).toBe('VALIDATION_CHANGED')
+  })
+
+  it('moveit_move rejects when the controller is not ready', async () => {
+    const run = moveitFlowRun({ online: { move_action: true, execute_trajectory: false, compute_cartesian_path: false, controller_manager: true } })
+    const approval = async () => 'allowed-once'
+    const t = createRos2Tools({ run, approval }).find((x) => x.name === 'moveit_move')
+    if (!t) throw new Error('moveit_move not registered')
+    const out = (await t.execute({ mode: 'joint_abs', group: 'right_arm', robot: 'lite', joints: 'a:=0.1', srdf: '/x.srdf' }, execStub)) as ToolResult
+    expect(out.ok).toBe(false)
+    expect(out.error?.code).toBe('CONTROLLER_NOT_READY')
+  })
+
+  it('motion_validate reports a failing trajectory (read-only)', async () => {
+    const run = makeRun((bin, args) => {
+      if (bin === 'python3' && args.includes('motion_validator.py')) {
+        return { stdout: JSON.stringify({ safe: false, status: 'fail', errors: ['关节 a 位置超出限位'], checks: { joint_limits: 'fail' }, fingerprint: 'fp' }) }
+      }
+      if (bin === 'python3' && args.includes('robot_profile.py')) return { stdout: JSON.stringify({ ok: true, robot: { joints: [], moveit: { groups: {} }, safety: {} } }) }
+      return { stdout: '' }
+    })
+    const out = await call('motion_validate', run, { trajectory: '/tmp/plan.json', robot: 'lite' })
+    expect(out.ok).toBe(true)
+    expect(out.warnings?.[0]).toContain('校验未通过')
   })
 })
 
@@ -552,12 +663,8 @@ describe('safety framework tools', () => {
   })
 
   it('moveit_move warns (not rejects) when monitor is down in warn mode', async () => {
-    const run = makeRun((bin, args) => {
-      if (bin === 'ros2' && args.includes('/safety/state')) return { stdout: '' }
-      return { stdout: JSON.stringify({ ok: true, executed: true, mode: 'joint_abs' }) }
-    })
     const approval = async () => 'allowed-once'
-    const t = createRos2Tools({ run, approval }).find((x) => x.name === 'moveit_move')
+    const t = createRos2Tools({ run: moveitFlowRun({ monitorDown: true }), approval }).find((x) => x.name === 'moveit_move')
     if (!t) throw new Error('not registered')
     const out = (await t.execute({ mode: 'joint_abs', group: 'right_arm', joints: 'a:=0.1', srdf: '/x.srdf' }, execStub)) as ToolResult
     expect(out.ok).toBe(true)

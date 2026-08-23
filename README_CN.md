@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![ROS2](https://img.shields.io/badge/ROS2-Jazzy-orange)]()
 ![Node](https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-brightgreen)
-![Tools](https://img.shields.io/badge/tools-50-blue)
+![Tools](https://img.shields.io/badge/tools-51-blue)
 
 **dsh-ros2** 让 DSH 智能体在一台装有 ROS2 的主机上获得完整的机器人开发/调试能力，分为四个能力层：
 
@@ -34,7 +34,7 @@
 
 ## 特性一览
 
-- **零侵入诊断**：50 个工具覆盖 ROS2 调试的绝大多数场景，从"包装了没有"到"这一帧话题里是什么"，一条命令一个结果；
+- **零侵入诊断**：51 个工具覆盖 ROS2 调试的绝大多数场景，从"包装了没有"到"这一帧话题里是什么"，一条命令一个结果；
 - **全图拓扑**：`ros2_graph` 将节点/发布/订阅/服务/动作折叠为一份 JSON，几秒看清系统结构；
 - **审批门控的写操作**：构建、装依赖、生成消息骨架等写操作通过 DSH 审批服务，fail-closed，拒绝即失败；
 - **可视化即服务**：无头也能"看"——截图/多模态描述/窗口交互全部本地化，不依赖远程显示；
@@ -113,6 +113,7 @@ ros2_doctor                         # 系统健康报告
 | `moveit_discover` | 扫描 MoveIt 包 + 解析 SRDF + 探测 move_group | 发现宿主上的 MoveIt2 配置包（任意带 SRDF 的包）、规划组与命名姿态，以及 `/move_action`/`/execute_trajectory`/`/compute_cartesian_path` 是否在线；可直接传 `srdf` 解析指定文件——通用，不绑定具体包 |
 | `robot_safety_state` | `ros2 topic echo /safety/state --once` | 读锁存安全状态（NORMAL / LOCKED + 严重级 + 触发原因 + 细节）；监视器离线时返回 `monitor_running: false` |
 | `robot_safety_arbitrate` | `ros2 run dsh_ros2_safety safety_vlm_arbitrate ...` | 事件驱动 VLM 语义仲裁（方案变更/异常后）：固定格式化 prompt + 新鲜离屏帧经 `/vlm/describe`；非 safe 一律提示人工裁决 |
+| `motion_validate` | `motion_validator.py --trajectory <file> --config <json>` | 确定性预执行校验（只读）：关节限位、NaN/Inf、名字与规划组覆盖、时间戳/时长、新鲜度、可选 workspace box、指纹 + TTL——碰撞/奇异留给 MoveIt 规划 |
 
 ### L2 管理（审批门控）
 
@@ -207,7 +208,7 @@ dsh-ros2 将它们抽象为 **一个工具 `moveit_move` + `mode` 参数**——
 | --- | --- |
 | `moveit_discover`（L1） | 读取任意 MoveIt 包的 SRDF：规划组、命名姿态、chain 末端；探测标准接口（`/move_action`、`/execute_trajectory`…）在线状态 |
 | `moveit_status`（L1） | 运行时探测：接口在线 + 当前 `/joint_states` 采样 + SRDF 规划帧 |
-| `moveit_move`（L2 审批） | **一个工具五种模式**：`joint_abs`（joints "j1:=v1 j2:=v2"）、`joint_rel`（deltaJoints = 当前 + 增量）、`pose_abs`（pose "x y z rx ry rz" 规划帧）、`pose_rel`（deltaPose "dx dy dz drx dry drz"，frame ee/world）、`trajectory`（执行已保存的轨迹 JSON）。**执行前查 `/safety/state`**：LOCKED 恒拒绝；监视器失联时 `safetyStrict: reject` 拒绝 |
+| `moveit_move`（L2 审批） | **一个工具五种模式**：`joint_abs`、`joint_rel`（当前 + 增量）、`pose_abs`、`pose_rel`（frame ee/world）、`trajectory`。**单一路径：规划 → 确定性校验（`robot` 档案完整限位）→ 人工审批（展示校验摘要）→ 执行 → 验证**。执行前查 `/safety/state`：LOCKED 恒拒；监视器失联按 `safetyStrict` |
 | `robot_safety_start` | `ros2 run dsh_ros2_safety safety_monitor --profile <yaml>` | 后台启动通用安全监视器（审批门控）；本体相关值全部来自档案 `safety` 段 |
 | `robot_safety_lock` / `robot_safety_unlock` | `ros2 service call /safety/set_lock\|unlock ...` | **人工门**显式锁死 / 解锁（调用前 L2 审批）；锁存直至人工解锁（恢复：解锁 → 回 home → 恢复） |
 
@@ -333,7 +334,7 @@ snapshot` 固化聚合层；`robot_topology learn` 在使用中逐个追加重�
 ```
 dsh-ros2/
 ├── src/                  # DSH 插件本体（TypeScript）
-│   ├── index.ts          # 插件入口：注册 50 个工具 + 4 个 skill
+│   ├── index.ts          # 插件入口：注册 51 个工具 + 4 个 skill
 │   ├── tools.ts          # 工具定义（L1/L2/L3 参数与命令映射）
 │   ├── vision.ts         # L4 视觉工具（snapshot / analyze / topics）
 │   ├── gui.ts            # L3 GUI 生命周期与交互
@@ -344,7 +345,7 @@ dsh-ros2/
 ├── offscreen/            # ROS2 包 dsh_ros2_rviz_offscreen（C++）：rviz_offscreen_node（OGRE 离屏渲染 → /rviz/scene）
 ├── safety/               # ROS2 包 dsh_ros2_safety（Python）：safety_monitor 节点 + safety_core（纯逻辑，--selftest）+ safety_vlm_arbitrate + SafetyState/Event msg + Unlock/SetLock srv
 ├── docs/                 # 架构（architecture.md）、兼容基线（compatibility.md）、实测记录（robot-state-vision-test.md）、截图
-├── tests/                # vitest（109 例，CLI 输出 mock）
+├── tests/                # vitest（113 例，CLI 输出 mock）
 ├── .github/workflows/    # CI：Node 22/24 → typecheck/test/build/pack 校验
 ├── PUBLISH.md            # 开源发布清单（GitHub + npm + DSH 社区目录）
 └── CHANGELOG.md          # 版本变更记录（Keep a Changelog）
@@ -370,7 +371,7 @@ dsh-ros2/
 ```bash
 pnpm install
 pnpm run typecheck   # tsc --noEmit
-pnpm run test        # vitest（109 例；CLI 输出 mock）
+pnpm run test        # vitest（113 例；CLI 输出 mock）
 pnpm run build       # tsc -> lib/ + lib/types/
 ```
 

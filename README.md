@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![ROS2](https://img.shields.io/badge/ROS2-Jazzy-orange)]()
 ![Node](https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-brightgreen)
-![Tools](https://img.shields.io/badge/tools-50-blue)
+![Tools](https://img.shields.io/badge/tools-51-blue)
 
 **dsh-ros2** gives a DSH agent full robot development / debugging capabilities on any host with ROS2, organized in four capability tiers:
 
@@ -34,7 +34,7 @@ All tools run plain `ros2` / `colcon` / `rosdep` CLI commands on the host; L1 ne
 
 ## Features
 
-- **Zero-intrusion diagnostics**: 50 tools cover most ROS2 debugging scenarios — from "is the package installed?" to "what is on this topic right now?", one command, one answer;
+- **Zero-intrusion diagnostics**: 51 tools cover most ROS2 debugging scenarios — from "is the package installed?" to "what is on this topic right now?", one command, one answer;
 - **Whole-graph topology**: `ros2_graph` folds nodes/publishers/subscribers/services/actions into one JSON — see the system structure in seconds;
 - **Approval-gated writes**: builds, dependency installs, message scaffolding etc. go through the DSH approval service; fail-closed, denial = failure;
 - **Visualization as a service**: "see" headlessly — screenshots / multimodal description / window interaction are fully local, no remote display;
@@ -113,6 +113,7 @@ ros2_doctor                         # system health report
 | `moveit_discover` | scans MoveIt packages + parses SRDF + probes move_group | Discover MoveIt2 config packages (any package shipping an SRDF), their planning groups and named poses, and whether `/move_action` / `/execute_trajectory` / `/compute_cartesian_path` are online. Pass `srdf` to parse a specific file directly — generic, not bound to a specific package |
 | `robot_safety_state` | `ros2 topic echo /safety/state --once` | Read the latched safety state (NORMAL / LOCKED + severity + trigger cause + detail); reports `monitor_running: false` when the monitor is offline |
 | `robot_safety_arbitrate` | `ros2 run dsh_ros2_safety safety_vlm_arbitrate ...` | Event-driven VLM semantic arbitration (plan change / post-anomaly): fixed-format prompt + fresh offscreen frame via `/vlm/describe`; any non-safe verdict flags human arbitration |
+| `motion_validate` | `motion_validator.py --trajectory <file> --config <json>` | Deterministic pre-execution validation (read-only): joint limits, NaN/Inf, names & group coverage, timestamps/duration, freshness, optional workspace box, fingerprint + TTL — collision/singularity stay with MoveIt planning |
 
 ### L2 management (approval-gated)
 
@@ -134,7 +135,7 @@ Every L2 tool performs a **write operation** and asks the user first via the DSH
 | `robot_register` | collects URDF/TF/cameras/MoveIt/zero-pose → writes `~/.dsh-ros2/robots/<name>.yaml` | Register a robot body profile on first contact (approval-gated) for instant later reuse |
 | `robot_load` | reads `~/.dsh-ros2/robots/<name>.yaml` | Load a registered robot profile as structured JSON (fast path — no discovery); empty name lists all profiles |
 | `robot_topology` | aggregate snapshot + progressive node learning (strict schema) | Robot comms topology trade-off: `snapshot` (approval) records node/topic/service lists (light, not verbose); `learn` (approval) records ONE important node's role/description + pub/sub/srv/act; `show` (read-only) reads them back |
-| `moveit_move` | unified: `/move_action` + `/execute_trajectory` | **One tool, five essential modes** (approval-gated): `joint_abs` (关节角绝对), `joint_rel` (关节角相对增量), `pose_abs` (末端位姿绝对), `pose_rel` (末端位姿相对增量, frame ee/world), `trajectory` (轨迹执行). Generic: standard moveit_msgs + SRDF only; `planOnly` + `trajectoryOut` split plan/execute. **Gates on `/safety/state` before executing**: LOCKED always rejected; monitor-down rejects under `safetyStrict: reject` |
+| `moveit_move` | unified: `/move_action` + `/execute_trajectory` | **One tool, five essential modes** (approval-gated): `joint_abs`, `joint_rel`, `pose_abs`, `pose_rel` (frame ee/world), `trajectory`. Generic: standard moveit_msgs + SRDF only. **Single motion path: plan → deterministic validation (motion_validator, `robot` profile for full limits) → human approval (validation summary shown) → execute → verify**. Gates on `/safety/state` (LOCKED always rejected; monitor-down per `safetyStrict`) |
 | `robot_safety_start` | `ros2 run dsh_ros2_safety safety_monitor --profile <yaml>` | Start the generic safety monitor as a **background job** (approval-gated); all robot-specific values come from the profile `safety` section |
 | `robot_safety_lock` / `robot_safety_unlock` | `ros2 service call /safety/set_lock|unlock ...` | **Human-gated** explicit lock / unlock (L2 approval before the call); lock is latched until a human unlocks (recovery: unlock → re-home → resume) |
 | `moveit_status` | probes move_group interfaces + samples `/joint_states` | Runtime status: online probe + current joint state + SRDF planning frame (read-only) |
@@ -358,7 +359,7 @@ them back instantly — one call instead of N discovery calls.
 ```
 dsh-ros2/
 ├── src/                  # DSH plugin core (TypeScript)
-│   ├── index.ts          # entry: registers 50 tools + 4 skills
+│   ├── index.ts          # entry: registers 51 tools + 4 skills
 │   ├── tools.ts          # tool definitions (L1/L2/L3 params & command mapping)
 │   ├── vision.ts         # L4 vision tools (snapshot / analyze / topics)
 │   ├── gui.ts            # L3 GUI lifecycle & interaction
@@ -368,8 +369,8 @@ dsh-ros2/
 ├── vlm/                  # ROS2 package dsh_ros2_vlm (Python): vlm_node / vision_bringup / vlm_bridge_node / image_snapshot / vlm_call / vlm_bridge_call
 ├── offscreen/            # ROS2 package dsh_ros2_rviz_offscreen (C++): rviz_offscreen_node (OGRE offscreen render → /rviz/scene)
 ├── safety/               # ROS2 package dsh_ros2_safety (Python): safety_monitor node + safety_core (pure logic, --selftest) + safety_vlm_arbitrate + SafetyState/Event msgs + Unlock/SetLock srvs
-├── docs/                 # architecture.md, compatibility.md, robot-state-vision-test.md, gpu-passthrough-test.md, **safety-handover.md**, screenshots
-├── tests/                # vitest (109 cases; CLI outputs mocked)
+├── docs/                 # architecture.md, compatibility.md, robot-state-vision-test.md, gpu-passthrough-test.md, **safety-handover.md** / **safety.md** / **safety-todo.md**, screenshots
+├── tests/                # vitest (113 cases; CLI outputs mocked)
 ├── .github/workflows/    # CI: Node 22/24 → typecheck/test/build/pack validation
 ├── PUBLISH.md            # open-source publishing checklist (GitHub + npm + DSH community)
 └── CHANGELOG.md          # version history (Keep a Changelog)
@@ -395,7 +396,7 @@ dsh-ros2/
 ```bash
 pnpm install
 pnpm run typecheck   # tsc --noEmit
-pnpm run test        # vitest (109 cases; CLI outputs mocked)
+pnpm run test        # vitest (113 cases; CLI outputs mocked)
 pnpm run build       # tsc -> lib/ + lib/types/
 ```
 

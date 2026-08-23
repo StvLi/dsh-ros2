@@ -1,0 +1,636 @@
+# DSH-ROS2 P0 Safety TODO
+#
+# Goal:
+# Upgrade the current L2 "approval-gated execution" model into:
+#
+#   PLAN
+#     ↓
+#   VALIDATE
+#     ↓
+#   APPROVE
+#     ↓
+#   EXECUTE
+#     ↓
+#   VERIFY
+#
+# The system MUST fail closed whenever safety cannot be established.
+# Never allow an LLM/Agent to directly execute an unvalidated robot motion.
+
+============================================================
+1. Unified Motion Safety Validation Layer
+============================================================
+
+Implement a reusable safety validation module, preferably separated
+from the MoveIt tool implementation.
+
+Suggested architecture:
+
+  moveit_move
+       ↓
+  motion planner
+       ↓
+  motion_validator
+       ↓
+  approval gate
+       ↓
+  execution
+       ↓
+  execution verifier
+
+Add a validation API/tool such as:
+
+  motion_validate
+
+It should accept either:
+- a newly planned trajectory
+- a trajectoryOut artifact
+- a normalized motion proposal
+
+Return structured JSON, for example:
+
+{
+  "safe": true,
+  "status": "pass",
+  "checks": {
+    "joint_limits": "pass",
+    "velocity_limits": "pass",
+    "acceleration_limits": "pass",
+    "workspace": "pass",
+    "collision": "pass",
+    "singularity": "warning",
+    "controller_state": "pass",
+    "state_freshness": "pass",
+    "trajectory_integrity": "pass"
+  },
+  "warnings": [],
+  "errors": []
+}
+
+The validator must be deterministic and must NOT rely on the LLM
+to decide whether a motion is safe.
+
+============================================================
+2. Joint Limit Validation
+============================================================
+
+Validate every joint waypoint against the robot's actual limits.
+
+Check:
+- position limits
+- velocity limits
+- acceleration limits
+- effort limits when available
+- continuous-joint handling
+- NaN / Inf
+- invalid joint names
+- missing joints
+- unreasonable trajectory duration
+- discontinuous joint jumps
+
+Use URDF / robot_description / MoveIt robot model as the source of
+truth whenever possible.
+
+For relative joint commands:
+- obtain a fresh current joint state
+- compute the resulting absolute target
+- validate the resulting target and trajectory
+
+Never validate only the delta value.
+
+============================================================
+3. Cartesian / Workspace Validation
+============================================================
+
+For pose_abs and pose_rel:
+
+- validate target frame
+- validate target pose numerical validity
+- reject NaN / Inf
+- validate workspace bounds
+- validate orientation representation
+- reject malformed poses
+- reject targets outside configured robot workspace
+
+Add optional robot-profile workspace configuration:
+
+workspace:
+  x: [xmin, xmax]
+  y: [ymin, ymax]
+  z: [zmin, zmax]
+
+Workspace checks must be configurable per robot.
+
+============================================================
+4. Collision Validation
+============================================================
+
+Before execution:
+
+- verify that MoveIt planning succeeded
+- inspect the resulting trajectory
+- perform a final collision/safety validation when possible
+- do NOT assume "planning succeeded" means the trajectory is still safe
+
+For trajectoryOut:
+- ALWAYS revalidate before execution
+- NEVER trust a previously validated trajectory indefinitely
+
+If the robot/environment state changed materially,
+invalidate the old validation result.
+
+============================================================
+5. Robot State Freshness
+============================================================
+
+Introduce a configurable maximum acceptable age for robot state.
+
+Example:
+
+maxStateAgeMs: 500
+
+(or an appropriate configurable default)
+
+Before:
+- joint_abs
+- joint_rel
+- pose_abs
+- pose_rel
+- trajectory execution
+
+check that /joint_states and required robot state are fresh.
+
+If state is stale or unavailable:
+
+  FAIL CLOSED
+
+Do not execute using an old state.
+
+For relative commands, this check is mandatory.
+
+============================================================
+6. Controller Readiness
+============================================================
+
+Before execution verify, where supported:
+
+- MoveIt action server is available
+- trajectory execution interface is available
+- required controllers are active
+- robot is in an executable state
+- no known controller fault
+- no emergency-stop condition reported
+- required joint state streams are alive
+
+If controller state cannot be established:
+
+  REJECT EXECUTION
+
+Do not convert "unknown" into "safe".
+
+============================================================
+7. Approval Must Happen AFTER Validation
+============================================================
+
+Current approval-gated behavior must be preserved.
+
+However, change the logical ordering to:
+
+  motion proposal
+       ↓
+  plan
+       ↓
+  safety validation
+       ↓
+  human approval
+       ↓
+  execution
+
+Never:
+
+  proposal
+       ↓
+  approval
+       ↓
+  validation
+       ↓
+  execution
+
+The user approval UI should show the validation result.
+
+Example:
+
+  Motion:
+    group: right_arm
+    mode: pose_rel
+    delta: [0.05, 0, 0, 0, 0, 0]
+
+  Safety:
+    joint limits: PASS
+    velocity limits: PASS
+    workspace: PASS
+    collision: PASS
+    state freshness: PASS
+    controller: PASS
+
+  Result:
+    SAFE TO EXECUTE
+
+============================================================
+8. Fail-Closed Policy
+============================================================
+
+The following conditions MUST reject execution:
+
+- approval service unavailable
+- safety validator unavailable
+- required robot state unavailable
+- stale joint state
+- controller state unknown
+- collision validation unavailable when required
+- malformed trajectory
+- invalid joint names
+- NaN / Inf
+- joint limit violation
+- velocity limit violation
+- acceleration limit violation
+- workspace violation
+- collision detected
+- action server unavailable
+- trajectory integrity failure
+
+Do NOT silently downgrade to "best effort".
+
+============================================================
+9. Validation Result Binding / TOCTOU Protection
+============================================================
+
+A validation result must be bound to the exact motion being approved.
+
+Create a motion/trajectory fingerprint or hash containing,
+at minimum:
+
+- robot profile identity/version
+- planning group
+- joint names
+- trajectory points
+- timestamps/durations
+- relevant planning parameters
+- validation timestamp
+- relevant robot-state timestamp
+
+When executing:
+
+- recompute the fingerprint
+- reject if the trajectory has changed
+- reject if the robot state has become too old
+- reject if the validation has expired
+
+This prevents:
+
+  validate(A)
+      ↓
+  modify(A) → B
+      ↓
+  execute(B)
+
+============================================================
+10. Validation Expiration
+============================================================
+
+Safety validation should have a short TTL.
+
+Example:
+
+validationTtlMs: 1000
+
+Make this configurable.
+
+After expiration:
+
+  REVALIDATE
+
+Do not reuse old safety results indefinitely.
+
+============================================================
+11. Execution Watchdog
+============================================================
+
+During MoveIt execution monitor:
+
+- action status
+- execution progress
+- timeout
+- controller errors
+- unexpected abort
+- trajectory deviation where available
+
+If execution exceeds a configurable timeout:
+
+  abort / cancel action
+
+If the underlying action reports failure:
+
+  immediately return structured failure information.
+
+Never leave a background motion job indefinitely unknown.
+
+============================================================
+12. Post-Execution Verification
+============================================================
+
+After execution:
+
+- obtain fresh joint state
+- compare actual vs expected final state
+- verify action result
+- verify trajectory completion
+- optionally verify end-effector pose
+
+Return:
+
+{
+  "execution": "success",
+  "verification": "pass",
+  "final_state": {...},
+  "errors": []
+}
+
+If execution succeeded but verification fails:
+
+  status = "verification_failed"
+
+Do NOT report generic "success".
+
+============================================================
+13. Relative Motion Safety
+============================================================
+
+For joint_rel and pose_rel:
+
+  current_state
+      ↓
+  compute target
+      ↓
+  plan
+      ↓
+  validate
+      ↓
+  approve
+      ↓
+  execute
+      ↓
+  verify
+
+Never allow the LLM to reason about safety based only on the
+relative delta.
+
+The validator must reason about the resulting absolute state
+and generated trajectory.
+
+============================================================
+14. Trajectory File Safety
+============================================================
+
+For trajectory mode:
+
+- validate file existence
+- validate JSON schema
+- validate joint names
+- validate numeric values
+- validate timestamps
+- validate monotonicity
+- validate joint limits
+- validate velocity/acceleration limits
+- validate trajectory fingerprint
+- validate robot profile compatibility
+
+Never blindly execute an arbitrary trajectory JSON.
+
+Prefer storing generated trajectories in a controlled DSH-managed
+directory rather than arbitrary filesystem paths.
+
+============================================================
+15. Robot Profile Safety Configuration
+============================================================
+
+Extend robot profiles with optional safety configuration:
+
+safety:
+  maxStateAgeMs: 500
+  validationTtlMs: 1000
+  workspace:
+    x: [-1.0, 1.0]
+    y: [-1.0, 1.0]
+    z: [0.0, 1.5]
+
+  execution:
+    maxDurationMs: 30000
+
+  requireControllerReady: true
+  requireCollisionCheck: true
+  requirePostExecutionVerification: true
+
+Do NOT hard-code robot-specific limits into the TypeScript tool layer.
+
+============================================================
+16. Emergency Stop Boundary
+============================================================
+
+Do NOT claim that DSH replaces a physical safety PLC or hardware
+emergency stop.
+
+Document explicitly:
+
+  DSH is NOT a certified functional-safety system.
+
+If the underlying robot exposes an emergency-stop or stop interface,
+provide an optional integration point.
+
+If no trustworthy stop interface exists, document the limitation.
+
+Never implement a fake "software E-stop" and present it as a safety
+guarantee.
+
+============================================================
+17. L3 GUI Safety
+============================================================
+
+Restrict ros2_gui_interact.
+
+Do NOT allow unrestricted arbitrary GUI interaction by default.
+
+Introduce capability restrictions such as:
+
+allowedApplications:
+  - rviz2
+  - rqt
+  - rqt_graph
+
+allowedActions:
+  rviz2:
+    - click
+    - drag
+    - scroll
+    - view_navigation
+
+Terminal / arbitrary applications:
+  disabled by default
+
+GUI interaction should be approval-gated when the action can modify
+robot state or launch/stop processes.
+
+Prefer window-title/application validation before sending xdotool
+events.
+
+============================================================
+18. Audit Logging
+============================================================
+
+Record every L2 motion operation:
+
+- timestamp
+- requesting agent/tool
+- robot
+- planning group
+- requested motion
+- generated trajectory fingerprint
+- validation result
+- approval result
+- execution result
+- post-execution verification
+- errors/warnings
+
+Never log API keys or secrets.
+
+Logs should allow reconstruction of:
+
+  what the Agent requested
+  what the validator checked
+  what the user approved
+  what was executed
+  what actually happened
+
+============================================================
+19. Security / Secret Handling
+============================================================
+
+Preserve the current rule:
+
+- API keys via environment/secret manager
+- never hard-code
+- never log secrets
+
+Also ensure:
+- command arguments do not accidentally expose secrets
+- error messages do not dump environment variables
+- trajectory/profile data does not unintentionally contain secrets
+- filesystem writes remain within intended DSH directories where
+  possible
+
+============================================================
+20. Tests
+============================================================
+
+Add deterministic unit tests for every validator.
+
+Minimum cases:
+
+PASS:
+- valid joint trajectory
+- valid pose
+- valid relative joint motion
+- valid relative pose motion
+
+FAIL:
+- position limit violation
+- velocity limit violation
+- acceleration limit violation
+- workspace violation
+- NaN
+- Inf
+- missing joint
+- unknown joint
+- stale joint state
+- unavailable controller
+- collision detected
+- malformed trajectory
+- expired validation
+- modified trajectory after validation
+- changed robot profile
+- changed robot state after validation
+
+Also add integration tests with a fake/simulated MoveIt robot.
+
+============================================================
+21. Final Execution Contract
+============================================================
+
+The only valid L2 motion execution path should be:
+
+  REQUEST
+     ↓
+  NORMALIZE
+     ↓
+  PLAN
+     ↓
+  VALIDATE
+     ↓
+  APPROVAL
+     ↓
+  FINGERPRINT CHECK
+     ↓
+  EXECUTE
+     ↓
+  WATCHDOG
+     ↓
+  VERIFY
+     ↓
+  RESULT
+
+No tool or internal helper should be able to bypass this path.
+
+The architecture should make unsafe bypasses difficult by construction,
+not merely by documentation.
+
+============================================================
+22. Documentation
+============================================================
+
+Add a dedicated:
+
+  docs/safety.md
+
+Clearly distinguish:
+
+1. Agent permission
+2. Human approval
+3. Motion validation
+4. Execution monitoring
+5. Post-execution verification
+6. Physical robot safety
+
+Explicitly state:
+
+  DSH approval is not a substitute for motion validation.
+  Motion validation is not a substitute for certified robot safety.
+  DSH is not a functional-safety controller.
+
+============================================================
+Acceptance Criteria
+============================================================
+
+The P0 task is complete only when:
+
+1. No L2 motion can bypass validation.
+2. Validation fails closed.
+3. Relative motions use fresh robot state.
+4. trajectoryOut is revalidated before execution.
+5. Validation is bound to the exact trajectory.
+6. Validation expires.
+7. Controller readiness is checked.
+8. Execution has a watchdog.
+9. Execution has post-verification.
+10. Safety results are visible before approval.
+11. GUI interaction has capability restrictions.
+12. All critical safety conditions have automated tests.
+13. docs/safety.md clearly documents the safety boundary.

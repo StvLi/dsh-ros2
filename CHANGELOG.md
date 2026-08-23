@@ -4,6 +4,44 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [SemVer](https://semver.org/).
 
+## [0.14.1] - 2026-08-23
+
+### Added
+
+- **确定性运动校验（pre-execution motion validation，51 工具）**——把运动执行升级为
+  `PLAN → VALIDATE → APPROVE → EXECUTE → VERIFY` 单一路径（docs/safety-todo.md 早批，
+  基于 GPT 意见评审，版本按约定留在 0.14.x 系列）：
+  - **`scripts/motion_validator.py`**（纯 Python 确定性、无 rclpy、无 LLM）：
+    限位（位置/速度/加速度，URDF 入档）、NaN/Inf、关节名与规划组覆盖、时间戳单调/
+    时长上限、相对运动绝对目标（基于新鲜状态）、状态新鲜度 `max_state_age_ms`、
+    pose 目标 workspace box（可配置）、轨迹指纹（sha256，TOCTOU 绑定）、TTL；
+    `--selftest` 24 个故障注入场景全绿。**不做** collision/singularity 二次校验
+    （与 MoveIt 规划冗余）。
+  - **`moveit_move` 重构**：执行模式 = 内部规划（不额外审批）→ 校验（fail-closed，
+    `VALIDATION_FAILED`）→ 控制器就绪探测（复用 moveit_status）→ 人工审批
+    （展示校验摘要）→ 执行前复验（指纹一致，`VALIDATION_CHANGED`）→ 经 trajectory
+    模式执行已校验轨迹 → 终态关节 vs 期望验证。新增 `robot` 参数启用完整校验；
+    `planOnly` 显式模式行为不变。
+  - **`motion_validate` 工具（L1，只读）**：校验任意已规划轨迹 / trajectoryOut /
+    运动提议，返回结构化 JSON。
+  - **`robot_profile.py`**：parse_urdf 将每关节 URDF 限位写入档案（
+    `joints[].limits`）；`safety` 段新增 `max_state_age_ms`（500）、
+    `validation_ttl_ms`（2000）、`workspace`、`execution.max_duration_ms`（30000）、
+    `require_controller_ready` / `require_post_execution_verification` /
+    `require_limits`；safety set/validate 同步。
+  - **执行看门狗**：`moveit_common.py` 动作超时先 `cancel_goal_async()` 再报错，
+    不留失控轨迹。
+  - **`docs/safety.md`**：六层边界（agent 权限 / 人工审批 / 运动校验 / 执行监视 /
+    事后验证 / 物理机器人安全）+ "DSH 非功能安全系统 / 不造假 E-stop" 声明 +
+    失败模式与降级策略表。
+
+### Changed
+
+- 工具数 50 → 51；测试 109 → 113（新流程：校验失败拒绝、TOCTOU 指纹、控制器
+  未就绪、motion_validate、审批在验证后）；README/README_CN 双语同步
+  （moveit_move 流程、motion_validate、safety.md 链接、配置示例）。
+- `resolveSrdf` 空输出健壮性修复。
+
 ## [0.14.0] - 2026-08-23
 
 ### Added

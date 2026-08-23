@@ -111,7 +111,10 @@ class MoveGroupClient:
         res_f = gh.get_result_async()
         rclpy.spin_until_future_complete(self._node, res_f, timeout_sec=timeout)
         if not res_f.done() or res_f.result() is None:
-            raise RuntimeError('move_group result timed out')
+            # execution watchdog: never leave the robot moving while the
+            # caller has given up — cancel the goal before raising
+            self._cancel(gh, 'move_group result timed out')
+            raise RuntimeError('move_group result timed out (goal cancelled)')
         result = res_f.result().result
         ok = result.error_code.val == SUCCESS
         return ok, result
@@ -128,7 +131,18 @@ class MoveGroupClient:
         rclpy.spin_until_future_complete(self._node, res_f, timeout_sec=timeout)
         res = res_f.result().result if res_f.done() else None
         if res is None or res.error_code.val != SUCCESS:
+            if res is None:
+                # execution watchdog: cancel before raising
+                self._cancel(gh, 'ExecuteTrajectory result timed out')
             raise RuntimeError('ExecuteTrajectory failed')
+
+    @staticmethod
+    def _cancel(gh, why: str):
+        """Fire-and-forget goal cancellation (best effort)."""
+        try:
+            gh.cancel_goal_async()
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def build_pose_goal(

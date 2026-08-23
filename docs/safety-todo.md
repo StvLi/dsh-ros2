@@ -3,7 +3,7 @@
 > 依据：`docs/gpt-safety-handover.txt`（GPT 的 P0 Safety TODO，22 条）+ 已有
 > 0.14.0 安全框架（`safety_monitor`/`robot_safety_*`/profile `safety` 段）+
 > 本文档之前的交互确认。
-> 状态：**已确认**（2026-08-23）：版本留在 0.14.x 系列——早批 **0.14.1** 集中解决迫在眉睫的安全问题；晚批 **0.15+** 再上独立项。校验器范围已确认收敛（排除 collision/singularity 冗余检查）。
+> 状态：**已确认并完成早批**（2026-08-23，v0.14.1）：版本留在 0.14.x 系列——早批已在 **0.14.1** 落地（motion_validator / moveit_move 单一路径 / motion_validate / profile 扩展 / 执行看门狗 cancel / docs/safety.md / 测试 113 例）；晚批 **0.15+** 再上独立项。校验器范围按确认收敛（排除 collision/singularity 冗余检查）。
 
 ---
 
