@@ -13,10 +13,10 @@
 
 | Tier | Capability | Safety boundary |
 | --- | --- | --- |
-| **L1** | Read-only diagnostics: package/workspace/dependency checks, node/topic/service/action/param/interface enumeration, one-shot topic sampling, TF tree queries, whole-graph topology JSON, `ros2doctor`, bag summaries | Pure read-only, no approval |
-| **L2** | Approval-gated management: `colcon build` (background job), `rosdep install`, custom message skeleton generation, `param set`, bounded `bag record` | Writes always ask first (fail-closed) |
+| **L1** | Read-only diagnostics: package/workspace/dependency checks, node/topic/service/action/param/interface enumeration, one-shot topic sampling, TF tree queries, whole-graph topology JSON, `ros2doctor`, bag summaries, MoveIt discovery, robot-profile load | Pure read-only, no approval |
+| **L2** | Approval-gated management: `colcon build` (background job), `rosdep install`, message skeleton generation, `param set`, bounded `bag record`, one-click ROS2 install, launch management, rosbag replay, MoveIt motion, zero-pose calibration, robot registration & topology learning | Writes always ask first (fail-closed) |
 | **L3** | Visualization: RViz2 / rqt lifecycle management, screenshots, multimodal vision description, xdotool-level window interaction | Local session operations |
-| **L4** | Realtime vision: parallel VLM ROS2 node + image-topic acquisition (headless), plus **RViz2 offscreen rendering** (OGRE kernel → `/rviz/scene` topic) | Pure software/GPU rendering, no display needed |
+| **L4** | Realtime vision: parallel VLM ROS2 node + image-topic acquisition (headless; `vision_bringup` periodically refreshes per-topic bridges), plus **RViz2 offscreen rendering** (OGRE kernel → `/rviz/scene` topic) | Pure software/GPU rendering, no display needed |
 
 All tools run plain `ros2` / `colcon` / `rosdep` CLI commands on the host; L1 never modifies anything, L2 always asks first.
 
@@ -34,13 +34,13 @@ All tools run plain `ros2` / `colcon` / `rosdep` CLI commands on the host; L1 ne
 
 ## Features
 
-- **Zero-intrusion diagnostics**: 37 tools cover most ROS2 debugging scenarios — from "is the package installed?" to "what is on this topic right now?", one command, one answer;
+- **Zero-intrusion diagnostics**: 45 tools cover most ROS2 debugging scenarios — from "is the package installed?" to "what is on this topic right now?", one command, one answer;
 - **Whole-graph topology**: `ros2_graph` folds nodes/publishers/subscribers/services/actions into one JSON — see the system structure in seconds;
 - **Approval-gated writes**: builds, dependency installs, message scaffolding etc. go through the DSH approval service; fail-closed, denial = failure;
 - **Visualization as a service**: "see" headlessly — screenshots / multimodal description / window interaction are fully local, no remote display;
 - **Parallel realtime vision**: the VLM runs in a separate ROS2 process (`vlm_node`, service `/vlm/describe`); images come from topics (`sensor_msgs/Image` / `CompressedImage`); `vision_bringup` auto-creates one bridge per image topic, headless-ready;
-- **RViz2 offscreen rendering (motion render 10Hz+; 30Hz with GPU)**: the real rviz render kernel (`rviz_common` + OGRE) renders any `.rviz` scene on a virtual display and publishes it as an image topic — no screenshots, no X11 window-stacking dependency. **Performance optimizations**: open3d low-poly meshes (`scripts/simplify_visual_meshes.py`) + direct OGRE pixel read (no PNG round-trip) + double-render elimination → motion rendering 1.9 → **22 Hz** (llvmpipe, 5.4×→11×), **30 Hz full rate with NVIDIA GPU passthrough** (v0.9.3), memory −2.5×;
-- **Bundled skills**: `ros2-diagnostics` (which tool to use when, narrow-down methodology) and `robot-state-vision-analysis` (full pipeline: status → offscreen render → VLM → cross-check).
+- **RViz2 offscreen rendering (motion render ~22 Hz on llvmpipe; 30 Hz full rate with GPU)**: the real rviz render kernel (`rviz_common` + OGRE) renders any `.rviz` scene on a virtual display and publishes it as an image topic — no screenshots, no X11 window-stacking dependency. **Performance optimizations**: open3d low-poly meshes (`scripts/simplify_visual_meshes.py`) + direct OGRE pixel read (no PNG round-trip) + double-render elimination → motion rendering 1.9 → ~22 Hz on llvmpipe (11×), and **30 Hz full rate with NVIDIA GPU passthrough** (v0.9.3), memory −2.5×;
+- **Bundled skills (4)**: `ros2-diagnostics` (which tool to use when, narrow-down methodology), `robot-state-vision-analysis` (status → offscreen render → VLM → cross-check), `robot-registration` (first-contact body profile + topology baseline) and `robot-retrieval` (instant profile load and bring-up).
 
 ---
 
@@ -264,7 +264,9 @@ them back instantly — one call instead of N discovery calls.
 | Skill | Content |
 | --- | --- |
 | `ros2-diagnostics` | Which tool to use when, narrow-down methodology, debugging "topic has no data" / message-mismatch / TF problems |
-| `robot-state-vision-analysis` | Full pipeline: status → offscreen render → VLM → cross-check (includes Jazzy `Description Source/Topic`, URDF↔TF frame-name matching, `file://` meshes, view distance 1.5–2.0 m, `FM frames` signal) |
+| `robot-state-vision-analysis` | Full pipeline: status → offscreen render → VLM → cross-check (includes Jazzy `Description Source/Topic`, URDF↔TF frame-name matching, `file://` meshes, view distance, `FM frames` signal, calibrated zero-pose semantics) |
+| `robot-registration` | First-contact flow: ask name/URDF → collect body info + zero-pose calibration → `robot_register` → topology baseline snapshot |
+| `robot-retrieval` | Instant profile load (`robot_load`) and bring-up of renders / diagnostics / motion; read & progressively learn the comms topology (`robot_topology`) |
 
 ---
 
@@ -294,17 +296,17 @@ them back instantly — one call instead of N discovery calls.
 ```
 dsh-ros2/
 ├── src/                  # DSH plugin core (TypeScript)
-│   ├── index.ts          # entry: registers 37 tools + 2 skills
+│   ├── index.ts          # entry: registers 45 tools + 4 skills
 │   ├── tools.ts          # tool definitions (L1/L2/L3 params & command mapping)
 │   ├── vision.ts         # L4 vision tools (snapshot / analyze / topics)
 │   ├── gui.ts            # L3 GUI lifecycle & interaction
-│   ├── skill.ts          # ros2-diagnostics + robot-state-vision-analysis
+│   ├── skill.ts          # 4 skills: diagnostics / vision / registration / retrieval
 │   ├── runner.ts         # command runner (timeout/log/approval/background-job seams)
 │   └── config.ts         # configuration read & validation
 ├── vlm/                  # ROS2 package dsh_ros2_vlm (Python): vlm_node / vision_bringup / vlm_bridge_node / image_snapshot / vlm_call / vlm_bridge_call
 ├── offscreen/            # ROS2 package dsh_ros2_rviz_offscreen (C++): rviz_offscreen_node (OGRE offscreen render → /rviz/scene)
 ├── docs/                 # architecture.md, compatibility.md, robot-state-vision-test.md, gpu-passthrough-test.md, screenshots
-├── tests/                # vitest (79 cases; CLI outputs mocked)
+├── tests/                # vitest (96 cases; CLI outputs mocked)
 ├── .github/workflows/    # CI: Node 22/24 → typecheck/test/build/pack validation
 ├── PUBLISH.md            # open-source publishing checklist (GitHub + npm + DSH community)
 └── CHANGELOG.md          # version history (Keep a Changelog)
@@ -330,7 +332,7 @@ dsh-ros2/
 ```bash
 pnpm install
 pnpm run typecheck   # tsc --noEmit
-pnpm run test        # vitest (79 cases; CLI outputs mocked)
+pnpm run test        # vitest (96 cases; CLI outputs mocked)
 pnpm run build       # tsc -> lib/ + lib/types/
 ```
 
@@ -343,7 +345,7 @@ Release workflow (npm & GitHub Releases): see [`PUBLISH.md`](PUBLISH.md).
 ## Roadmap
 
 - [x] `vision_bringup` polling/refresh discovery (auto-bridge late topics, stop bridges for gone topics);
-- [ ] Skill: per-robot zero-pose semantics (e.g. "zero = lateral raise, elbows forward") to improve VLM pose interpretation;
+- [x] Zero-pose semantics: generic calibration flow (`ros2_zero_pose_semantics`, render + VLM + user confirm, 3-axis combos) linked into robot profiles;
 - [ ] npm publishing (`pnpm publish --access public`, requires `npm login`);
 - [ ] More ROS2 distros (Humble / Rolling) compatibility validation.
 

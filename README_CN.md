@@ -13,10 +13,10 @@
 
 | 层级 | 能力 | 安全边界 |
 | --- | --- | --- |
-| **L1** | 只读诊断：包/工作区/依赖检查、节点/话题/服务/动作/参数/接口枚举、单帧话题采样、TF 树查询、全图拓扑 JSON、`ros2doctor`、bag 摘要 | 纯只读，无需审批 |
-| **L2** | 审批门控管理：`colcon build`（后台任务）、`rosdep install`、自定义消息骨架生成、`param set`、限时 `bag record` | 写操作一律先审批（fail-closed） |
+| **L1** | 只读诊断：包/工作区/依赖检查、节点/话题/服务/动作/参数/接口枚举、单帧话题采样、TF 树查询、全图拓扑 JSON、`ros2doctor`、bag 摘要、MoveIt 发现、机器人档案读取 | 纯只读，无需审批 |
+| **L2** | 审批门控管理：`colcon build`（后台任务）、`rosdep install`、消息骨架生成、`param set`、限时 `bag record`、一键安装 ROS2、launch 启停、rosbag 回放、MoveIt 运动、零位语义校准、机器人注册与拓扑学习 | 写操作一律先审批（fail-closed） |
 | **L3** | 可视化：RViz2 / rqt 生命周期管理、截图、多模态视觉描述、xdotool 级窗口交互 | 本地会话操作 |
-| **L4** | 实时视觉：并行 VLM ROS2 节点 + 图像话题取帧（无头），外加 **RViz2 离屏渲染**（OGRE 渲染内核 → `/rviz/scene` 话题） | 纯软件渲染，无需显示器 |
+| **L4** | 实时视觉：并行 VLM ROS2 节点 + 图像话题取帧（无头；`vision_bringup` 周期刷新每话题桥），外加 **RViz2 离屏渲染**（OGRE 渲染内核 → `/rviz/scene` 话题） | 纯软件渲染，无需显示器 |
 
 所有工具直接调用宿主上的 `ros2` / `colcon` / `rosdep` CLI；L1 永远不修改任何东西，L2 永远先询问。
 
@@ -34,12 +34,12 @@
 
 ## 特性一览
 
-- **零侵入诊断**：37 个工具覆盖 ROS2 调试的绝大多数场景，从"包装了没有"到"这一帧话题里是什么"，一条命令一个结果；
+- **零侵入诊断**：45 个工具覆盖 ROS2 调试的绝大多数场景，从"包装了没有"到"这一帧话题里是什么"，一条命令一个结果；
 - **全图拓扑**：`ros2_graph` 将节点/发布/订阅/服务/动作折叠为一份 JSON，几秒看清系统结构；
 - **审批门控的写操作**：构建、装依赖、生成消息骨架等写操作通过 DSH 审批服务，fail-closed，拒绝即失败；
 - **可视化即服务**：无头也能"看"——截图/多模态描述/窗口交互全部本地化，不依赖远程显示；
 - **并行实时视觉**：VLM 跑在独立 ROS2 进程（`vlm_node`，服务 `/vlm/describe`），图像来自话题（`sensor_msgs/Image` / `CompressedImage`），`vision_bringup` 自动为每个图像话题建桥，无头可用；
-- **RViz2 离屏渲染（动作渲染 10Hz+）**：真实 rviz 渲染内核（`rviz_common` + OGRE）在虚拟显示器下渲染任意 `.rviz` 场景并发布为图像话题——不截图、不依赖 X11 窗口层级。**v0.9.0 性能优化**：open3d 低模 mesh（`scripts/simplify_visual_meshes.py`）+ OGRE 直接读像素（跳过 PNG 中转），动作渲染 1.9 → **10.2 Hz（5.4×）**，内存 -2.5×；
+- **RViz2 离屏渲染（llvmpipe ~22 Hz，GPU 直通 30 Hz 满帧）**：真实 rviz 渲染内核（`rviz_common` + OGRE）在虚拟显示器下渲染任意 `.rviz` 场景并发布为图像话题——不截图、不依赖 X11 窗口层级。**性能优化**：open3d 低模 mesh（`scripts/simplify_visual_meshes.py`）+ OGRE 直接读像素（跳过 PNG 中转）+ 消除双重渲染 → 动作渲染 1.9 → llvmpipe ~22 Hz（11×），NVIDIA GPU 直通达 **30 Hz 满帧**（v0.9.3），内存 -2.5×；
 - **内置技能**：`ros2-diagnostics`（何时用哪个工具、如何由宽到窄排查）与 `robot-state-vision-analysis`（状态读取 → 离屏渲染 → VLM → 交叉验证的完整流水线）。
 
 ---
@@ -252,7 +252,9 @@ snapshot` 固化聚合层；`robot_topology learn` 在使用中逐个追加重�
 | Skill | 内容 |
 | --- | --- |
 | `ros2-diagnostics` | 何时用哪个工具、如何由宽到窄定位、排查"话题无数据"/消息格式不匹配/TF 问题的方法论 |
-| `robot-state-vision-analysis` | 完整流水线：状态读取 → 离屏渲染 → 传 VLM → 交叉验证（含 Jazzy `Description Source/Topic`、URDF↔TF 帧名一致、`file://` mesh、视距 1.5–2.0 m 与 `FM frames` 判定信号） |
+| `robot-state-vision-analysis` | 完整流水线：状态读取 → 离屏渲染 → 传 VLM → 交叉验证（含 Jazzy `Description Source/Topic`、URDF↔TF 帧名一致、`file://` mesh、视距、`FM frames` 信号、校准后的零位语义） |
+| `robot-registration` | 首接触流程：问名称/URDF → 采集本体 + 零位语义校准 → `robot_register` → 拓扑基线快照 |
+| `robot-retrieval` | 即时加载档案（`robot_load`）并拉起渲染/诊断/运动；读取并渐进学习通信拓扑（`robot_topology`） |
 
 ---
 
@@ -282,7 +284,7 @@ snapshot` 固化聚合层；`robot_topology learn` 在使用中逐个追加重�
 ```
 dsh-ros2/
 ├── src/                  # DSH 插件本体（TypeScript）
-│   ├── index.ts          # 插件入口：注册 37 个工具 + 2 个 skill
+│   ├── index.ts          # 插件入口：注册 45 个工具 + 4 个 skill
 │   ├── tools.ts          # 工具定义（L1/L2/L3 参数与命令映射）
 │   ├── vision.ts         # L4 视觉工具（snapshot / analyze / topics）
 │   ├── gui.ts            # L3 GUI 生命周期与交互
@@ -292,7 +294,7 @@ dsh-ros2/
 ├── vlm/                  # ROS2 包 dsh_ros2_vlm（Python）：vlm_node / vision_bringup / vlm_bridge_node / image_snapshot / vlm_call / vlm_bridge_call
 ├── offscreen/            # ROS2 包 dsh_ros2_rviz_offscreen（C++）：rviz_offscreen_node（OGRE 离屏渲染 → /rviz/scene）
 ├── docs/                 # 架构（architecture.md）、兼容基线（compatibility.md）、实测记录（robot-state-vision-test.md）、截图
-├── tests/                # vitest（79 例，CLI 输出 mock）
+├── tests/                # vitest（96 例，CLI 输出 mock）
 ├── .github/workflows/    # CI：Node 22/24 → typecheck/test/build/pack 校验
 ├── PUBLISH.md            # 开源发布清单（GitHub + npm + DSH 社区目录）
 └── CHANGELOG.md          # 版本变更记录（Keep a Changelog）
@@ -318,7 +320,7 @@ dsh-ros2/
 ```bash
 pnpm install
 pnpm run typecheck   # tsc --noEmit
-pnpm run test        # vitest（79 例；CLI 输出 mock）
+pnpm run test        # vitest（96 例；CLI 输出 mock）
 pnpm run build       # tsc -> lib/ + lib/types/
 ```
 
@@ -331,7 +333,7 @@ CI（`.github/workflows/ci.yml`）：push 到 `main` / PR 时在 Node 22 与 24 
 ## 路线图
 
 - [x] `vision_bringup` 轮询/刷新发现（晚出现话题自动补桥、消失自动停桥）；
-- [ ] skill 补充各机器人零位语义（如"零位 = 侧平举、肘窝向前"）以提升 VLM 姿态解读精度；
+- [x] 零位语义：通用校准流程（`ros2_zero_pose_semantics`，渲染 + VLM + 使用者确认，三维组合）并联动进机器人档案；
 - [ ] npm 发布（`pnpm publish --access public`，需 `npm login`）；
 - [ ] 更多 ROS2 版本（Humble / Rolling）兼容验证。
 
