@@ -287,7 +287,9 @@ describe('tool inventory', () => {
     expect(names).toContain('ros2_bag_play')
     expect(names).toContain('ros2_launch')
     expect(names).toContain('ros2_zero_pose_semantics')
-    expect(names).toHaveLength(45)
+    expect(names).toContain('robot_register')
+    expect(names).toContain('robot_load')
+    expect(names).toHaveLength(47)
   })
 })
 
@@ -551,5 +553,35 @@ describe('ros2_zero_pose_semantics', () => {
     // custom text path
     const out2 = (await t.execute({ action: 'confirm', customText: '双臂展开45度', out: '/tmp/zp.yaml' }, execStub)) as ToolResult
     expect(out2.ok).toBe(true)
+  })
+})
+
+describe('robot_register / robot_load', () => {
+  it('robot_register requires a name and approval', async () => {
+    const run = makeRun(() => ({ stdout: '' }))
+    const denied = await call('robot_register', run, { name: 'lite' })
+    expect(denied.error?.code).toBe('APPROVAL_DENIED')
+    const approval = async () => 'allowed-once'
+    const run2 = makeRun(() => ({
+      stdout: JSON.stringify({ ok: true, written: '/x.yaml', robot: { name: 'lite', links: 10 } }),
+    }))
+    const t = createRos2Tools({ run: run2, approval }).find((x) => x.name === 'robot_register')
+    if (!t) throw new Error('robot_register not registered')
+    const out = (await t.execute({ name: 'lite' }, execStub)) as ToolResult
+    expect(out.ok).toBe(true)
+    expect(out.data).toMatchObject({ ok: true })
+  })
+
+  it('robot_load parses the profile JSON and lists when name empty', async () => {
+    const run = makeRun((bin, args) => ({
+      stdout: JSON.stringify({ ok: true, robot: { name: 'lite', tf_root: 'chest' }, profile_path: '/x.yaml' }),
+    }))
+    const loaded = await call('robot_load', run, { name: 'lite' })
+    expect(loaded.ok).toBe(true)
+    expect((loaded.data as { robot: { name: string } }).robot.name).toBe('lite')
+    const runList = makeRun(() => ({ stdout: JSON.stringify({ ok: true, robots: ['lite'], dir: '/x' }) }))
+    const listed = await call('robot_load', runList, {})
+    expect(listed.ok).toBe(true)
+    expect((listed.data as { robots: string[] }).robots).toContain('lite')
   })
 })

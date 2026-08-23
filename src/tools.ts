@@ -436,6 +436,8 @@ export function createRos2Tools(deps: ToolDeps) {
   tools.push(makeRos2InstallTool(deps))
   tools.push(makeLaunchTool(deps))
   tools.push(makeZeroPoseSemanticsTool(deps))
+  tools.push(makeRobotRegisterTool(deps))
+  tools.push(makeRobotLoadTool(deps))
   // L3 visualization tools (GUI lifecycle + screenshot + multimodal vision).
   tools.push(makeGuiStartTool(deps))
   tools.push(makeGuiListTool(deps))
@@ -1977,6 +1979,81 @@ function makeZeroPoseSemanticsTool(deps: ToolDeps) {
           res.stderr.trim() || `exit ${res.exitCode ?? 'unknown'}`)
       }
       return okResult('ros2_zero_pose_semantics', command, parseJsonOrRaw(res.stdout))
+    },
+  })
+}
+
+/**
+ * L2: register a robot body profile (approval-gated; writes a config file).
+ * Collects a new robot's body info (URDF links/joints, TF root, cameras,
+ * MoveIt SRDF groups, zero-pose semantics) into ~/.dsh-ros2/robots/<name>.yaml
+ * so later calls can load it instantly instead of re-discovering.
+ */
+function makeRobotRegisterTool(deps: ToolDeps) {
+  return defineTool({
+    name: 'robot_register',
+    description:
+      'Register a robot body profile (approval-gated; writes ~/.dsh-ros2/robots/<name>.yaml). ' +
+      'Collects the robot\'s body info for fast reuse: URDF (--urdf path or live /robot_description) links/joints, TF root, image/camera topics, MoveIt SRDF groups (from --srdf or package scan), and zero-pose semantics (from ~/.dsh-ros2/zero-pose.yaml if calibrated). Use once per robot; afterwards robot_load returns it instantly.',
+    parameters: {
+      name: { type: 'string', description: 'Robot profile name (e.g. lite).' },
+      urdf: { type: 'string', default: '', description: 'URDF file path (empty = fetch live /robot_description).' },
+      srdf: { type: 'string', default: '', description: 'MoveIt SRDF path (empty = auto package scan).' },
+      description: { type: 'string', default: '', description: 'Optional one-line robot description.' },
+      dir: { type: 'string', default: '', description: 'Profiles directory (default ~/.dsh-ros2/robots).' },
+    },
+    output: { schema: resultSchema, render: renderResult },
+    async execute(args, exec) {
+      const params = args as Record<string, unknown>
+      const name = strOrUndefined(params.name) ?? ''
+      if (!name) return toolError('robot_register', 'robot_register', 'MISSING_PARAM', 'name 必填')
+      const command = `robot_register name=${name}`
+      const approval = await requestApproval(deps, exec, 'robot_register',
+        `将采集机器人「${name}」本体信息（URDF/关节/相机/MoveIt/零位语义）并写入档案（~/.dsh-ros2/robots/${name}.yaml）。`)
+      if (!approval.allowed) return deniedResult('robot_register', command, approval.outcome)
+      const helperArgs = [scriptPath('robot_profile.py'), 'register', '--name', name]
+      if (strOrUndefined(params.urdf)) helperArgs.push('--urdf', strOrUndefined(params.urdf)!)
+      if (strOrUndefined(params.srdf)) helperArgs.push('--srdf', strOrUndefined(params.srdf)!)
+      if (strOrUndefined(params.description)) helperArgs.push('--description', strOrUndefined(params.description)!)
+      if (strOrUndefined(params.dir)) helperArgs.push('--dir', strOrUndefined(params.dir)!)
+      const res = await deps.run('python3', helperArgs, { timeoutMs: 120000 })
+      if (!res.ok && res.stdout.trim().length === 0) {
+        return toolError('robot_register', command, res.error ?? 'COMMAND_FAILED',
+          res.stderr.trim() || `exit ${res.exitCode ?? 'unknown'}`)
+      }
+      return okResult('robot_register', command, parseJsonOrRaw(res.stdout))
+    },
+  })
+}
+
+/**
+ * L1: load a registered robot body profile as structured JSON (fast path —
+ * no discovery needed). Empty name lists all profiles.
+ */
+function makeRobotLoadTool(deps: ToolDeps) {
+  return defineTool({
+    name: 'robot_load',
+    description:
+      'Load a registered robot body profile as structured JSON (fast path — no discovery needed): URDF links/joints, TF root, cameras, MoveIt groups, zero-pose semantics. Empty name lists all profiles. Profiles come from robot_register.',
+    parameters: {
+      name: { type: 'string', default: '', description: 'Robot profile name (empty = list all).' },
+      dir: { type: 'string', default: '', description: 'Profiles directory (default ~/.dsh-ros2/robots).' },
+    },
+    output: { schema: resultSchema, render: renderResult },
+    async execute(args) {
+      const params = args as Record<string, unknown>
+      const name = strOrUndefined(params.name) ?? ''
+      const action = name ? 'load' : 'list'
+      const helperArgs = [scriptPath('robot_profile.py'), action]
+      if (name) helperArgs.push('--name', name)
+      if (strOrUndefined(params.dir)) helperArgs.push('--dir', strOrUndefined(params.dir)!)
+      const command = `robot_load ${action === 'list' ? '(list)' : `name=${name}`}`
+      const res = await deps.run('python3', helperArgs, { timeoutMs: 30000 })
+      if (!res.ok && res.stdout.trim().length === 0) {
+        return toolError('robot_load', command, res.error ?? 'COMMAND_FAILED',
+          res.stderr.trim() || `exit ${res.exitCode ?? 'unknown'}`)
+      }
+      return okResult('robot_load', command, parseJsonOrRaw(res.stdout))
     },
   })
 }

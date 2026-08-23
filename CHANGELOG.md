@@ -4,6 +4,23 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [SemVer](https://semver.org/).
 
+## [0.13.7] - 2026-08-23
+
+### Added
+
+- **机器人本体注册与读取**（47 工具 + 4 技能）：
+  - `robot_register`（L2 审批）：首次接触机器人时采集本体信息（URDF link/joint、
+    TF 根、相机话题、MoveIt SRDF 规划组、**零位语义自动联动校准文件**）写入
+    `~/.dsh-ros2/robots/<name>.yaml`；
+  - `robot_load`（L1）：按名加载档案为结构化 JSON（快速路径，无需重新发现）；
+    name 为空列出全部；helper 用 `yaml.safe_load` 健壮解析（含 datetime 归一化）；
+  - **skill `robot-registration`**：首接触流程（询问名称/URDF → 采集 → 注册 →
+    校验），强调零位语义必校准；
+  - **skill `robot-retrieval`**：按名即时读取档案并用其拉起渲染/分析/运动
+    （URDF 路径、TF 根、相机、MoveIt 组、零位语义），替代重复发现。
+- 测试：102 例全绿。端到端验证（lite）：register（24 links/23 joints/3 cameras/
+  4 groups）→ load 快速读回 → 零位校准文件自动纳入档案。
+
 ## [0.13.6] - 2026-08-23
 
 ### Fixed
