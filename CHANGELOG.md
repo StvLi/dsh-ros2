@@ -305,7 +305,7 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 - **GPU 直通渲染验证通过（30 Hz 满帧）**：实测 NVIDIA RTX 4060 Ti + Xorg GLX，
   `rviz_offscreen_node` 30 Hz 请求帧率从 llvmpipe 的 ~22 Hz 提升到 **30.0 Hz
   （满 rate）**；onUpdate（含渲染）30 → 9 ms，且链路开支不增（GPU→CPU 回读
-  1–2 ms，远小于渲染节省）。完整测试报告：`docs/gpu-passthrough-test.md`。
+  1–2 ms，远小于渲染节省）。完整测试报告：`docs/test-gpu-passthrough.md`。
 
 ### Fixed
 
@@ -317,7 +317,7 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 
 ### Changed
 
-- 文档：新增 `docs/gpu-passthrough-test.md`（硬件/排查/结果/使用方式）；
+- 文档：新增 `docs/test-gpu-passthrough.md`（硬件/排查/结果/使用方式）；
   `docs/architecture.md` §5.2 补充 GPU 直通结论。
 
 ## [0.9.2] - 2026-08-21
@@ -331,7 +331,7 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 - 实测（38.7 万面低模，1000×750，rate=30）：静止 22.9 Hz、运动 21.5–24.2 Hz
   （400+ 帧稳态）；10 Hz 请求仍达上限（10.3 Hz）；画面像素与之前一致。
 - 代码注释明确"不要在 onUpdate 后再 win->render()"的成因与验证。
-- 文档：`docs/architecture.md` §5.2、`docs/robot-state-vision-test.md` §8.4 更新为
+- 文档：`docs/architecture.md` §5.2、`docs/test-robot-state-vision.md` §8.4 更新为
   双重渲染发现与新数据。
 
 ## [0.9.1] - 2026-08-20
@@ -339,7 +339,7 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 ### Performance
 
 - **30 Hz 请求实测与循环开销优化**（详见 `docs/architecture.md` §5.2、
-  `docs/robot-state-vision-test.md` §8.4）：
+  `docs/test-robot-state-vision.md` §8.4）：
   1. **events 节流**：`app.processEvents()` 每 5 帧调用（headless 下 Qt 事件少；
      每帧处理会触发 Qt paint → OGRE 双重渲染 ~30ms/帧），events 30ms → 0ms；
   2. **onUpdate/2**：`onUpdate` 每 2 帧调用（渲染仍每帧；TF 位置刷新 15Hz，
@@ -355,7 +355,7 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 ### Performance
 
 - **离屏渲染"动作渲染"提速 5.4×（1.9 → 10.2 Hz）**，两个关键手段（实测，详见
-  `docs/architecture.md` §5.1 与 `docs/robot-state-vision-test.md` §8）：
+  `docs/architecture.md` §5.1 与 `docs/test-robot-state-vision.md` §8）：
   1. **渲染低模 mesh**：新增 `scripts/simplify_visual_meshes.py`（**open3d** quadric
      decimation，大 STL → 25k/15k 面；实测 276 万 → 38.7 万面），帧率 1.9 → 7.1 Hz、
      内存 962 → 386 MB、mesh 加载 ~90s → ~40s、渲染内容保留 99.7%；
@@ -374,7 +374,7 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 
 ### Added
 
-- 文档：`docs/architecture.md` §5.1（性能优化）、`docs/robot-state-vision-test.md`
+- 文档：`docs/architecture.md` §5.1（性能优化）、`docs/test-robot-state-vision.md`
   §8（动作渲染优化验证）；README 特性栏更新。
 
 ## [0.8.2] - 2026-08-20
@@ -386,13 +386,13 @@ All notable changes to **dsh-ros2** are documented here. Format follows
   `docs/images/robot_mesh_full.jpg` 更新为彩色渲染图。
 - **静态演示渲染流程**（真机下线时）：`robot_state_publisher` 加载带 `file://` mesh
   的 URDF 并 remap 描述话题，配合 `/joint_states` 发布器即可离屏渲染任意 URDF；
-  记录于 `docs/robot-state-vision-test.md` §7。
+  记录于 `docs/test-robot-state-vision.md` §7。
 
 ### Changed
 
 - **文档**：`docs/architecture.md` §4.4 补充材质颜色、相机焦点高度（`Focal Point Z`
   应对准主体高度，避免高基座柱遮挡/裁切）、大 mesh 首次加载耗时特征；
-  `docs/robot-state-vision-test.md` 新增 §7（彩色渲染验证 + 静态渲染流程 +
+  `docs/test-robot-state-vision.md` 新增 §7（彩色渲染验证 + 静态渲染流程 +
   视角/多进程踩坑）；README 截图说明更新。
 
 ## [0.8.1] - 2026-08-20
@@ -417,7 +417,7 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 - **skill `robot-state-vision-analysis` 更新**：离屏渲染步骤补充 Jazzy
   `Description Source/Topic`、URDF↔TF 帧名必须一致（否则堆叠原点）、`file://` mesh
   路径、视距 1.5–2.0 m 与 `FM frames` 判定信号；交叉验证新增"全渲染在原点"的排查路径。
-- **文档**：`docs/architecture.md` §4.4 与 `docs/robot-state-vision-test.md` §6
+- **文档**：`docs/architecture.md` §4.4 与 `docs/test-robot-state-vision.md` §6
   记录根因、修复与验证；`docs/images/robot_mesh_full.jpg` 更新为修复后正确渲染图，
   并补充三路相机实拍图（`camera_head.jpg` / `camera_wrist_left.jpg` /
   `camera_wrist_right.jpg`）嵌入联合分析 §5.2。
@@ -431,7 +431,7 @@ All notable changes to **dsh-ros2** are documented here. Format follows
   ② URDF mesh 路径需绝对路径或 `file://` 前缀（裸路径 `resource_retriever` fopen 失败）；
   ③ 视距需适配 mesh 尺度。详见 `docs/architecture.md` §4.4。
 - **联合分析验证**：RViz2 场景（mesh 渲染）+ 头部相机 + 左右手眼相机 4 路并行分析，
-  状态正常；记录于 `docs/robot-state-vision-test.md` §5。
+  状态正常；记录于 `docs/test-robot-state-vision.md` §5。
 - **文档**：新增 mesh 渲染图 `docs/images/robot_mesh_full.jpg`；记录 `vision_bringup`
   发现不完整（2/4 路）与 transient-local 发布者需常驻的局限。
 
@@ -445,7 +445,7 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 - **测试**：79 用例（新增 skill 结构/内容断言）；真机端到端验证——19 节点链路下
   关节零位读取、离屏渲染 `/rviz/scene`、bridge VLM 分析 5.7s 全部通过，
   结果记录于 `docs/architecture.md` §6.5。
-- **文档**：`docs/robot-camera-analysis.md` 更名为 `docs/robot-state-vision-test.md`
+- **文档**：`docs/robot-camera-analysis.md` 更名为 `docs/test-robot-state-vision.md`
   （机器人状态视觉分析测试与实时性）：双臂自由下垂构型分析（关节 ±77° 外展 + VLM 视觉 +
   零位语义标定交叉验证）、单轮流水线实时性（稳态 ~7.1s，VLM 推理主导）、链路演进对比；
   附当前状态离屏渲染图 `docs/images/robot_scene.jpg`。

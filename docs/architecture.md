@@ -1,6 +1,6 @@
 # dsh-ros2 架构
 
-> 版本 0.6.0（37 工具 + `ros2-diagnostics` skill）· 配套 `README.md`（使用）· `compatibility.md`（兼容基线）
+> 版本 0.14.1（51 工具 + 4 skills）· 配套 `README.md`（使用）· `compatibility.md`（兼容基线）· `safety.md`（安全边界）· `safety-handover.md`（本体适配交接）
 
 ---
 
@@ -10,9 +10,9 @@ dsh-ros2 让 DSH agent 以 **CLI + ROS2 话题/service 双通道**调试机器�
 
 | 层 | 范围 | 工具数 | 安全模型 |
 | --- | --- | --- | --- |
-| **L1 只读诊断** | 包/工作区/依赖/节点/话题/服务/动作/参数/接口/TF/拓扑/健康/包 | 17 | 纯只读，无审批 |
-| **L2 审批管理** | 构建/依赖安装/消息骨架/参数设置/录制 + 任务查询 | 7 | 写操作一律 `ctx.approval.request`，fail-closed |
-| **L3 可视化与交互** | GUI 生命周期/截图/多模态描述/xdotool 交互 | 9 | 本地会话良性操作，无审批 |
+| **L1 只读诊断** | 包/工作区/依赖/节点/话题/服务/动作/参数/接口/TF/拓扑/健康/包/MoveIt 发现与状态/运动校验（`motion_validate`）/档案读取/安全状态 | 25 | 纯只读，无审批 |
+| **L2 审批管理** | 构建/依赖安装/消息骨架/参数设置/录制 + 任务查询/MoveIt 运动（规划→校验→审批→执行→验证）/机器人注册与拓扑/安全监视启动与人工门锁存 | 15 | 写操作一律 `ctx.approval.request`，fail-closed |
+| **L3 可视化与交互** | GUI 生命周期/截图/多模态描述/xdotool 交互 | 7 | 本地会话良性操作，无审批 |
 | **L4 实时视觉** | 并行 VLM / 图像话题取帧 / 视觉链路自动建立 | 4 | 图像来自话题（无头），无审批 |
 
 **核心设计原则**
@@ -24,26 +24,33 @@ dsh-ros2 让 DSH agent 以 **CLI + ROS2 话题/service 双通道**调试机器�
 
 ## 2. 工具分层
 
-### L1 只读诊断（17）
+### L1 只读诊断（25）
 
 `ros2_pkg_list` / `ros2_colcon_list` / `ros2_rosdep_check` / `ros2_node_list` /
 `ros2_node_info` / `ros2_topic_list` / `ros2_topic_info` / `ros2_topic_echo` /
 `ros2_service_list` / `ros2_action_list` / `ros2_param_list` /
 `ros2_interface_show` / `ros2_graph` / `ros2_tf_list` / `ros2_tf_echo` /
-`ros2_doctor` / `ros2_bag_info`。
+`ros2_doctor` / `ros2_bag_info` / `ros2_jobs_list` / `ros2_job_status`（任务查询）/
+`moveit_discover` / `moveit_status`（MoveIt 发现与在线探测）/ `motion_validate`
+（确定性运动校验）/ `robot_load`（档案读取）/ `robot_safety_state` /
+`robot_safety_arbitrate`（VLM 语义仲裁，非 safe 升级人工）。
 
-### L2 审批管理（7）
+### L2 审批管理（15）
 
 `ros2_colcon_build`（后台任务）/ `ros2_rosdep_install`（dry-run 预览）/
 `ros2_interface_create`（msg/srv/action 骨架，不覆盖既有文件）/
 `ros2_param_set`（JSON 值类型化）/ `ros2_bag_record`（限时录制）/
-`ros2_jobs_list` / `ros2_job_status`（只读查询）。
+`ros2_bag_play`（回放）/ `ros2_launch`（launch 后台任务）/ `ros2_install`
+（FishROS 一键安装）/ `ros2_zero_pose_semantics`（零位语义校准）/
+`robot_register` / `robot_topology`（档案与拓扑）/ `moveit_move`（运动，单一路径
+规划→校验→审批→执行→验证）/ `robot_safety_start` / `robot_safety_lock` /
+`robot_safety_unlock`（安全监视启动与人工门锁存）。
 
-### L3 可视化与交互（9）
+### L3 可视化与交互（7）
 
 `ros2_gui_start` / `ros2_gui_list` / `ros2_gui_close` / `ros2_screenshot` /
-`ros2_vision_describe` / `ros2_gui_observe` / `ros2_gui_click` /
-`ros2_gui_drag` / `ros2_gui_key`（xdotool 级交互：RViz2 视点操控、显示配置重载）。
+`ros2_vision_describe` / `ros2_gui_observe` / `ros2_gui_interact`
+（统一 xdotool 交互：click/drag/key，RViz2 视点操控、显示配置重载）。
 
 ### L4 实时视觉（4）
 
@@ -198,7 +205,7 @@ rate=30 实测发现真正瓶颈是**双重渲染**：`VisualizationManager::onU
 
 **GPU 直通（v0.9.3，已验证）**：NVIDIA Xorg GLX + `disableAntiAliasing()` 后
 30 Hz 请求 **满帧 30.0 Hz**（onUpdate 30 → 9 ms，链路开支不增）。详见
-`docs/gpu-passthrough-test.md`。
+`docs/test-gpu-passthrough.md`。
 
 ---
 

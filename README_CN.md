@@ -28,7 +28,7 @@
 | --- | --- | --- | --- |
 | ![mesh render](docs/images/robot_mesh_full.jpg) | ![head cam](docs/images/camera_head.jpg) | ![wrist left](docs/images/camera_wrist_left.jpg) | ![wrist right](docs/images/camera_wrist_right.jpg) |
 
-> 左图由 `rviz_offscreen_node` 在 Xvfb 下用真实 rviz 渲染栈（OGRE）渲染并发布到 `/rviz/scene` 图像话题；右侧三图由 `ros2_image_snapshot` 从相机话题取帧（1280×720）。完整实测记录见 [`docs/robot-state-vision-test.md`](docs/robot-state-vision-test.md)。
+> 左图由 `rviz_offscreen_node` 在 Xvfb 下用真实 rviz 渲染栈（OGRE）渲染并发布到 `/rviz/scene` 图像话题；右侧三图由 `ros2_image_snapshot` 从相机话题取帧（1280×720）。完整实测记录见 [`docs/test-robot-state-vision.md`](docs/test-robot-state-vision.md)。
 
 ---
 
@@ -344,7 +344,7 @@ dsh-ros2/
 ├── vlm/                  # ROS2 包 dsh_ros2_vlm（Python）：vlm_node / vision_bringup / vlm_bridge_node / image_snapshot / vlm_call / vlm_bridge_call
 ├── offscreen/            # ROS2 包 dsh_ros2_rviz_offscreen（C++）：rviz_offscreen_node（OGRE 离屏渲染 → /rviz/scene）
 ├── safety/               # ROS2 包 dsh_ros2_safety（Python）：safety_monitor 节点 + safety_core（纯逻辑，--selftest）+ safety_vlm_arbitrate + SafetyState/Event msg + Unlock/SetLock srv
-├── docs/                 # 架构（architecture.md）、兼容基线（compatibility.md）、实测记录（robot-state-vision-test.md）、截图
+├── docs/                 # 架构（architecture.md）· 兼容基线（compatibility.md）· 安全（safety.md / safety-handover.md / safety-todo.md / safety-gpt-review.md）· 实测（test-robot-state-vision.md / test-gpu-passthrough.md）· 截图
 ├── tests/                # vitest（113 例，CLI 输出 mock）
 ├── .github/workflows/    # CI：Node 22/24 → typecheck/test/build/pack 校验
 ├── PUBLISH.md            # 开源发布清单（GitHub + npm + DSH 社区目录）
@@ -396,7 +396,7 @@ CI（`.github/workflows/ci.yml`）：push 到 `main` / PR 时在 Node 22 与 24 
 | --- | --- |
 | [`docs/architecture.md`](docs/architecture.md) | 设计概览、四层能力、L4 视觉与离屏渲染架构、性能演进、安全模型 |
 | [`docs/compatibility.md`](docs/compatibility.md) | 兼容基线 |
-| [`docs/robot-state-vision-test.md`](docs/robot-state-vision-test.md) | 真机端到端实测：流水线、实时性、mesh/TF 绑定修复与验证、四路联合分析（含图） |
+| [`docs/test-robot-state-vision.md`](docs/test-robot-state-vision.md) | 真机端到端实测：流水线、实时性、mesh/TF 绑定修复与验证、四路联合分析（含图） |
 | [`CHANGELOG.md`](CHANGELOG.md) | 版本变更记录（Keep a Changelog） |
 
 ---

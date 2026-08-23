@@ -105,4 +105,4 @@ ros2 run dsh_ros2_rviz_offscreen rviz_offscreen_node \
 ## 7. 相关代码
 
 - `offscreen/src/rviz_offscreen_node.cpp`：`RenderSystem::disableAntiAliasing()`（v0.9.3）
-- 其余优化（低模 mesh、直读像素、双重渲染消除）：`docs/architecture.md` §5、`docs/robot-state-vision-test.md` §8
+- 其余优化（低模 mesh、直读像素、双重渲染消除）：`docs/architecture.md` §5、`docs/test-robot-state-vision.md` §8

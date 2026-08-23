@@ -1,6 +1,6 @@
 # dsh-ros2 安全体系 ToDo（GPT 意见评审）
 
-> 依据：`docs/gpt-safety-handover.txt`（GPT 的 P0 Safety TODO，22 条）+ 已有
+> 依据：`docs/safety-gpt-review.md`（GPT 的 P0 Safety TODO，22 条）+ 已有
 > 0.14.0 安全框架（`safety_monitor`/`robot_safety_*`/profile `safety` 段）+
 > 本文档之前的交互确认。
 > 状态：**已确认并完成早批**（2026-08-23，v0.14.1）：版本留在 0.14.x 系列——早批已在 **0.14.1** 落地（motion_validator / moveit_move 单一路径 / motion_validate / profile 扩展 / 执行看门狗 cancel / docs/safety.md / 测试 113 例）；晚批 **0.15+** 再上独立项。校验器范围按确认收敛（排除 collision/singularity 冗余检查）。
@@ -98,6 +98,7 @@ GPT 的核心方向**采纳**：把当前"审批即执行"升级为
 
 | 项 | 说明 |
 | --- | --- |
+| **C++ 实时安全验证节点（架构演进，用户建议）** | 当前 `safety_monitor` 为 rclpy（Python）——GIL 与 GC 停顿限制硬实时性上限。后续用 **C++（rclcpp）** 重写持续运行的监视/校验热路径（同 `rviz_offscreen_node` 模式）：ROS2 接口不变（`/safety/state`、`/safety/event`、`/safety/heartbeat`、`/safety/lock_active`、get_state/unlock/set_lock 服务），profile 与工具层**零改动**；`safety_core.py` 保留为参考实现 + CI 单测（`--selftest`）；C++ 侧复用同套检查器语义（tracking/stall/feedback_loss/watchdog/torque + 锁存状态机），控制频率提到 1kHz 级、定时确定性更好（配 PREEMPT_RT 更佳）。技术路线：`safety/src/safety_monitor_node.cpp`（rclcpp，与 offscreen 同构建模式）→ 纯逻辑头文件 `safety_monitor_core.hpp`（无 ROS 依赖、可单测）→ 双实现并行验证（Python 参考 vs C++ 生产，结果一致性对拍）→ 工具/技能零改动切换。 |
 | L3 GUI 白名单（§17） | `ros2_gui_interact` 默认 `allowedApplications: [rviz2, rqt, rqt_graph]` + 窗口标题校验；需改动时审批 |
 | 审计 JSONL（§18） | `~/.dsh-ros2/audit/motion-YYYYMMDD.jsonl`，工具层追加（动作/指纹/校验/审批/执行/验证），无密钥 |
 | workspace box 默认启用（§3） | 校验器已支持，按机器人填 box 后开启 |

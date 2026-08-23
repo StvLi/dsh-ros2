@@ -1,3 +1,6 @@
+<!-- 来源：GPT 审阅 dsh-ros2 仓库后提出的 P0 安全建议原文（安全主题文档家族之一）。
+     评审结论与实施批次见 docs/safety-todo.md；边界定义见 docs/safety.md。-->
+
 # DSH-ROS2 P0 Safety TODO
 #
 # Goal:

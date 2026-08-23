@@ -28,7 +28,7 @@ All tools run plain `ros2` / `colcon` / `rosdep` CLI commands on the host; L1 ne
 | --- | --- | --- | --- |
 | ![mesh render](docs/images/robot_mesh_full.jpg) | ![head cam](docs/images/camera_head.jpg) | ![wrist left](docs/images/camera_wrist_left.jpg) | ![wrist right](docs/images/camera_wrist_right.jpg) |
 
-> Left: `rviz_offscreen_node` renders with the real rviz stack (OGRE) and publishes to the `/rviz/scene` image topic. Right: three frames grabbed from live camera topics by `ros2_image_snapshot` (1280×720). Full test record: [`docs/robot-state-vision-test.md`](docs/robot-state-vision-test.md).
+> Left: `rviz_offscreen_node` renders with the real rviz stack (OGRE) and publishes to the `/rviz/scene` image topic. Right: three frames grabbed from live camera topics by `ros2_image_snapshot` (1280×720). Full test record: [`docs/test-robot-state-vision.md`](docs/test-robot-state-vision.md).
 
 ---
 
@@ -369,7 +369,7 @@ dsh-ros2/
 ├── vlm/                  # ROS2 package dsh_ros2_vlm (Python): vlm_node / vision_bringup / vlm_bridge_node / image_snapshot / vlm_call / vlm_bridge_call
 ├── offscreen/            # ROS2 package dsh_ros2_rviz_offscreen (C++): rviz_offscreen_node (OGRE offscreen render → /rviz/scene)
 ├── safety/               # ROS2 package dsh_ros2_safety (Python): safety_monitor node + safety_core (pure logic, --selftest) + safety_vlm_arbitrate + SafetyState/Event msgs + Unlock/SetLock srvs
-├── docs/                 # architecture.md, compatibility.md, robot-state-vision-test.md, gpu-passthrough-test.md, **safety-handover.md** / **safety.md** / **safety-todo.md**, screenshots
+├── docs/                 # architecture.md · compatibility.md · safety.md / safety-handover.md / safety-todo.md / safety-gpt-review.md · test-robot-state-vision.md / test-gpu-passthrough.md · screenshots
 ├── tests/                # vitest (113 cases; CLI outputs mocked)
 ├── .github/workflows/    # CI: Node 22/24 → typecheck/test/build/pack validation
 ├── PUBLISH.md            # open-source publishing checklist (GitHub + npm + DSH community)
@@ -421,8 +421,11 @@ Release workflow (npm & GitHub Releases): see [`PUBLISH.md`](PUBLISH.md).
 | --- | --- |
 | [`docs/architecture.md`](docs/architecture.md) | Design overview, four tiers, L4 vision & offscreen rendering architecture, performance evolution, safety model |
 | [`docs/compatibility.md`](docs/compatibility.md) | Compatibility baseline |
-| [`docs/robot-state-vision-test.md`](docs/robot-state-vision-test.md) | End-to-end real-robot tests: pipeline, realtime, mesh/TF binding fix & verification, 4-channel joint analysis (with images) |
-| [`docs/gpu-passthrough-test.md`](docs/gpu-passthrough-test.md) | GPU passthrough verification: hardware, troubleshooting, results, usage |
+| [`docs/safety.md`](docs/safety.md) | Safety boundary: six layers (agent permission / human approval / motion validation / execution monitoring / post-execution verification / physical robot safety), fail-closed & degradation policy, "DSH is not a functional-safety system" |
+| [`docs/safety-handover.md`](docs/safety-handover.md) | Handover for downstream robot-adaptation agents: generic framework/interfaces vs body-specific data sources/algorithms, profile `safety` schema, interfaces |
+| [`docs/safety-todo.md`](docs/safety-todo.md) | GPT review decisions + batches: 0.14.1 done (deterministic validation), 0.15+ (GUI whitelist / audit / C++ real-time node ...) |
+| [`docs/test-robot-state-vision.md`](docs/test-robot-state-vision.md) | End-to-end real-robot tests: pipeline, realtime, mesh/TF binding fix & verification, 4-channel joint analysis (with images) |
+| [`docs/test-gpu-passthrough.md`](docs/test-gpu-passthrough.md) | GPU passthrough verification: hardware, troubleshooting, results, usage |
 | [`CHANGELOG.md`](CHANGELOG.md) | Version history (Keep a Changelog) |
 
 ---
