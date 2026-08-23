@@ -4,6 +4,19 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [SemVer](https://semver.org/).
 
+## [0.13.3] - 2026-08-23
+
+### Added
+
+- **`ros2_bag_play`（L2 审批）**：回放 rosbag 到其话题（`--topics` 过滤、`--rate`、
+  `--loop`、`--start-offset`；前台运行可配 `timeoutMs`，超时返回已启动提示）。
+- **`ros2_launch`（L2 审批）**：以后台任务启动 `ros2 launch <pkg> <launch_file>`
+  （返回 jobId，`ros2_job_status` 查询、DSH job 控制停止）。
+- **skill `robot-state-vision-analysis` 零位语义补充**：明确"全零关节 ≠ 双臂下垂"，
+  DeepCybo Lite 零位 = 侧平举/肘窝向前，当前非零 = 双臂下垂；VLM 不能从 TF 骨架
+  推断关节角，以 `joint_states` 为准。
+- 测试：98 例全绿（bag_play/launch 参数、审批、后台 job 路径）。工具总数 44。
+
 ## [0.13.2] - 2026-08-23
 
 ### Added

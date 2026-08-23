@@ -429,10 +429,12 @@ export function createRos2Tools(deps: ToolDeps) {
   tools.push(makeInterfaceCreateTool(deps))
   tools.push(makeParamSetTool(deps))
   tools.push(makeBagRecordTool(deps))
+  tools.push(makeBagPlayTool(deps))
   tools.push(makeJobsListTool(deps))
   tools.push(makeJobStatusTool(deps))
   // L2: one-click ROS2 install via FishROS when ROS2 is missing (interactive PTY session).
   tools.push(makeRos2InstallTool(deps))
+  tools.push(makeLaunchTool(deps))
   // L3 visualization tools (GUI lifecycle + screenshot + multimodal vision).
   tools.push(makeGuiStartTool(deps))
   tools.push(makeGuiListTool(deps))
@@ -1818,4 +1820,98 @@ async function resolveSrdf(deps: ToolDeps, srdf: string, pkg: string): Promise<s
   const info = scan.ok ? (parseJsonOrRaw(scan.stdout) as { packages?: { package: string; srdf: string }[] }) : { packages: [] }
   const hit = (info.packages ?? []).find((p) => !pkg || p.package === pkg)
   return hit ? hit.srdf : ''
+}
+
+/**
+ * L2: replay a rosbag into its topics (approval-gated; publishes to the
+ * graph). `ros2 bag play <path>` with optional topic filter / rate / loop /
+ * start offset. Runs in the foreground for timeoutMs (default 60 s); use a
+ * longer timeoutMs to let longer bags finish.
+ */
+function makeBagPlayTool(deps: ToolDeps) {
+  return defineTool({
+    name: 'ros2_bag_play',
+    description: 'Replay a rosbag into its topics (`ros2 bag play <path> [--topics ...] [--rate X] [--loop] [--start-offset S]`). Publishes to the graph — requires approval. Runs in the foreground for timeoutMs (default 60000 ms); raise it to let longer bags finish.',
+    parameters: {
+      path: { type: 'string', required: true, description: 'Path to the bag directory.' },
+      topics: { type: 'string', default: '', description: 'Space-separated topics to replay (empty = all).' },
+      rate: { type: 'number', default: 0, description: 'Replay rate multiplier (0 = original timing).' },
+      loop: { type: 'boolean', default: false, description: 'Loop playback.' },
+      startOffset: { type: 'number', default: 0, description: 'Start offset in seconds (0 = from start).' },
+      timeoutMs: { type: 'number', default: 60000, description: 'Foreground timeout in ms.' },
+    },
+    output: { schema: resultSchema, render: renderResult },
+    async execute(args, exec) {
+      const params = args as Record<string, unknown>
+      const path = strOrUndefined(params.path) ?? ''
+      if (!path) return toolError('ros2_bag_play', 'ros2_bag_play', 'MISSING_PARAM', 'path 必填')
+      const topics = strOrUndefined(params.topics)?.split(/\s+/).filter(Boolean) ?? []
+      const playArgs = ['bag', 'play', path, ...(topics.length ? ['--topics', ...topics] : [])]
+      const rate = numOrUndefined(params.rate) ?? 0
+      if (rate > 0) playArgs.push('--rate', String(rate))
+      if (params.loop === true) playArgs.push('--loop')
+      const startOffset = numOrUndefined(params.startOffset) ?? 0
+      if (startOffset > 0) playArgs.push('--start-offset', String(startOffset))
+      const command = `ros2 ${playArgs.join(' ')}`
+      const approval = await requestApproval(deps, exec, 'ros2_bag_play',
+        `将回放 rosbag ${path} 到话题${topics.length ? `（${topics.join(', ')}）` : '（全部）'}。${params.loop ? '循环播放。' : ''}`)
+      if (!approval.allowed) return deniedResult('ros2_bag_play', command, approval.outcome)
+      const res = await deps.run('ros2', playArgs, { timeoutMs: Math.max(10000, numOrUndefined(params.timeoutMs) ?? 60000) })
+      if (!res.ok && res.timedOut) {
+        return okResult('ros2_bag_play', command, {
+          ok: true, started: true, timedOut: true,
+          note: '回放超时被停止（可能已发布部分数据）；可增大 timeoutMs 或改用 loop。',
+        })
+      }
+      if (!res.ok) {
+        return toolError('ros2_bag_play', command, res.error ?? 'COMMAND_FAILED', res.stderr.trim() || `exit ${res.exitCode ?? 'unknown'}`)
+      }
+      return okResult('ros2_bag_play', command, { ok: true, replayed: path, command: 'ros2 bag play' })
+    },
+  })
+}
+
+/**
+ * L2: launch a ROS2 launch file as a background job (approval-gated).
+ * `ros2 launch <package> <launch_file> [args...]`; the process keeps running
+ * until stopped (DSH job controls / ros2_jobs). Returns jobId.
+ */
+function makeLaunchTool(deps: ToolDeps) {
+  return defineTool({
+    name: 'ros2_launch',
+    description: 'Launch a ROS2 launch file as a background job (`ros2 launch <package> <launch_file> [extra args]`). Long-running: starts a background job (returns jobId), track with ros2_job_status and stop with the DSH job controls. Requires approval.',
+    parameters: {
+      package: { type: 'string', required: true, description: 'Launch package name (e.g. lite_moveit2).' },
+      launch: { type: 'string', required: true, description: 'Launch file name (e.g. demo.launch.py).' },
+      args: { type: 'string', default: '', description: 'Extra arguments appended after the launch file.' },
+      cwd: { type: 'string', default: '', description: 'Working directory (default: plugin workspaceRoot).' },
+    },
+    output: { schema: resultSchema, render: renderResult },
+    async execute(args, exec) {
+      const params = args as Record<string, unknown>
+      const pkg = strOrUndefined(params.package) ?? ''
+      const launch = strOrUndefined(params.launch) ?? ''
+      if (!pkg || !launch) return toolError('ros2_launch', 'ros2_launch', 'MISSING_PARAM', 'package 与 launch 必填')
+      const extra = strOrUndefined(params.args)?.split(/\s+/).filter(Boolean) ?? []
+      const launchArgs = ['launch', pkg, launch, ...extra]
+      const command = `ros2 ${launchArgs.join(' ')}`
+      const approval = await requestApproval(deps, exec, 'ros2_launch',
+        `将以后台任务启动 launch：${command}（持续运行，用 DSH job 控制停止）`)
+      if (!approval.allowed) return deniedResult('ros2_launch', command, approval.outcome)
+      if (!deps.jobs) return toolError('ros2_launch', command, 'JOBS_UNAVAILABLE', '后台任务服务不可用（需要 DSH jobs 支持）')
+      let jobId: string
+      try {
+        jobId = deps.jobs.start({
+          owner: exec.agent,
+          kind: 'ros2-launch',
+          label: `${pkg}/${launch}`,
+          outputLimitBytes: 16 * 1024 * 1024,
+          run: () => spawnJob('ros2', launchArgs, { cwd: strOrUndefined(params.cwd), outputLimitBytes: 16 * 1024 * 1024 }),
+        })
+      } catch (error) {
+        return toolError('ros2_launch', command, 'JOB_START_FAILED', error instanceof Error ? error.message : String(error))
+      }
+      return okResult('ros2_launch', command, { jobId, kind: 'ros2-launch', label: `${pkg}/${launch}`, status: 'started', note: '查询用 ros2_job_status，停止用 DSH job 控制' })
+    },
+  })
 }

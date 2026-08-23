@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![ROS2](https://img.shields.io/badge/ROS2-Jazzy-orange)]()
 ![Node](https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-brightgreen)
-![Tools](https://img.shields.io/badge/tools-42-blue)
+![Tools](https://img.shields.io/badge/tools-44-blue)
 
 **dsh-ros2** gives a DSH agent full robot development / debugging capabilities on any host with ROS2, organized in four capability tiers:
 
@@ -124,6 +124,8 @@ Every L2 tool performs a **write operation** and asks the user first via the DSH
 | `ros2_jobs_list` | `ctx.jobs.list` | Background jobs of this agent (read-only) |
 | `ros2_job_status` | `ctx.jobs.get` | Status of one job by id (read-only) |
 | `ros2_install` | FishROS one-click installer (interactive PTY session) | When ROS2 is missing: `check` probes (installed / installed-not-sourced / absent); `start` (approval) launches the installer; `send` / `status` / `stop` drive and observe the interactive menus |
+| `ros2_bag_play` | `ros2 bag play <path> [--topics ...] [--rate X] [--loop] [--start-offset S]` | Replay a rosbag into its topics (approval-gated; publishes to the graph); foreground for `timeoutMs` |
+| `ros2_launch` | `ros2 launch <pkg> <launch_file> [args]` | Launch a launch file as a **background job** (approval-gated; returns jobId, stop via DSH job controls) |
 | `moveit_move_to_pose` | standard moveit_msgs (`/move_action` + `/execute_trajectory`) | Move a planning group to a named SRDF pose (approval-gated; moves the real robot). Generic: uses only standard moveit_msgs and an SRDF named state, never a specific MoveIt package; `planOnly` plans without executing |
 | `moveit_cartesian` | standard moveit_msgs (`/compute_cartesian_path` + `/execute_trajectory`) | Translate a group's end-effector by (dx, dy, dz) along a Cartesian path (approval-gated). Generic: planning frame + EE link come from the SRDF (`virtual_joint` + group chain tip), both overridable; `frame=ee|world`; long translations split into segments; `planOnly` plans only |
 | `moveit_status` | probes move_group interfaces + samples `/joint_states` | Runtime status: online probe (/move_action, /execute_trajectory, /compute_cartesian_path, controller_manager) + current joint state + SRDF planning frame (read-only) |

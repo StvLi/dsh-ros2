@@ -284,7 +284,9 @@ describe('tool inventory', () => {
     expect(names).toContain('moveit_status')
     expect(names).toContain('moveit_plan')
     expect(names).toContain('moveit_trajectory')
-    expect(names).toHaveLength(42)
+    expect(names).toContain('ros2_bag_play')
+    expect(names).toContain('ros2_launch')
+    expect(names).toHaveLength(44)
   })
 })
 
@@ -483,5 +485,38 @@ describe('moveit_status / moveit_plan / moveit_trajectory', () => {
     const out = (await t.execute({ trajectory: '/x.json' }, execStub)) as ToolResult
     expect(out.ok).toBe(true)
     expect(out.data).toMatchObject({ ok: true, executed: true })
+  })
+})
+
+describe('ros2_bag_play / ros2_launch', () => {
+  it('ros2_bag_play requires a path and approval', async () => {
+    const run = makeRun(() => ({ stdout: '' }))
+    // missing path is rejected by the required-parameter schema (ToolArgsError)
+    const denied = await call('ros2_bag_play', run, { path: '/tmp/bag' })
+    expect(denied.error?.code).toBe('APPROVAL_DENIED')
+    const approval = async () => 'allowed-once'
+    const run2 = makeRun((bin, args) => {
+      const cmd = `${bin} ${args.join(' ')}`
+      return cmd.includes('bag play') ? { ok: true, stdout: '[INFO] Replaying...' } : { ok: false, stdout: '', exitCode: 127 }
+    })
+    const t = createRos2Tools({ run: run2, approval }).find((x) => x.name === 'ros2_bag_play')
+    if (!t) throw new Error('ros2_bag_play not registered')
+    const out = (await t.execute({ path: '/tmp/bag', rate: 2, loop: true }, execStub)) as ToolResult
+    expect(out.ok).toBe(true)
+    expect(out.data).toMatchObject({ ok: true, replayed: '/tmp/bag' })
+  })
+
+  it('ros2_launch requires package/launch and starts a background job', async () => {
+    const run = makeRun(() => ({ stdout: '' }))
+    // missing package/launch is rejected by the required-parameter schema
+    const denied = await call('ros2_launch', run, { package: 'lite_moveit2', launch: 'demo.launch.py' })
+    expect(denied.error?.code).toBe('APPROVAL_DENIED')
+    const approval = async () => 'allowed-once'
+    const jobs = { start: () => 'job-42' } as never
+    const t = createRos2Tools({ run, approval, jobs }).find((x) => x.name === 'ros2_launch')
+    if (!t) throw new Error('ros2_launch not registered')
+    const out = (await t.execute({ package: 'lite_moveit2', launch: 'demo.launch.py' }, execStub)) as ToolResult
+    expect(out.ok).toBe(true)
+    expect(out.data).toMatchObject({ jobId: 'job-42', kind: 'ros2-launch' })
   })
 })
