@@ -418,8 +418,11 @@ export function createRos2Tools(deps: ToolDeps) {
   // L1/L2: MoveIt2 generic interfaces (discovery reads any MoveIt package's
   // SRDF; motion uses only standard moveit_msgs, never a specific package).
   tools.push(makeMoveitDiscoverTool(deps))
+  tools.push(makeMoveitStatusTool(deps))
   tools.push(makeMoveitMoveToPoseTool(deps))
   tools.push(makeMoveitCartesianTool(deps))
+  tools.push(makeMoveitPlanTool(deps))
+  tools.push(makeMoveitTrajectoryTool(deps))
   // L2 management tools (write operations, approval-gated).
   tools.push(makeBuildTool(deps))
   tools.push(makeRosdepInstallTool(deps))
@@ -1683,4 +1686,136 @@ function makeMoveitCartesianTool(deps: ToolDeps) {
       return okResult('moveit_cartesian', command, data)
     },
   })
+}
+
+/**
+ * L1: runtime status of the MoveIt stack (generic): online probe of the
+ * standard interfaces + current joint state + SRDF planning frame.
+ */
+function makeMoveitStatusTool(deps: ToolDeps) {
+  return defineTool({
+    name: 'moveit_status',
+    description:
+      'Runtime status of the MoveIt stack (generic, read-only): whether the standard move_group interfaces (/move_action, /execute_trajectory, /compute_cartesian_path, controller_manager) are online, the current joint state (sample of /joint_states), and the SRDF planning frame. Optional srdf path.',
+    parameters: {
+      srdf: { type: 'string', default: '', description: 'SRDF file path (optional; used for the planning frame).' },
+    },
+    output: { schema: resultSchema, render: renderResult },
+    async execute(args) {
+      const params = args as Record<string, unknown>
+      const helperArgs = [scriptPath('moveit_status.py')]
+      if (strOrUndefined(params.srdf)) helperArgs.push('--srdf', strOrUndefined(params.srdf)!)
+      const command = `python3 ${helperArgs.join(' ')}`
+      const res = await deps.run('python3', helperArgs, { timeoutMs: 45000 })
+      if (!res.ok && res.stdout.trim().length === 0) {
+        return toolError('moveit_status', command, res.error ?? 'COMMAND_FAILED',
+          res.stderr.trim() || `exit ${res.exitCode ?? 'unknown'}`)
+      }
+      return okResult('moveit_status', command, parseJsonOrRaw(res.stdout))
+    },
+  })
+}
+
+/**
+ * L2: plan (and optionally execute) an arbitrary joint goal via move_group
+ * (approval-gated). With planOnly + trajectoryOut, saves the planned
+ * trajectory as JSON for later moveit_trajectory execution.
+ */
+function makeMoveitPlanTool(deps: ToolDeps) {
+  return defineTool({
+    name: 'moveit_plan',
+    description:
+      'Plan (and optionally execute) an arbitrary joint goal through move_group (approval-gated; moves the real robot). Generic: standard moveit_msgs + SRDF only. joints is space-separated "name:=value" pairs (from moveit_discover named states or joint_states). planOnly plans without executing; trajectoryOut saves the planned trajectory JSON for moveit_trajectory.',
+    parameters: {
+      group: { type: 'string', description: 'MoveIt planning group name (e.g. right_arm).' },
+      joints: { type: 'string', description: 'Joint goal as space-separated "name:=value" pairs, e.g. "right_shoulder_roll:=0.5 right_elbow_pitch:=-0.3".' },
+      srdf: { type: 'string', default: '', description: 'SRDF file path (default: discovered via package scan).' },
+      package: { type: 'string', default: '', description: 'MoveIt config package name to load the SRDF from.' },
+      planOnly: { type: 'boolean', default: false, description: 'Plan only, do not execute.' },
+      trajectoryOut: { type: 'string', default: '', description: 'Path to save the planned trajectory JSON (with planOnly).' },
+      timeoutMs: { type: 'number', default: 90000, description: 'Action timeout in ms.' },
+    },
+    output: { schema: resultSchema, render: renderResult },
+    async execute(args, exec) {
+      const params = args as Record<string, unknown>
+      const group = strOrUndefined(params.group) ?? ''
+      const joints = strOrUndefined(params.joints) ?? ''
+      if (!group || !joints.trim()) {
+        return toolError('moveit_plan', 'moveit_plan', 'MISSING_PARAM', 'group 与 joints 必填（joints 形如 "j1:=v1 j2:=v2"）')
+      }
+      const srdf = await resolveSrdf(deps, strOrUndefined(params.srdf) ?? '', strOrUndefined(params.package) ?? '')
+      if (!srdf) {
+        return toolError('moveit_plan', 'moveit_plan', 'SRDF_NOT_FOUND',
+          '未找到 SRDF（请安装/构建 moveit 配置包，或显式传 srdf 路径）')
+      }
+      const planOnly = params.planOnly === true
+      const command = `moveit_plan group=${group} joints=${joints}${planOnly ? ' (plan-only)' : ''}`
+      const approval = await requestApproval(deps, exec, 'moveit_plan',
+        `将调用 move_group 规划并${planOnly ? '（仅规划）' : '执行'}关节目标：组 ${group} → {${joints}}。${planOnly ? '' : '将真实移动机器人。'}`)
+      if (!approval.allowed) return deniedResult('moveit_plan', command, approval.outcome)
+
+      const helperArgs = [
+        scriptPath('moveit_plan.py'),
+        '--srdf', srdf,
+        '--group', group,
+        '--joints', joints,
+        ...(planOnly ? ['--plan-only'] : []),
+        ...(strOrUndefined(params.trajectoryOut) ? ['--out', strOrUndefined(params.trajectoryOut)!] : []),
+        '--timeout', String(Math.max(10, Math.floor(numOrUndefined(params.timeoutMs) ?? 90000) / 1000)),
+      ]
+      const timeoutMs = Math.max(30000, numOrUndefined(params.timeoutMs) ?? 90000) + 10000
+      const res = await deps.run('python3', helperArgs, { timeoutMs })
+      if (!res.ok && res.stdout.trim().length === 0) {
+        return toolError('moveit_plan', command, res.error ?? 'COMMAND_FAILED',
+          res.stderr.trim() || `exit ${res.exitCode ?? 'unknown'}`)
+      }
+      return okResult('moveit_plan', command, parseJsonOrRaw(res.stdout))
+    },
+  })
+}
+
+/**
+ * L2: execute a saved joint trajectory JSON via /execute_trajectory
+ * (approval-gated; moves the real robot). Trajectories come from
+ * moveit_plan --plan-only --trajectoryOut.
+ */
+function makeMoveitTrajectoryTool(deps: ToolDeps) {
+  return defineTool({
+    name: 'moveit_trajectory',
+    description:
+      'Execute a saved joint trajectory JSON via /execute_trajectory (approval-gated; moves the real robot). The trajectory is produced by moveit_plan with planOnly + trajectoryOut.',
+    parameters: {
+      trajectory: { type: 'string', description: 'Path to the trajectory JSON file (from moveit_plan trajectoryOut).' },
+      timeoutMs: { type: 'number', default: 90000, description: 'Action timeout in ms.' },
+    },
+    output: { schema: resultSchema, render: renderResult },
+    async execute(args, exec) {
+      const params = args as Record<string, unknown>
+      const trajectory = strOrUndefined(params.trajectory) ?? ''
+      if (!trajectory) {
+        return toolError('moveit_trajectory', 'moveit_trajectory', 'MISSING_PARAM', 'trajectory 路径必填（来自 moveit_plan trajectoryOut）')
+      }
+      const command = `moveit_trajectory trajectory=${trajectory}`
+      const approval = await requestApproval(deps, exec, 'moveit_trajectory',
+        `将通过 /execute_trajectory 执行轨迹文件 ${trajectory}（真实移动机器人）。`)
+      if (!approval.allowed) return deniedResult('moveit_trajectory', command, approval.outcome)
+      const timeoutMs = Math.max(30000, numOrUndefined(params.timeoutMs) ?? 90000) + 10000
+      const res = await deps.run('python3', [scriptPath('moveit_trajectory.py'), '--trajectory', trajectory,
+        '--timeout', String(Math.max(10, Math.floor(numOrUndefined(params.timeoutMs) ?? 90000) / 1000))], { timeoutMs })
+      if (!res.ok && res.stdout.trim().length === 0) {
+        return toolError('moveit_trajectory', command, res.error ?? 'COMMAND_FAILED',
+          res.stderr.trim() || `exit ${res.exitCode ?? 'unknown'}`)
+      }
+      return okResult('moveit_trajectory', command, parseJsonOrRaw(res.stdout))
+    },
+  })
+}
+
+/** Resolve an SRDF path: explicit > package scan > auto (shared by MoveIt tools). */
+async function resolveSrdf(deps: ToolDeps, srdf: string, pkg: string): Promise<string> {
+  if (srdf) return srdf
+  const scan = await deps.run('python3', [scriptPath('moveit_discover.py'), ...(pkg ? ['--package', pkg] : [])], { timeoutMs: 90000 })
+  const info = scan.ok ? (parseJsonOrRaw(scan.stdout) as { packages?: { package: string; srdf: string }[] }) : { packages: [] }
+  const hit = (info.packages ?? []).find((p) => !pkg || p.package === pkg)
+  return hit ? hit.srdf : ''
 }

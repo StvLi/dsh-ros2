@@ -281,7 +281,10 @@ describe('tool inventory', () => {
     expect(names).toContain('moveit_discover')
     expect(names).toContain('moveit_move_to_pose')
     expect(names).toContain('moveit_cartesian')
-    expect(names).toHaveLength(39)
+    expect(names).toContain('moveit_status')
+    expect(names).toContain('moveit_plan')
+    expect(names).toContain('moveit_trajectory')
+    expect(names).toHaveLength(42)
   })
 })
 
@@ -429,5 +432,56 @@ describe('moveit_cartesian', () => {
     )) as ToolResult
     expect(out.ok).toBe(true)
     expect(out.data).toMatchObject({ ok: true, executed_segments: 2 })
+  })
+})
+
+describe('moveit_status / moveit_plan / moveit_trajectory', () => {
+  it('moveit_status parses the helper JSON', async () => {
+    const run = makeRun(() => ({
+      stdout: JSON.stringify({ online: { move_action: true, execute_trajectory: true, compute_cartesian_path: true, controller_manager: true }, joint_state: { a: 0.0 }, planning_frame: 'world' }),
+    }))
+    const out = await call('moveit_status', run, {})
+    expect(out.ok).toBe(true)
+    expect(out.data).toMatchObject({ planning_frame: 'world' })
+    expect((out.data as { online: Record<string, boolean> }).online.move_action).toBe(true)
+  })
+
+  it('moveit_plan requires group and joints', async () => {
+    const run = makeRun(() => ({ stdout: '' }))
+    const out = await call('moveit_plan', run, { group: 'right_arm' })
+    expect(out.error?.code).toBe('MISSING_PARAM')
+  })
+
+  it('moveit_plan fails closed without approval', async () => {
+    const run = makeRun(() => ({ stdout: '' }))
+    const out = await call('moveit_plan', run, { group: 'right_arm', joints: 'a:=0.1', srdf: '/x.srdf' })
+    expect(out.error?.code).toBe('APPROVAL_DENIED')
+  })
+
+  it('moveit_plan parses helper result with approval + srdf', async () => {
+    const run = makeRun(() => ({
+      stdout: JSON.stringify({ ok: true, planned: true, planning_time: 0.3, executed: true, error_code: 1 }),
+    }))
+    const approval = async () => 'allowed-once'
+    const t = createRos2Tools({ run, approval }).find((x) => x.name === 'moveit_plan')
+    if (!t) throw new Error('moveit_plan not registered')
+    const out = (await t.execute({ group: 'right_arm', joints: 'a:=0.1 b:=-0.2', srdf: '/x.srdf' }, execStub)) as ToolResult
+    expect(out.ok).toBe(true)
+    expect(out.data).toMatchObject({ ok: true, executed: true })
+  })
+
+  it('moveit_trajectory requires a trajectory path and approval', async () => {
+    const run = makeRun(() => ({ stdout: '' }))
+    const missing = await call('moveit_trajectory', run, {})
+    expect(missing.error?.code).toBe('MISSING_PARAM')
+    const denied = await call('moveit_trajectory', run, { trajectory: '/x.json' })
+    expect(denied.error?.code).toBe('APPROVAL_DENIED')
+    const approval = async () => 'allowed-once'
+    const run2 = makeRun(() => ({ stdout: JSON.stringify({ ok: true, executed: true, error_code: 1 }) }))
+    const t = createRos2Tools({ run: run2, approval }).find((x) => x.name === 'moveit_trajectory')
+    if (!t) throw new Error('moveit_trajectory not registered')
+    const out = (await t.execute({ trajectory: '/x.json' }, execStub)) as ToolResult
+    expect(out.ok).toBe(true)
+    expect(out.data).toMatchObject({ ok: true, executed: true })
   })
 })

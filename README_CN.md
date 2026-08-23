@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![ROS2](https://img.shields.io/badge/ROS2-Jazzy-orange)]()
 ![Node](https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-brightgreen)
-![Tools](https://img.shields.io/badge/tools-39-blue)
+![Tools](https://img.shields.io/badge/tools-42-blue)
 
 **dsh-ros2** 让 DSH 智能体在一台装有 ROS2 的主机上获得完整的机器人开发/调试能力，分为四个能力层：
 
@@ -126,6 +126,9 @@ ros2_doctor                         # 系统健康报告
 | `ros2_install` | 鱼香ROS一键安装（交互式 PTY 会话） | ROS2 未安装时：`check` 探测（已装/已装未 source/未装）；`start`（审批）拉起安装器；`send`/`status`/`stop` 驱动与观察交互菜单 |
 | `moveit_move_to_pose` | 标准 moveit_msgs（`/move_action` + `/execute_trajectory`） | 将规划组移动到 SRDF 命名姿态（审批门控；会真实移动机器人）。通用：仅用标准 moveit_msgs 与 SRDF 命名姿态，不绑定具体 MoveIt 包；`planOnly` 仅规划不执行 |
 | `moveit_cartesian` | 标准 moveit_msgs（`/compute_cartesian_path` + `/execute_trajectory`） | 沿笛卡尔路径平移规划组末端 (dx, dy, dz) 米（审批门控）。通用：规划帧与 EE link 取自 SRDF（`virtual_joint` + 组 chain tip），均可覆盖；`frame=ee|world`；长平移分段执行；`planOnly` 仅规划 |
+| `moveit_status` | 探测 move_group 接口 + 采样 `/joint_states` | 运行时状态：在线探测（/move_action、/execute_trajectory、/compute_cartesian_path、controller_manager）+ 当前关节状态 + SRDF 规划帧（只读） |
+| `moveit_plan` | 标准 moveit_msgs `/move_action` | 规划（可执行）任意关节目标 `"j1:=v1 j2:=v2"`（审批门控）；`planOnly` + `trajectoryOut` 保存轨迹 JSON 供后续执行 |
+| `moveit_trajectory` | 标准 moveit_msgs `/execute_trajectory` | 执行已保存的轨迹 JSON（来自 `moveit_plan` trajectoryOut），审批门控 |
 
 ### L3 可视化
 

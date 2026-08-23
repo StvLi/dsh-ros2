@@ -4,6 +4,19 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [SemVer](https://semver.org/).
 
+## [0.13.2] - 2026-08-23
+
+### Added
+
+- **MoveIt 更多工具（42 个工具）**，全部通用（标准 moveit_msgs + SRDF，不绑定包）：
+  - `moveit_status`（L1 只读）：在线探测标准接口 + 当前关节状态采样 + SRDF 规划帧；
+  - `moveit_plan`（L2 审批）：规划（可执行）任意关节目标 `"j1:=v1 j2:=v2"`；
+    `planOnly` + `trajectoryOut` 把规划轨迹存为 JSON；
+  - `moveit_trajectory`（L2 审批）：通过 `/execute_trajectory` 执行 `moveit_plan`
+    保存的轨迹 JSON——实现"规划→执行"分离。
+- 共享库 `scripts/moveit_common.py`（SRDF 加载/命名姿态/规划帧/goal 构造/客户端）。
+- 测试：96 例全绿（新增三个工具的解析/参数/审批/结果路径）。
+
 ## [0.13.1] - 2026-08-23
 
 ### Fixed
