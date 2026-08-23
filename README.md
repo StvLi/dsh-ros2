@@ -192,6 +192,73 @@ xvfb-run -a -s "-screen 0 1280x800x24" ros2 run dsh_ros2_rviz_offscreen rviz_off
 
 ---
 
+## MoveIt2 motion — five essential modes, one tool
+
+**Design intent.** Robot motion through MoveIt is, at its core, only five
+operations: set joints absolutely, nudge joints relatively, place the
+end-effector at an absolute pose, move it by a relative delta, or execute a
+pre-planned trajectory. Rather than a growing zoo of named tools, dsh-ros2
+abstracts them into **one tool `moveit_move` with a `mode` parameter** — so the
+interface stays small, predictable and scriptable, and works with *any* MoveIt
+package (it reads the SRDF and speaks only standard `moveit_msgs`).
+
+| Tool | Role |
+| --- | --- |
+| `moveit_discover` (L1) | Read any MoveIt package's SRDF: planning groups, named poses, chain tip; probe the standard interfaces (`/move_action`, `/execute_trajectory`, ...) online |
+| `moveit_status` (L1) | Runtime probe: interfaces online + current `/joint_states` sample + SRDF planning frame |
+| `moveit_move` (L2, approval) | **One tool, five modes**: `joint_abs` (joints "j1:=v1 j2:=v2"), `joint_rel` (deltaJoints = current + delta), `pose_abs` (pose "x y z rx ry rz" in the planning frame), `pose_rel` (deltaPose "dx dy dz drx dry drz", frame ee/world), `trajectory` (execute a saved trajectory JSON) |
+
+```json
+moveit_move {mode: "joint_abs", group: "right_arm", joints: "right_shoulder_roll:=0.5"}
+moveit_move {mode: "joint_rel", group: "right_arm", deltaJoints: "right_elbow_pitch:=-0.2"}
+moveit_move {mode: "pose_rel",  group: "right_arm", deltaPose: "0.05 0 0 0 0 0"}
+moveit_move {mode: "pose_abs",  group: "right_arm", pose: "0.5 0 0.8 0 0 0"}
+moveit_move {mode: "trajectory", group: "right_arm", trajectory: "/tmp/traj.json"}
+```
+
+**How it works.** `moveit_discover`/`moveit_status` tell you *what* you can move
+(groups, joints, EE link from the SRDF chain tip, online state); `moveit_move`
+turns any mode into a standard `MoveGroup` goal (`/move_action`), executes via
+`/execute_trajectory`, and — with `planOnly` + `trajectoryOut` — saves the
+planned trajectory so `mode: "trajectory"` can run it later (plan/execute
+separation). Nothing is bound to a specific MoveIt package; only the SRDF path
+matters (auto-resolved by package scan, or explicit `srdf`/`package`).
+
+---
+
+## Robot profiles & communication topology
+
+**Design intent.** A robot's body (URDF links/joints, cameras, MoveIt groups,
+zero-pose semantics) and its comms graph are costly to rediscover every time.
+The plugin persists them as a **structured profile** (`~/.dsh-ros2/robots/<name>.yaml`):
+register once on first contact, then load instantly forever after. For the
+comms graph, full verbosity does not scale (a complex robot has hundreds of
+topics/services), so the design is a **trade-off**: an *aggregate snapshot*
+(light node/topic/service lists) plus *progressive learning* of only the
+important nodes as you actually work with them.
+
+| Tool | Role |
+| --- | --- |
+| `robot_register` (L2) | Collect body info (URDF links/joints, TF root, cameras, MoveIt SRDF groups, **auto-links the zero-pose calibration**) into the profile |
+| `robot_load` (L1) | Load the profile as structured JSON — the fast path, no rediscovery; empty name lists all |
+| `robot_topology` (L1/L2) | Comms graph: `snapshot` (L2, aggregate lists), `learn` (L2, one important node's role/description + pub/sub/srv/act, strict schema), `show` (L1, read back) |
+| `ros2_zero_pose_semantics` (L2) | Calibrate zero pose via render + VLM + user confirm (arm/elbow/palm combos or free text); the profile auto-includes it |
+
+Two bundled skills complete the workflow: **`robot-registration`** (first-contact
+flow: ask name/URDF → collect → register → verify, plus the topology baseline
+snapshot) and **`robot-retrieval`** (load the profile instantly and bring up
+renders/diagnostics/motion from it, including the learned topology and zero-pose
+semantics).
+
+**How it works.** Everything is plain structured YAML under `~/.dsh-ros2/` —
+`robots/<name>.yaml` (body + topology) and `zero-pose.yaml` (calibration).
+`robot_register` snapshots the body; `robot_topology snapshot` snapshots the
+aggregate layer; `robot_topology learn` appends one node at a time (idempotent
+merge) as you discover what matters. `robot_load` and `robot_topology show` read
+them back instantly — one call instead of N discovery calls.
+
+---
+
 ## Bundled skills
 
 | Skill | Content |

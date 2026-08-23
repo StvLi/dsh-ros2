@@ -192,6 +192,61 @@ xvfb-run -a -s "-screen 0 1280x800x24" ros2 run dsh_ros2_rviz_offscreen rviz_off
 
 ---
 
+## MoveIt2 运动——五种本质模式，一个工具
+
+**设计意图**。机器人经 MoveIt 的运动，本质只有五种操作：关节角绝对设置、关节角相对微调、
+末端位姿绝对到达、末端位姿相对增量、执行预规划轨迹。与其让工具随需求不断膨胀，
+dsh-ros2 将它们抽象为 **一个工具 `moveit_move` + `mode` 参数**——接口小而可预期、可脚本化，
+并且对任意 MoveIt 包通用（读取 SRDF、只讲标准 `moveit_msgs`）。
+
+| 工具 | 职责 |
+| --- | --- |
+| `moveit_discover`（L1） | 读取任意 MoveIt 包的 SRDF：规划组、命名姿态、chain 末端；探测标准接口（`/move_action`、`/execute_trajectory`…）在线状态 |
+| `moveit_status`（L1） | 运行时探测：接口在线 + 当前 `/joint_states` 采样 + SRDF 规划帧 |
+| `moveit_move`（L2 审批） | **一个工具五种模式**：`joint_abs`（joints "j1:=v1 j2:=v2"）、`joint_rel`（deltaJoints = 当前 + 增量）、`pose_abs`（pose "x y z rx ry rz" 规划帧）、`pose_rel`（deltaPose "dx dy dz drx dry drz"，frame ee/world）、`trajectory`（执行已保存的轨迹 JSON） |
+
+```json
+moveit_move {mode: "joint_abs", group: "right_arm", joints: "right_shoulder_roll:=0.5"}
+moveit_move {mode: "joint_rel", group: "right_arm", deltaJoints: "right_elbow_pitch:=-0.2"}
+moveit_move {mode: "pose_rel",  group: "right_arm", deltaPose: "0.05 0 0 0 0 0"}
+moveit_move {mode: "pose_abs",  group: "right_arm", pose: "0.5 0 0.8 0 0 0"}
+moveit_move {mode: "trajectory", group: "right_arm", trajectory: "/tmp/traj.json"}
+```
+
+**实现方式**。`moveit_discover`/`moveit_status` 告诉你"能动什么"（组、关节、SRDF chain
+末端的 EE link、在线状态）；`moveit_move` 把任意模式转成标准 `MoveGroup` goal
+（`/move_action`），经 `/execute_trajectory` 执行；配合 `planOnly` + `trajectoryOut`
+保存规划轨迹，之后用 `mode: "trajectory"` 单独执行（规划/执行分离）。不绑定任何具体
+MoveIt 包——只需 SRDF 路径（包扫描自动解析，或显式 `srdf`/`package`）。
+
+---
+
+## 机器人注册与通信拓扑维护
+
+**设计意图**。机器人的本体（URDF link/joint、相机、MoveIt 组、零位语义）与通信拓扑，
+每次重新发现成本很高。插件将它们固化为**结构化档案**
+（`~/.dsh-ros2/robots/<name>.yaml`）：首次接触注册一次，之后即时读取。对通信图，
+全量逐节点深挖在复杂机器人（成百上千话题/服务）下不可扩展，因此设计取**折中**：
+**聚合层快照**（轻量的节点/话题/服务清单）+ **使用中渐进学习**（只记录真正重要的节点）。
+
+| 工具 | 职责 |
+| --- | --- |
+| `robot_register`（L2） | 采集本体信息（URDF link/joint、TF 根、相机、MoveIt SRDF 组、**自动联动零位语义校准**）写入档案 |
+| `robot_load`（L1） | 按名加载档案为结构化 JSON——快速路径，无需重新发现；name 为空列出全部 |
+| `robot_topology`（L1/L2） | 通信拓扑：`snapshot`（L2，聚合清单）、`learn`（L2，单个重要节点的角色/描述 + pub/sub/srv/act，严格 schema）、`show`（L1，读回） |
+| `ros2_zero_pose_semantics`（L2） | 经"渲染 + VLM + 使用者确认"校准零位（臂/肘/手掌组合或自定义文字）；档案自动纳入 |
+
+配套两个内置 skill 完成闭环：**`robot-registration`**（首接触流程：问名称/URDF →
+采集 → 注册 → 校验，并建立拓扑基线快照）与 **`robot-retrieval`**（即时加载档案，
+据此拉起渲染/诊断/运动——含已学习的拓扑与零位语义）。
+
+**实现方式**。全部为 `~/.dsh-ros2/` 下的结构化 YAML：`robots/<name>.yaml`（本体 +
+拓扑）与 `zero-pose.yaml`（校准）。`robot_register` 固化本体；`robot_topology
+snapshot` 固化聚合层；`robot_topology learn` 在使用中逐个追加重要节点（幂等合并）。
+`robot_load` 与 `robot_topology show` 即时读回——一次调用替代 N 次发现。
+
+---
+
 ## 内置技能
 
 | Skill | 内容 |
