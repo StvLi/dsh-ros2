@@ -4,11 +4,11 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [SemVer](https://semver.org/).
 
-## [0.14.0] - 2026-08-23
+## [0.13.9] - 2026-08-23
 
 ### Changed
 
-- **MoveIt 运动接口统一抽象**（`moveit_move`，45 工具）：原四个命名不一的运动
+- **MoveIt 运动接口统一抽象（非新功能，属 0.13 系列内部重构）**（`moveit_move`，45 工具）：原四个命名不一的运动
   工具（`moveit_move_to_pose` / `moveit_cartesian` / `moveit_plan` /
   `moveit_trajectory`）合并为**一个工具 + `mode` 参数**，对应五种本质模式：
   1. `joint_abs` 关节角绝对位置模式规划执行（joints "j1:=v1 j2:=v2"）；
