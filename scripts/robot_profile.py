@@ -147,6 +147,108 @@ def read_zero_pose() -> dict:
         return {}
 
 
+# ── topology: 聚合层快照 + 渐进式重要节点学习（严格结构化）───────────────
+# Trade-off: 不全量深挖（机器人复杂后冗杂），也不一无所知——snapshot 记录聚合层
+# （节点/话题/服务清单），learn 使用中逐步记录"重要节点"的功能与连接（固定 schema）。
+
+TOPO_SCHEMA_NODE = ["name", "role", "description", "pub", "sub", "srv", "act", "learned_at"]
+
+
+def _profile_path(name):
+    return os.path.join(DEFAULT_DIR, f"{name}.yaml")
+
+
+def _read_profile(name):
+    import yaml as pyyaml
+    path = _profile_path(name)
+    if not os.path.exists(path):
+        return None, None
+    with open(path) as f:
+        data = pyyaml.safe_load(f) or {}
+    return data, path
+
+
+def topo_snapshot(name: str) -> dict:
+    """聚合层快照：节点/话题/服务清单（轻量，不逐节点深挖）。"""
+    data, path = _read_profile(name)
+    if data is None:
+        return {"ok": False, "error": f"未找到档案 {name}（先 register）"}
+    nodes = []
+    ok, out, _ = ros2("node", "list")
+    if ok:
+        nodes = [l.strip() for l in out.splitlines() if l.strip()]
+    topics = []
+    ok2, out2, _ = ros2("topic", "list", "-t")
+    if ok2:
+        topics = sorted({l.split()[0] for l in out2.splitlines() if l.strip()})
+    services = []
+    ok3, out3, _ = ros2("service", "list")
+    if ok3:
+        services = sorted({l.strip() for l in out3.splitlines() if l.strip()})
+    snapshot = {
+        "nodes": nodes,
+        "topics": topics,
+        "services": services,
+        "snapshot_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+    }
+    robot = data.setdefault("robot", {})
+    robot.setdefault("topology", {})["snapshot"] = snapshot
+    # 保留已学习节点
+    robot["topology"].setdefault("nodes", {})
+    with open(path, "w") as f:
+        f.write(f"# robot body profile (written by dsh-ros2 robot_profile)\n")
+        import yaml as pyyaml
+        pyyaml.safe_dump(data, f, allow_unicode=True, sort_keys=False)
+    return {"ok": True, "snapshot": snapshot, "learned_nodes": len(robot["topology"]["nodes"])}
+
+
+def topo_learn(name: str, node: str, role: str, description: str,
+               pub: str = "", sub: str = "", srv: str = "", act: str = "") -> dict:
+    """记录/更新一个重要节点的功能与拓扑连接（严格 schema，幂等合并）。"""
+    data, path = _read_profile(name)
+    if data is None:
+        return {"ok": False, "error": f"未找到档案 {name}（先 register）"}
+    robot = data.setdefault("robot", {})
+    topo = robot.setdefault("topology", {})
+    nodes = topo.setdefault("nodes", {})
+    entry = {
+        "name": node,
+        "role": role,
+        "description": description,
+        "pub": [t for t in pub.split(",") if t.strip()],
+        "sub": [t for t in sub.split(",") if t.strip()],
+        "srv": [t for t in srv.split(",") if t.strip()],
+        "act": [t for t in act.split(",") if t.strip()],
+        "learned_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+    }
+    nodes[node] = entry
+    with open(path, "w") as f:
+        f.write(f"# robot body profile (written by dsh-ros2 robot_profile)\n")
+        import yaml as pyyaml
+        pyyaml.safe_dump(data, f, allow_unicode=True, sort_keys=False)
+    return {"ok": True, "node": entry, "learned_nodes": len(nodes)}
+
+
+def topo_show(name: str) -> dict:
+    """输出档案拓扑：已学习节点（含功能）+ 最近聚合快照概要。"""
+    data, path = _read_profile(name)
+    if data is None:
+        return {"ok": False, "error": f"未找到档案 {name}（先 register）"}
+    topo = data.get("robot", {}).get("topology", {})
+    snapshot = topo.get("snapshot", {})
+    return {
+        "ok": True,
+        "learned_nodes": topo.get("nodes", {}),
+        "snapshot_summary": {
+            "nodes": len(snapshot.get("nodes", [])),
+            "topics": len(snapshot.get("topics", [])),
+            "services": len(snapshot.get("services", [])),
+            "snapshot_at": snapshot.get("snapshot_at", ""),
+        },
+        "profile_path": path,
+    }
+
+
 def register(name: str, urdf: str, srdf: str, description: str) -> dict:
     profile_dir = os.path.dirname(os.path.join(DEFAULT_DIR, name + ".yaml"))
     os.makedirs(profile_dir, exist_ok=True)
@@ -234,16 +336,35 @@ def list_profiles():
 def main():
     global DEFAULT_DIR
     ap = argparse.ArgumentParser()
-    ap.add_argument("action", choices=["register", "load", "list"])
+    ap.add_argument("action", choices=["register", "load", "list", "topology"])
     ap.add_argument("--name", default="")
     ap.add_argument("--urdf", default="")
     ap.add_argument("--srdf", default="")
+    ap.add_argument("--topology-action", default="show", choices=["snapshot", "learn", "show"])
+    ap.add_argument("--node", default="")
+    ap.add_argument("--role", default="")
+    ap.add_argument("--pub", default="")
+    ap.add_argument("--sub", default="")
+    ap.add_argument("--srv", default="")
+    ap.add_argument("--act", default="")
     ap.add_argument("--description", default="")
     ap.add_argument("--dir", default=DEFAULT_DIR)
     args = ap.parse_args()
     DEFAULT_DIR = args.dir
 
-    if args.action == "register":
+    if args.action == "topology":
+        topo_action = args.topology_action
+        if topo_action == "snapshot":
+            out = topo_snapshot(args.name)
+        elif topo_action == "learn":
+            if not (args.name and args.node):
+                print(json.dumps({"ok": False, "error": "topology learn 需要 --name 与 --node"}))
+                return 1
+            out = topo_learn(args.name, args.node, args.role, args.description,
+                             args.pub, args.sub, args.srv, args.act)
+        else:  # show
+            out = topo_show(args.name)
+    elif args.action == "register":
         if not args.name:
             print(json.dumps({"ok": False, "error": "register 需要 --name"}))
             return 1

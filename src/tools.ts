@@ -438,6 +438,7 @@ export function createRos2Tools(deps: ToolDeps) {
   tools.push(makeZeroPoseSemanticsTool(deps))
   tools.push(makeRobotRegisterTool(deps))
   tools.push(makeRobotLoadTool(deps))
+  tools.push(makeRobotTopologyTool(deps))
   // L3 visualization tools (GUI lifecycle + screenshot + multimodal vision).
   tools.push(makeGuiStartTool(deps))
   tools.push(makeGuiListTool(deps))
@@ -2054,6 +2055,69 @@ function makeRobotLoadTool(deps: ToolDeps) {
           res.stderr.trim() || `exit ${res.exitCode ?? 'unknown'}`)
       }
       return okResult('robot_load', command, parseJsonOrRaw(res.stdout))
+    },
+  })
+}
+
+/**
+ * L1/L2: robot topology — aggregate snapshot + progressive important-node
+ * learning, strictly structured in the robot profile (trade-off: not the full
+ * verbose graph, not zero knowledge).
+ * snapshot (L2): record the aggregate layer (node/topic/service lists).
+ * learn (L2): record one important node's role/description + connections.
+ * show (L1): read back learned nodes + snapshot summary.
+ */
+function makeRobotTopologyTool(deps: ToolDeps) {
+  return defineTool({
+    name: 'robot_topology',
+    description:
+      'Robot communication topology, strictly structured in the robot profile (trade-off between full verbose ROS2 graphs and zero knowledge). ' +
+      'snapshot (approval): record the aggregate layer — current node/topic/service lists (light, not per-node deep dive). ' +
+      'learn (approval): progressively record ONE important node\'s role/description and its connections (pub/sub/srv/act, comma-separated) — do this as you work with the robot instead of dumping everything. ' +
+      'show (read-only): read back learned nodes (with functions) + snapshot summary. robot must be registered first.',
+    parameters: {
+      robot: { type: 'string', description: 'Robot profile name (registered via robot_register).' },
+      action: { type: 'string', enum: ['snapshot', 'learn', 'show'], default: 'show', description: 'snapshot | learn | show.' },
+      node: { type: 'string', default: '', description: 'learn: node name to record (e.g. /robot_state_publisher).' },
+      role: { type: 'string', default: '', description: 'learn: node role (e.g. tf-publisher, lifecycle, planner).' },
+      description: { type: 'string', default: '', description: 'learn: what this node does.' },
+      pub: { type: 'string', default: '', description: 'learn: comma-separated topics it publishes.' },
+      sub: { type: 'string', default: '', description: 'learn: comma-separated topics it subscribes.' },
+      srv: { type: 'string', default: '', description: 'learn: comma-separated services it provides.' },
+      act: { type: 'string', default: '', description: 'learn: comma-separated actions it provides.' },
+    },
+    output: { schema: resultSchema, render: renderResult },
+    async execute(args, exec) {
+      const params = args as Record<string, unknown>
+      const robot = strOrUndefined(params.robot) ?? ''
+      const action = String(params.action ?? 'show')
+      if (!robot) return toolError('robot_topology', 'robot_topology', 'MISSING_PARAM', 'robot 必填（已注册的档案名）')
+      const command = `robot_topology robot=${robot} action=${action}`
+      if (action === 'show') {
+        const res = await deps.run('python3', [scriptPath('robot_profile.py'), 'topology', '--name', robot, '--topology-action', 'show'], { timeoutMs: 30000 })
+        if (!res.ok && res.stdout.trim().length === 0) return toolError('robot_topology', command, res.error ?? 'COMMAND_FAILED', res.stderr.trim())
+        return okResult('robot_topology', command, parseJsonOrRaw(res.stdout))
+      }
+      const reason = action === 'snapshot'
+        ? `将采集机器人「${robot}」当前节点/话题/服务聚合快照并写入档案。`
+        : `将把节点 ${String(params.node ?? '')} 的功能与拓扑写入机器人「${robot}」档案（严格结构化）。`
+      const approval = await requestApproval(deps, exec, 'robot_topology', reason)
+      if (!approval.allowed) return deniedResult('robot_topology', command, approval.outcome)
+      const helperArgs = [scriptPath('robot_profile.py'), 'topology', '--name', robot, '--topology-action', action]
+      if (action === 'learn') {
+        const node = strOrUndefined(params.node) ?? ''
+        if (!node) return toolError('robot_topology', command, 'MISSING_PARAM', 'learn 需要 node')
+        helperArgs.push('--node', node)
+        if (strOrUndefined(params.role)) helperArgs.push('--role', strOrUndefined(params.role)!)
+        if (strOrUndefined(params.description)) helperArgs.push('--description', strOrUndefined(params.description)!)
+        if (strOrUndefined(params.pub)) helperArgs.push('--pub', strOrUndefined(params.pub)!)
+        if (strOrUndefined(params.sub)) helperArgs.push('--sub', strOrUndefined(params.sub)!)
+        if (strOrUndefined(params.srv)) helperArgs.push('--srv', strOrUndefined(params.srv)!)
+        if (strOrUndefined(params.act)) helperArgs.push('--act', strOrUndefined(params.act)!)
+      }
+      const res = await deps.run('python3', helperArgs, { timeoutMs: 60000 })
+      if (!res.ok && res.stdout.trim().length === 0) return toolError('robot_topology', command, res.error ?? 'COMMAND_FAILED', res.stderr.trim())
+      return okResult('robot_topology', command, parseJsonOrRaw(res.stdout))
     },
   })
 }

@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![ROS2](https://img.shields.io/badge/ROS2-Jazzy-orange)]()
 ![Node](https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-brightgreen)
-![Tools](https://img.shields.io/badge/tools-47-blue)
+![Tools](https://img.shields.io/badge/tools-48-blue)
 
 **dsh-ros2** gives a DSH agent full robot development / debugging capabilities on any host with ROS2, organized in four capability tiers:
 
@@ -129,6 +129,7 @@ Every L2 tool performs a **write operation** and asks the user first via the DSH
 | `ros2_zero_pose_semantics` | publish-zero → offscreen render → VLM → confirm | Calibrate zero-pose semantics interactively (generic): `analyze` renders the all-zero pose and asks the VLM its posture across three aspects (arm: lateral_raise/hanging, elbow: forward/upward, palm/camera-mount: up/forward/down); `confirm` records the user-approved combo (or a `customText` free-text description) to `~/.dsh-ros2/zero-pose.yaml` for skills |
 | `robot_register` | collects URDF/TF/cameras/MoveIt/zero-pose → writes `~/.dsh-ros2/robots/<name>.yaml` | Register a robot body profile on first contact (approval-gated) for instant later reuse |
 | `robot_load` | reads `~/.dsh-ros2/robots/<name>.yaml` | Load a registered robot profile as structured JSON (fast path — no discovery); empty name lists all profiles |
+| `robot_topology` | aggregate snapshot + progressive node learning (strict schema) | Robot comms topology trade-off: `snapshot` (approval) records node/topic/service lists (light, not verbose); `learn` (approval) records ONE important node's role/description + pub/sub/srv/act; `show` (read-only) reads them back |
 | `moveit_move_to_pose` | standard moveit_msgs (`/move_action` + `/execute_trajectory`) | Move a planning group to a named SRDF pose (approval-gated; moves the real robot). Generic: uses only standard moveit_msgs and an SRDF named state, never a specific MoveIt package; `planOnly` plans without executing |
 | `moveit_cartesian` | standard moveit_msgs (`/compute_cartesian_path` + `/execute_trajectory`) | Translate a group's end-effector by (dx, dy, dz) along a Cartesian path (approval-gated). Generic: planning frame + EE link come from the SRDF (`virtual_joint` + group chain tip), both overridable; `frame=ee|world`; long translations split into segments; `planOnly` plans only |
 | `moveit_status` | probes move_group interfaces + samples `/joint_states` | Runtime status: online probe (/move_action, /execute_trajectory, /compute_cartesian_path, controller_manager) + current joint state + SRDF planning frame (read-only) |

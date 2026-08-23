@@ -164,8 +164,12 @@ structured profile so every later call is instant (no re-discovery).
    (approval-gated; writes \`~/.dsh-ros2/robots/<name>.yaml\`) — it auto-includes
    the zero-pose calibration file if present. Confirm the returned summary
    (links/joints/cameras/groups counts) with the user.
-4. **Verify**: \`robot_load {name}\` returns the structured profile; sanity-check
-   TF root, camera list and groups with the user.
+4. **Topology baseline**: \`robot_topology {robot, action: "snapshot"}\`
+   (approval) records the aggregate layer — current node/topic/service lists —
+   so the profile is never "zero knowledge" about the comms graph without
+   dumping its full verbosity.
+5. **Verify**: \`robot_load {name}\` returns the structured profile; sanity-check
+   TF root, camera list, groups, and the topology snapshot with the user.
 
 ## Notes
 
@@ -211,6 +215,19 @@ with the known facts instead of re-discovering.
      (calibrated via robot-registration) — do not guess.
 4. **Fallbacks**: if the profile is stale (TF/URDF changed), re-register
    (robot-registration flow) rather than hacking around it.
+
+## Communication topology (progressive, strictly structured)
+
+- **Read**: \`robot_topology {robot, action: "show"}\` returns the learned
+  important nodes (role/description/connections) + the aggregate snapshot
+  summary (node/topic/service counts) — enough to orient without parsing a
+  verbose full graph.
+- **Learn progressively**: as you work and a node proves important, record it
+  with \`robot_topology {robot, action: "learn", node, role, description, pub,
+  sub, srv, act}\` (approval). Strict schema, idempotent merge. Prefer this
+  over full-dump rediscovery: the robot's comms grow complex, so keep the
+  profile meaningful, not exhaustive.
+- Refresh the aggregate layer occasionally with \`action: "snapshot"\`.
 
 ## Notes
 

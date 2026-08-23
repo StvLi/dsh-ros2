@@ -289,7 +289,8 @@ describe('tool inventory', () => {
     expect(names).toContain('ros2_zero_pose_semantics')
     expect(names).toContain('robot_register')
     expect(names).toContain('robot_load')
-    expect(names).toHaveLength(47)
+    expect(names).toContain('robot_topology')
+    expect(names).toHaveLength(48)
   })
 })
 
@@ -583,5 +584,31 @@ describe('robot_register / robot_load', () => {
     const listed = await call('robot_load', runList, {})
     expect(listed.ok).toBe(true)
     expect((listed.data as { robots: string[] }).robots).toContain('lite')
+  })
+})
+
+describe('robot_topology', () => {
+  it('show is read-only and parses the profile topology', async () => {
+    const run = makeRun(() => ({
+      stdout: JSON.stringify({ ok: true, learned_nodes: { '/robot_state_publisher': { role: 'tf-publisher' } }, snapshot_summary: { nodes: 18, topics: 32 } }),
+    }))
+    const out = await call('robot_topology', run, { robot: 'lite', action: 'show' })
+    expect(out.ok).toBe(true)
+    expect((out.data as { learned_nodes: Record<string, unknown> }).learned_nodes).toHaveProperty('/robot_state_publisher')
+  })
+
+  it('snapshot and learn require approval and a robot', async () => {
+    const run = makeRun(() => ({ stdout: '' }))
+    const missing = await call('robot_topology', run, {})
+    expect(missing.error?.code).toBe('MISSING_PARAM')
+    const denied = await call('robot_topology', run, { robot: 'lite', action: 'snapshot' })
+    expect(denied.error?.code).toBe('APPROVAL_DENIED')
+    const approval = async () => 'allowed-once'
+    const run2 = makeRun(() => ({ stdout: JSON.stringify({ ok: true, node: { name: '/x', role: 'r' }, learned_nodes: 3 }) }))
+    const t = createRos2Tools({ run: run2, approval }).find((x) => x.name === 'robot_topology')
+    if (!t) throw new Error('robot_topology not registered')
+    const out = (await t.execute({ robot: 'lite', action: 'learn', node: '/x', role: 'r' }, execStub)) as ToolResult
+    expect(out.ok).toBe(true)
+    expect(out.data).toMatchObject({ ok: true })
   })
 })

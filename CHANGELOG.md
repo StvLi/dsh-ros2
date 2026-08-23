@@ -4,6 +4,25 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [SemVer](https://semver.org/).
 
+## [0.13.8] - 2026-08-23
+
+### Added
+
+- **机器人通信拓扑（`robot_topology`，48 工具）**——回答"注册是否含通信逻辑"：
+  之前的注册只有 URDF/关节/相机/MoveIt/零位，不含节点间通信。现按
+  **"聚合层快照 + 使用中渐进学习"** 的取舍实现（不全量冗杂、非一无所知）：
+  - `snapshot`（L2）：记录当前节点/话题/服务**聚合清单**（轻量，不逐节点深挖）；
+  - `learn`（L2）：**使用中逐步记录重要节点**——固定 schema
+    `{name, role, description, pub[], sub[], srv[], act[], learned_at}`，
+    幂等合并；机器人复杂后保持档案"有意义而非详尽"；
+  - `show`（L1）：读回已学习节点（含功能）与快照概要；
+  - 严格结构化写入 `~/.dsh-ros2/robots/<name>.yaml`（yaml.safe_dump）。
+- skill 更新：`robot-registration` 增加拓扑基线快照步骤；`robot-retrieval`
+  新增"通信拓扑（渐进式、严格结构化）"章节（show 读取 / learn 记录 / 定期
+  snapshot 刷新）。
+- 测试：104 例全绿。实测：learn 记录 rsp/controller_manager 节点、snapshot
+  采集 18 节点/32 话题/160 服务、show 读回。
+
 ## [0.13.7] - 2026-08-23
 
 ### Added
