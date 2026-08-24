@@ -4,6 +4,34 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [SemVer](https://semver.org/).
 
+## [0.15.0] - 2026-08-24
+
+### Added
+
+- **知识增强诊断（knowledge-augmented diagnosis）**——让"使用中渐进学习"的机器人通信
+  知识档案（`robot_topology`：已学节点 + 聚合快照）在诊断流程中**被主动消费**，而非
+  只存不读：
+  - **`robot_topology diagnose`**（L1 只读，`robot_profile.py topo_diagnose`）：
+    载入知识库，与实时 ROS2 图交叉比对——
+    - `missing`：已学但当前不在线的节点（控制器/发布者掉线？）——最高优先级；
+    - `new`：在线但未入知识库的节点（`learn` 候选）；
+    - `matched[].drift`：每个已学节点的期望 pub/sub/srv/act vs 实时连接差异
+      （缺 = 连接消失，多 = 节点已变化）；
+    - `topic_drift`：聚合快照话题 vs 实时话题差异；
+    - 附带角色/描述标注解读与诊断顺序提示（missing → new → drift → topic_drift）。
+  - `robot_profile.py` 新增 `_live_node_info`（兼容现代 `ros2 node info`
+    Publishers/Subscribers/Service Servers/Action Servers + `name: type` 输出格式）。
+  - **技能整合**：`ros2-diagnostics` 与 `robot-retrieval` 技能新增
+    "知识增强诊断"路径——诊断从 `robot_topology diagnose` 开始，用标准工具
+    （node_info/topic_info/topic_echo）下钻被标记节点，并以 `learn` 记录重要
+    `new` 节点收尾（闭环：知识库每会话变好，诊断一次比一次快）。
+  - README 双语拓扑章节同步（"知识库是被消费的，而非只存不读"）。
+
+### Changed
+
+- 工具数 51 → 51（`robot_topology` 扩展 action=diagnose）；测试 113 → **114**
+  （diagnose 只读解析/交叉比对断言）；typecheck/test/build 全绿。
+
 ## [0.14.1] - 2026-08-23
 
 ### Added

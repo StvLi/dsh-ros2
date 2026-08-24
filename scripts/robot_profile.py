@@ -442,6 +442,126 @@ def topo_show(name: str) -> dict:
     }
 
 
+def _norm_node(name: str) -> str:
+    """节点名归一化：去空白与前导 /。"""
+    return str(name).strip().lstrip("/")
+
+
+def _live_node_info(node: str, timeout: int = 10):
+    """Best-effort `ros2 node info` parse: {pub, sub, srv, act} topic lists.
+    Handles the modern output (Publishers/Subscribers/Service Servers/Action
+    Servers + `name: type` entries; client-side sections are ignored)."""
+    ok, out, _ = ros2("node", "info", node, timeout=timeout)
+    if not ok:
+        return None
+    result = {"pub": [], "sub": [], "srv": [], "act": []}
+    section = None
+    for line in out.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("Publishers:"):
+            section = "pub"
+            continue
+        if stripped.startswith("Subscribers:"):
+            section = "sub"
+            continue
+        if stripped.startswith("Service Servers:"):
+            section = "srv"
+            continue
+        if stripped.startswith("Action Servers:"):
+            section = "act"
+            continue
+        if stripped.startswith("Service Clients:") or stripped.startswith("Action Clients:"):
+            section = None
+            continue
+        if section and stripped:
+            token = stripped.split(":")[0].strip().lstrip("*").strip()
+            if token:
+                result[section].append(token)
+    return result
+    return result
+
+
+def topo_diagnose(name: str) -> dict:
+    """知识增强诊断（只读，不改档案）。
+
+    载入档案知识库（已学节点 + 聚合快照），与实时 ROS2 图交叉比对：
+      - missing：已学但当前不在线的节点（控制器/发布者掉线？）——诊断重点；
+      - new：当前在线但未学习/未快照的节点（提示可 robot_topology learn）；
+      - matched + drift：已学且在线节点的期望 pub/sub/srv/act vs 实时连接差异；
+      - topic_drift：聚合快照话题 vs 实时话题差异。
+    让"使用中渐进学习"的知识库真正参与诊断，而非只存不读。"""
+    data, path = _read_profile(name)
+    if data is None:
+        return {"ok": False, "error": f"未找到档案 {name}（先 register）"}
+    topo = data.get("robot", {}).get("topology", {})
+    learned = topo.get("nodes", {}) or {}
+    snapshot = topo.get("snapshot", {}) or {}
+
+    ok, out, _ = ros2("node", "list")
+    live_nodes = [_norm_node(l) for l in out.splitlines() if l.strip()] if ok else []
+    live_set = set(live_nodes)
+    known_set = set(_norm_node(n) for n in learned) | set(_norm_node(n) for n in snapshot.get("nodes", []))
+
+    missing = [
+        {"name": n, "role": e.get("role", ""), "description": e.get("description", ""),
+         "learned_at": e.get("learned_at", "")}
+        for n, e in learned.items() if _norm_node(n) not in live_set
+    ]
+    new_nodes = [n for n in live_nodes if n not in known_set]
+
+    matched, drift_count = [], 0
+    for n, e in learned.items():
+        norm = _norm_node(n)
+        if norm not in live_set:
+            continue
+        # ros2 node info requires the leading '/' (e.g. /tt_talker)
+        info = _live_node_info("/" + norm)
+        if info is None:
+            matched.append({"name": n, "role": e.get("role", ""), "description": e.get("description", ""),
+                            "live": None, "drift": {"error": "node info 不可用"}})
+            continue
+        drift = {}
+        for kind in ("pub", "sub", "srv", "act"):
+            expected = set(e.get(kind, []) or [])
+            actual = set(info[kind])
+            d_missing, d_new = sorted(expected - actual), sorted(actual - expected)
+            if d_missing or d_new:
+                drift[kind] = {"missing": d_missing, "new": d_new}
+                drift_count += 1
+        matched.append({"name": n, "role": e.get("role", ""), "description": e.get("description", ""),
+                        "live": info, "drift": drift})
+
+    snap_topics = set(snapshot.get("topics", []) or [])
+    topic_drift = {}
+    ok_t, out_t, _ = ros2("topic", "list", "-t")
+    if ok_t:
+        live_topics = sorted({l.split()[0] for l in out_t.splitlines() if l.strip()})
+        live_topic_set = set(live_topics)
+        if snap_topics:
+            topic_drift = {"missing": sorted(snap_topics - live_topic_set),
+                           "new": sorted(live_topic_set - snap_topics)}
+
+    return {
+        "ok": True,
+        "knowledge": {
+            "learned_nodes": {n: {k: e.get(k) for k in ("role", "description")} for n, e in learned.items()},
+            "learned_count": len(learned),
+            "snapshot_summary": {"nodes": len(snapshot.get("nodes", []) or []),
+                                 "topics": len(snap_topics),
+                                 "snapshot_at": snapshot.get("snapshot_at", "")},
+        },
+        "live": {"nodes": live_nodes, "count": len(live_nodes)},
+        "missing": missing,
+        "new": new_nodes,
+        "matched": matched,
+        "topic_drift": topic_drift,
+        "summary": {"learned": len(learned), "live": len(live_nodes),
+                    "missing": len(missing), "new": len(new_nodes), "drift": drift_count},
+        "profile_path": path,
+        "hint": "诊断顺序：先看 missing（已学节点掉线）→ new（新节点，可 learn 记录角色）→ drift（期望 vs 实际连接变化）→ topic_drift（聚合层话题变化）。",
+    }
+
+
 def register(name: str, urdf: str, srdf: str, description: str) -> dict:
     profile_dir = os.path.dirname(os.path.join(DEFAULT_DIR, name + ".yaml"))
     os.makedirs(profile_dir, exist_ok=True)
@@ -522,7 +642,7 @@ def main():
     ap.add_argument("--name", default="")
     ap.add_argument("--urdf", default="")
     ap.add_argument("--srdf", default="")
-    ap.add_argument("--topology-action", default="show", choices=["snapshot", "learn", "show"])
+    ap.add_argument("--topology-action", default="show", choices=["snapshot", "learn", "show", "diagnose"])
     ap.add_argument("--safety-action", default="show", choices=["show", "set"])
     ap.add_argument("--key", default="")
     ap.add_argument("--value", default="")
@@ -558,6 +678,11 @@ def main():
                 return 1
             out = topo_learn(args.name, args.node, args.role, args.description,
                              args.pub, args.sub, args.srv, args.act)
+        elif topo_action == "diagnose":
+            if not args.name:
+                print(json.dumps({"ok": False, "error": "topology diagnose 需要 --name"}))
+                return 1
+            out = topo_diagnose(args.name)
         else:  # show
             out = topo_show(args.name)
     elif args.action == "register":

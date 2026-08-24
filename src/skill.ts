@@ -24,6 +24,7 @@ You have a read-only ROS2 tool set (all commands run as \`ros2\`/\`colcon\`/\`ro
 | Which nodes are running | \`ros2_node_list\` |
 | What a node publishes/subscribes/serves | \`ros2_node_info\` (\`verbose\` for types) |
 | Whole-system topology at a glance | \`ros2_graph\` (folds node info into JSON) |
+| Knowledge-augmented diagnosis (registered robot) | \`robot_topology {robot, action: "diagnose"}\` (cross-references the learned knowledge base + snapshot against the LIVE graph) |
 | Topic inventory with types | \`ros2_topic_list\` |
 | Topic metadata / QoS | \`ros2_topic_info\` |
 | Sample one message | \`ros2_topic_echo\` (\`field\` narrows big messages, e.g. \`position\`) |
@@ -44,6 +45,30 @@ You have a read-only ROS2 tool set (all commands run as \`ros2\`/\`colcon\`/\`ro
 5. **Dependency / build problems:** \`ros2_rosdep_check\` first (missing deps), then \`ros2_pkg_list\` + \`ros2_colcon_list\` to locate packages.
 6. **Tool results:** every tool returns \`{ok, tool, command, data}\`. \`ok:false\` with \`error.code\` \`TIMEOUT\` means the command hung (common for discovery); retry once or widen \`timeoutMs\`. stderr noise like \`RTPS_TRANSPORT_SHM\`/FastDDS SHM warnings is harmless and dropped unless configured otherwise.
 7. **Read-only contract:** all tools in this skill are read-only. Do NOT use them to modify the system; that is L2 scope.
+
+## Knowledge-augmented diagnosis (robot profile topology)
+
+If a robot profile is registered (\`robot_load\` lists one, or the user names a
+robot), **consume the progressive topology knowledge base FIRST** — it turns raw
+node names into interpretable diagnostics:
+
+1. Run \`robot_topology {robot, action: "diagnose"}\` (read-only) — it
+   cross-references the knowledge base (learned nodes + aggregate snapshot)
+   against the LIVE graph:
+   - \`missing\`: learned nodes that are offline now (controllers /
+     publishers down?) — highest priority;
+   - \`new\`: live nodes not in the knowledge base — expected or not? Record
+     important ones with \`robot_topology {action: "learn", node, role,
+     description, pub, sub, srv, act}\`;
+   - \`matched[].drift\`: per learned node, expected pub/sub/srv/act vs actual —
+     missing topics mean a connection is gone; new topics mean the node
+     changed since it was learned;
+   - \`topic_drift\`: aggregate snapshot topics vs live topics.
+2. Narrow down with the standard tools (\`ros2_node_info\`,
+   \`ros2_topic_info\`, \`ros2_topic_echo\`) on the flagged nodes.
+3. **Close the loop**: after diagnosis, \`learn\` any important \`new\` nodes so
+   the knowledge base improves with every session (it is progressively updated
+   exactly for this).
 
 ## ROS2 missing on the host (one-click install)
 
@@ -226,6 +251,15 @@ with the known facts instead of re-discovering.
      (calibrated via robot-registration) — do not guess.
 4. **Fallbacks**: if the profile is stale (TF/URDF changed), re-register
    (robot-registration flow) rather than hacking around it.
+
+## Knowledge-driven diagnostics (consume the knowledge base)
+
+After loading the profile, run \`robot_topology {robot, action: "diagnose"}\`
+(read-only): it cross-references the learned nodes + snapshot against the live
+graph and reports \`missing\` (learned nodes offline), \`new\` (unlearned nodes —
+learn the important ones), \`matched[].drift\` (expected vs actual connections)
+and \`topic_drift\`. Use this as the first step of any robot diagnosis — the
+knowledge base exists to be consumed.
 
 ## Communication topology (progressive, strictly structured)
 

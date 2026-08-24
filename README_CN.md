@@ -283,7 +283,7 @@ cd /tmp/vlm_ws && colcon build --symlink-install && source install/setup.bash
 | --- | --- |
 | `robot_register`（L2） | 采集本体信息（URDF link/joint、TF 根、相机、MoveIt SRDF 组、**自动联动零位语义校准**与通用 **`safety` 段**——URDF 派生限位）写入档案；随后自动拉起 safety_monitor（`startSafety: false` 可关） |
 | `robot_load`（L1） | 按名加载档案为结构化 JSON——快速路径，无需重新发现；name 为空列出全部 |
-| `robot_topology`（L1/L2） | 通信拓扑：`snapshot`（L2，聚合清单）、`learn`（L2，单个重要节点的角色/描述 + pub/sub/srv/act，严格 schema）、`show`（L1，读回） |
+| `robot_topology`（L1/L2） | 通信拓扑：`snapshot`（L2，聚合清单）、`learn`（L2，单个重要节点的角色/描述 + pub/sub/srv/act，严格 schema）、`show`（L1，读回）、**`diagnose`（L1——知识增强诊断：知识库 + 快照 × 实时图交叉比对：missing / new / drift / topic_drift）** |
 | `ros2_zero_pose_semantics`（L2） | 经"渲染 + VLM + 使用者确认"校准零位（臂/肘/手掌组合或自定义文字）；档案自动纳入 |
 
 配套两个内置 skill 完成闭环：**`robot-registration`**（首接触流程：问名称/URDF →
@@ -294,6 +294,18 @@ cd /tmp/vlm_ws && colcon build --symlink-install && source install/setup.bash
 拓扑）与 `zero-pose.yaml`（校准）。`robot_register` 固化本体；`robot_topology
 snapshot` 固化聚合层；`robot_topology learn` 在使用中逐个追加重要节点（幂等合并）。
 `robot_load` 与 `robot_topology show` 即时读回——一次调用替代 N 次发现。
+
+**知识库是被消费的，而非只存不读。** `robot_topology diagnose`（L1 只读）是
+**知识增强诊断**的入口：载入已学节点 + 快照，与实时 ROS2 图交叉比对——
+
+- `missing`：已学但当前不在线的节点（控制器/发布者掉线）——最高优先级；
+- `new`：在线但未入知识库的节点（learn 候选）；
+- `matched[].drift`：每个已学节点的期望 pub/sub/srv/act vs 实时（缺话题 = 连接
+  消失；多话题 = 节点已变化）；
+- `topic_drift`：聚合快照话题 vs 实时话题。
+
+`ros2-diagnostics` 与 `robot-retrieval` 两个 skill 都以 `diagnose` 开始诊断，
+并用 `learn` 记录重要的 `new` 节点收尾——知识库每次会话都在变好，诊断一次比一次快。
 
 ---
 
@@ -345,7 +357,7 @@ dsh-ros2/
 ├── offscreen/            # ROS2 包 dsh_ros2_rviz_offscreen（C++）：rviz_offscreen_node（OGRE 离屏渲染 → /rviz/scene）
 ├── safety/               # ROS2 包 dsh_ros2_safety（Python）：safety_monitor 节点 + safety_core（纯逻辑，--selftest）+ safety_vlm_arbitrate + SafetyState/Event msg + Unlock/SetLock srv
 ├── docs/                 # 架构（architecture.md）· 兼容基线（compatibility.md）· 安全（safety.md / safety-handover.md / safety-todo.md / safety-gpt-review.md）· 实测（test-robot-state-vision.md / test-gpu-passthrough.md）· 截图
-├── tests/                # vitest（113 例，CLI 输出 mock）
+├── tests/                # vitest（114 例，CLI 输出 mock）
 ├── .github/workflows/    # CI：Node 22/24 → typecheck/test/build/pack 校验
 ├── PUBLISH.md            # 开源发布清单（GitHub + npm + DSH 社区目录）
 └── CHANGELOG.md          # 版本变更记录（Keep a Changelog）
@@ -371,7 +383,7 @@ dsh-ros2/
 ```bash
 pnpm install
 pnpm run typecheck   # tsc --noEmit
-pnpm run test        # vitest（113 例；CLI 输出 mock）
+pnpm run test        # vitest（114 例；CLI 输出 mock）
 pnpm run build       # tsc -> lib/ + lib/types/
 ```
 

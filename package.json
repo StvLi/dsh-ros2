@@ -1,6 +1,6 @@
 {
   "name": "dsh-ros2",
-  "version": "0.14.1",
+  "version": "0.15.0",
   "description": "ROS2 debugging tools and diagnostics skills for DeepSeek Harness (DSH): package/workspace/dependency inspection, node/topic/service/action/param/interface enumeration, topic sampling, TF tree, graph topology JSON, approval-gated builds and message scaffolding, GUI screenshot and multimodal vision observation, headless realtime vision (parallel VLM ROS2 node + image-topic acquisition), offscreen RViz2 scene rendering, a generic real-time safety framework (safety_monitor node with latched /safety/state, motion/feedback/watchdog/torque checkers, VLM semantic arbitration — see docs/safety-handover.md), and deterministic pre-execution motion validation (motion_validator: plan → validate → approve → execute → verify — see docs/safety.md).",
   "type": "module",
   "main": "./lib/index.js",

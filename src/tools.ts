@@ -1929,10 +1929,11 @@ function makeRobotTopologyTool(deps: ToolDeps) {
       'Robot communication topology, strictly structured in the robot profile (trade-off between full verbose ROS2 graphs and zero knowledge). ' +
       'snapshot (approval): record the aggregate layer — current node/topic/service lists (light, not per-node deep dive). ' +
       'learn (approval): progressively record ONE important node\'s role/description and its connections (pub/sub/srv/act, comma-separated) — do this as you work with the robot instead of dumping everything. ' +
-      'show (read-only): read back learned nodes (with functions) + snapshot summary. robot must be registered first.',
+      'show (read-only): read back learned nodes (with functions) + snapshot summary. ' +
+      'diagnose (read-only): knowledge-augmented diagnosis — cross-reference the learned knowledge base + aggregate snapshot against the LIVE ros2 graph: missing (learned nodes offline), new (unlearned nodes, learn candidates), drift (expected vs actual pub/sub/srv/act), topic_drift. robot must be registered first.',
     parameters: {
       robot: { type: 'string', description: 'Robot profile name (registered via robot_register).' },
-      action: { type: 'string', enum: ['snapshot', 'learn', 'show'], default: 'show', description: 'snapshot | learn | show.' },
+      action: { type: 'string', enum: ['snapshot', 'learn', 'show', 'diagnose'], default: 'show', description: 'snapshot | learn | show | diagnose.' },
       node: { type: 'string', default: '', description: 'learn: node name to record (e.g. /robot_state_publisher).' },
       role: { type: 'string', default: '', description: 'learn: node role (e.g. tf-publisher, lifecycle, planner).' },
       description: { type: 'string', default: '', description: 'learn: what this node does.' },
@@ -1948,8 +1949,8 @@ function makeRobotTopologyTool(deps: ToolDeps) {
       const action = String(params.action ?? 'show')
       if (!robot) return toolError('robot_topology', 'robot_topology', 'MISSING_PARAM', 'robot 必填（已注册的档案名）')
       const command = `robot_topology robot=${robot} action=${action}`
-      if (action === 'show') {
-        const res = await deps.run('python3', [scriptPath('robot_profile.py'), 'topology', '--name', robot, '--topology-action', 'show'], { timeoutMs: 30000 })
+      if (action === 'show' || action === 'diagnose') {
+        const res = await deps.run('python3', [scriptPath('robot_profile.py'), 'topology', '--name', robot, '--topology-action', action], { timeoutMs: 60000 })
         if (!res.ok && res.stdout.trim().length === 0) return toolError('robot_topology', command, res.error ?? 'COMMAND_FAILED', res.stderr.trim())
         return okResult('robot_topology', command, parseJsonOrRaw(res.stdout))
       }

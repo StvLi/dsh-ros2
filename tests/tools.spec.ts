@@ -487,6 +487,31 @@ describe('robot_topology', () => {
     expect((out.data as { learned_nodes: Record<string, unknown> }).learned_nodes).toHaveProperty('/robot_state_publisher')
   })
 
+  it('diagnose is read-only and cross-references knowledge against the live graph', async () => {
+    const run = makeRun(() => ({
+      stdout: JSON.stringify({
+        ok: true,
+        knowledge: { learned_count: 1, learned_nodes: { '/controller_manager': { role: 'controller' } }, snapshot_summary: { nodes: 18, topics: 32 } },
+        live: { nodes: ['tt_talker', 'controller_manager'], count: 2 },
+        missing: [{ name: '/old_node', role: 'planner' }],
+        new: ['tt_talker'],
+        matched: [{ name: '/controller_manager', role: 'controller', drift: { pub: { missing: ['/joint_states'] } } }],
+        topic_drift: { missing: ['/gone'], new: ['/chatter'] },
+        summary: { learned: 1, live: 2, missing: 1, new: 1, drift: 1 },
+      }),
+    }))
+    const out = await call('robot_topology', run, { robot: 'lite', action: 'diagnose' })
+    expect(out.ok).toBe(true)
+    const data = out.data as {
+      summary: { missing: number; new: number; drift: number }
+      missing: Array<{ name: string }>
+      matched: Array<{ drift: { pub: { missing: string[] } } }>
+    }
+    expect(data.summary).toMatchObject({ missing: 1, new: 1, drift: 1 })
+    expect(data.missing[0]?.name).toBe('/old_node')
+    expect(data.matched[0]?.drift.pub.missing).toContain('/joint_states')
+  })
+
   it('snapshot and learn require approval and a robot', async () => {
     const run = makeRun(() => ({ stdout: '' }))
     const missing = await call('robot_topology', run, {})
