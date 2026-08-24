@@ -1930,10 +1930,11 @@ function makeRobotTopologyTool(deps: ToolDeps) {
       'snapshot (approval): record the aggregate layer — current node/topic/service lists (light, not per-node deep dive). ' +
       'learn (approval): progressively record ONE important node\'s role/description and its connections (pub/sub/srv/act, comma-separated) — do this as you work with the robot instead of dumping everything. ' +
       'show (read-only): read back learned nodes (with functions) + snapshot summary. ' +
-      'diagnose (read-only): knowledge-augmented diagnosis — cross-reference the learned knowledge base + aggregate snapshot against the LIVE ros2 graph: missing (learned nodes offline), new (unlearned nodes, learn candidates), drift (expected vs actual pub/sub/srv/act), topic_drift. robot must be registered first.',
+      'diagnose (read-only): knowledge-augmented diagnosis — cross-reference the learned knowledge base + aggregate snapshot against the LIVE ros2 graph: missing (learned nodes offline), new (unlearned nodes, learn candidates), drift (expected vs actual pub/sub/srv/act), topic_drift. ' +
+      'search (read-only): efficient retrieval in the knowledge archive — reverse-lookup by topic ("which learned node uses /joint_states?") or keyword match on name/role/description/connections (field to limit), for quick reference while debugging. robot must be registered first.',
     parameters: {
       robot: { type: 'string', description: 'Robot profile name (registered via robot_register).' },
-      action: { type: 'string', enum: ['snapshot', 'learn', 'show', 'diagnose'], default: 'show', description: 'snapshot | learn | show | diagnose.' },
+      action: { type: 'string', enum: ['snapshot', 'learn', 'show', 'diagnose', 'search'], default: 'show', description: 'snapshot | learn | show | diagnose | search.' },
       node: { type: 'string', default: '', description: 'learn: node name to record (e.g. /robot_state_publisher).' },
       role: { type: 'string', default: '', description: 'learn: node role (e.g. tf-publisher, lifecycle, planner).' },
       description: { type: 'string', default: '', description: 'learn: what this node does.' },
@@ -1941,6 +1942,9 @@ function makeRobotTopologyTool(deps: ToolDeps) {
       sub: { type: 'string', default: '', description: 'learn: comma-separated topics it subscribes.' },
       srv: { type: 'string', default: '', description: 'learn: comma-separated services it provides.' },
       act: { type: 'string', default: '', description: 'learn: comma-separated actions it provides.' },
+      query: { type: 'string', default: '', description: 'search: keyword matched against name/role/description/connections (case-insensitive).' },
+      field: { type: 'string', default: 'all', description: 'search: limit match to one field — name | role | description | pub | sub | srv | act | all (default).' },
+      topic: { type: 'string', default: '', description: 'search: reverse lookup — find learned nodes whose pub/sub/srv/act contains this topic.' },
     },
     output: { schema: resultSchema, render: renderResult },
     async execute(args, exec) {
@@ -1949,8 +1953,14 @@ function makeRobotTopologyTool(deps: ToolDeps) {
       const action = String(params.action ?? 'show')
       if (!robot) return toolError('robot_topology', 'robot_topology', 'MISSING_PARAM', 'robot 必填（已注册的档案名）')
       const command = `robot_topology robot=${robot} action=${action}`
-      if (action === 'show' || action === 'diagnose') {
-        const res = await deps.run('python3', [scriptPath('robot_profile.py'), 'topology', '--name', robot, '--topology-action', action], { timeoutMs: 60000 })
+      if (action === 'show' || action === 'diagnose' || action === 'search') {
+        const helperArgs = [scriptPath('robot_profile.py'), 'topology', '--name', robot, '--topology-action', action]
+        if (action === 'search') {
+          if (strOrUndefined(params.query)) helperArgs.push('--query', strOrUndefined(params.query)!)
+          if (strOrUndefined(params.field)) helperArgs.push('--field', strOrUndefined(params.field)!)
+          if (strOrUndefined(params.topic)) helperArgs.push('--topic', strOrUndefined(params.topic)!)
+        }
+        const res = await deps.run('python3', helperArgs, { timeoutMs: 60000 })
         if (!res.ok && res.stdout.trim().length === 0) return toolError('robot_topology', command, res.error ?? 'COMMAND_FAILED', res.stderr.trim())
         return okResult('robot_topology', command, parseJsonOrRaw(res.stdout))
       }

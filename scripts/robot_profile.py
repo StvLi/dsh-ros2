@@ -562,6 +562,66 @@ def topo_diagnose(name: str) -> dict:
     }
 
 
+SEARCH_FIELDS = ("name", "role", "description", "pub", "sub", "srv", "act")
+
+
+def topo_search(name: str, query: str = "", field: str = "all", topic: str = "") -> dict:
+    """知识库检索（只读，供 Agent 高效取参考信息）。
+
+    两种检索方式：
+      - 按 topic 反查：哪些已学节点连接了该话题（pub/sub/srv/act 任一包含），
+        附带角色/描述——"谁在发 /joint_states？"；
+      - 按关键字匹配：query 命中 name/role/description/pub/sub/srv/act
+        （field 限定单个字段，默认 all）。
+    大小写不敏感子串匹配；返回结构化命中，供 debug 参考。"""
+    data, path = _read_profile(name)
+    if data is None:
+        return {"ok": False, "error": f"未找到档案 {name}（先 register）"}
+    learned = data.get("robot", {}).get("topology", {}).get("nodes", {}) or {}
+    if not learned:
+        return {"ok": True, "query": query, "field": field, "topic": topic,
+                "matches": [], "count": 0,
+                "note": "知识库为空——先用 robot_topology learn/snapshot 记录节点", "profile_path": path}
+
+    matches = []
+    if topic:
+        needle = topic.lower()
+        for n, e in learned.items():
+            hit = None
+            for k in ("pub", "sub", "srv", "act"):
+                if any(needle in t.lower() for t in (e.get(k) or [])):
+                    hit = k
+                    break
+            if hit:
+                matches.append({"name": n, "role": e.get("role", ""), "description": e.get("description", ""),
+                                "pub": e.get("pub", []), "sub": e.get("sub", []), "srv": e.get("srv", []),
+                                "act": e.get("act", []), "learned_at": e.get("learned_at", ""),
+                                "matched": f"{hit}包含 {topic}"})
+    else:
+        needle = (query or "").lower()
+        if not needle:
+            return {"ok": True, "query": query, "field": field, "topic": topic,
+                    "matches": [], "count": 0, "error": "search 需要 query 或 topic 之一", "profile_path": path}
+        fields = [f for f in SEARCH_FIELDS if field in ("all", f)]
+        for n, e in learned.items():
+            hit_field = None
+            for f in fields:
+                if f == "name":
+                    haystack = [n]
+                else:
+                    haystack = e.get(f, []) if isinstance(e.get(f), list) else [e.get(f, "")]
+                if any(needle in str(h).lower() for h in haystack):
+                    hit_field = f
+                    break
+            if hit_field:
+                matches.append({"name": n, "role": e.get("role", ""), "description": e.get("description", ""),
+                                "pub": e.get("pub", []), "sub": e.get("sub", []), "srv": e.get("srv", []),
+                                "act": e.get("act", []), "learned_at": e.get("learned_at", ""),
+                                "matched": f"字段 {hit_field} 命中 '{query}'"})
+    return {"ok": True, "query": query, "field": field, "topic": topic,
+            "matches": matches, "count": len(matches), "profile_path": path}
+
+
 def register(name: str, urdf: str, srdf: str, description: str) -> dict:
     profile_dir = os.path.dirname(os.path.join(DEFAULT_DIR, name + ".yaml"))
     os.makedirs(profile_dir, exist_ok=True)
@@ -642,9 +702,12 @@ def main():
     ap.add_argument("--name", default="")
     ap.add_argument("--urdf", default="")
     ap.add_argument("--srdf", default="")
-    ap.add_argument("--topology-action", default="show", choices=["snapshot", "learn", "show", "diagnose"])
+    ap.add_argument("--topology-action", default="show", choices=["snapshot", "learn", "show", "diagnose", "search"])
     ap.add_argument("--safety-action", default="show", choices=["show", "set"])
     ap.add_argument("--key", default="")
+    ap.add_argument("--query", default="")
+    ap.add_argument("--field", default="all")
+    ap.add_argument("--topic", default="")
     ap.add_argument("--value", default="")
     ap.add_argument("--node", default="")
     ap.add_argument("--role", default="")
@@ -683,6 +746,11 @@ def main():
                 print(json.dumps({"ok": False, "error": "topology diagnose 需要 --name"}))
                 return 1
             out = topo_diagnose(args.name)
+        elif topo_action == "search":
+            if not args.name:
+                print(json.dumps({"ok": False, "error": "topology search 需要 --name"}))
+                return 1
+            out = topo_search(args.name, args.query, args.field, args.topic)
         else:  # show
             out = topo_show(args.name)
     elif args.action == "register":

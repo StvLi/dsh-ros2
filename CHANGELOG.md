@@ -22,15 +22,22 @@ All notable changes to **dsh-ros2** are documented here. Format follows
   - `robot_profile.py` 新增 `_live_node_info`（兼容现代 `ros2 node info`
     Publishers/Subscribers/Service Servers/Action Servers + `name: type` 输出格式）。
   - **技能整合**：`ros2-diagnostics` 与 `robot-retrieval` 技能新增
-    "知识增强诊断"路径——诊断从 `robot_topology diagnose` 开始，用标准工具
-    （node_info/topic_info/topic_echo）下钻被标记节点，并以 `learn` 记录重要
-    `new` 节点收尾（闭环：知识库每会话变好，诊断一次比一次快）。
+    "知识驱动诊断"路径——**先从知识档案检索参考**（search），再用 diagnose
+    交叉比对实时图，标准工具下钻，以 `learn` 记录重要 `new` 节点收尾
+    （闭环：知识库每会话变好，诊断一次比一次快）。
+  - **`robot_topology search`**（L1 只读，`robot_profile.py topo_search`）——
+    **知识库高效检索**（Agent debug 时取参考信息）：
+    - 按 `topic` 反查："谁在发/订阅/服务 `/joint_states`？"——返回命中已学节点
+      及其角色/描述/连接（pub/sub/srv/act 任一包含即命中）；
+    - 按 `query` + `field`（name|role|description|pub|sub|srv|act|all）关键字
+      匹配，大小写不敏感；
+    - 结构化命中（含 matched 字段说明），一次调用替代全量 show 后人工过滤。
   - README 双语拓扑章节同步（"知识库是被消费的，而非只存不读"）。
 
 ### Changed
 
-- 工具数 51 → 51（`robot_topology` 扩展 action=diagnose）；测试 113 → **114**
-  （diagnose 只读解析/交叉比对断言）；typecheck/test/build 全绿。
+- 工具数 51 → 51（`robot_topology` 扩展 action=diagnose/search）；测试 113 →
+  **115**（diagnose 交叉比对 + search 检索断言）；typecheck/test/build 全绿。
 
 ## [0.14.1] - 2026-08-23
 

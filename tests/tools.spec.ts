@@ -512,6 +512,25 @@ describe('robot_topology', () => {
     expect(data.matched[0]?.drift.pub.missing).toContain('/joint_states')
   })
 
+  it('search retrieves knowledge by topic and keyword (read-only)', async () => {
+    const run = makeRun(() => ({
+      stdout: JSON.stringify({
+        ok: true, query: '', field: 'all', topic: '/joint_states',
+        matches: [{ name: '/controller_manager', role: 'controller', description: '硬件抽象与安全', pub: ['/joint_states'], matched: 'pub包含 /joint_states' }],
+        count: 1,
+      }),
+    }))
+    const byTopic = await call('robot_topology', run, { robot: 'lite', action: 'search', topic: '/joint_states' })
+    expect(byTopic.ok).toBe(true)
+    const data = byTopic.data as { count: number; matches: Array<{ name: string; matched: string }> }
+    expect(data.count).toBe(1)
+    expect(data.matches[0]?.name).toBe('/controller_manager')
+    expect(data.matches[0]?.matched).toContain('/joint_states')
+    const byRole = await call('robot_topology', run, { robot: 'lite', action: 'search', query: 'controller', field: 'role' })
+    expect(byRole.ok).toBe(true)
+    expect(byRole.data).toMatchObject({ count: 1 })
+  })
+
   it('snapshot and learn require approval and a robot', async () => {
     const run = makeRun(() => ({ stdout: '' }))
     const missing = await call('robot_topology', run, {})

@@ -304,7 +304,7 @@ important nodes as you actually work with them.
 | --- | --- |
 | `robot_register` (L2) | Collect body info (URDF links/joints, TF root, cameras, MoveIt SRDF groups, **auto-links the zero-pose calibration** and a generic **`safety` section** with URDF-derived limits) into the profile; auto-launches the safety monitor (`startSafety: false` to skip) |
 | `robot_load` (L1) | Load the profile as structured JSON — the fast path, no rediscovery; empty name lists all |
-| `robot_topology` (L1/L2) | Comms graph: `snapshot` (L2, aggregate lists), `learn` (L2, one important node's role/description + pub/sub/srv/act, strict schema), `show` (L1, read back), **`diagnose` (L1 — knowledge-augmented diagnosis: cross-references the learned knowledge base + snapshot against the LIVE graph: missing / new / drift / topic_drift)** |
+| `robot_topology` (L1/L2) | Comms graph: `snapshot` (L2, aggregate lists), `learn` (L2, one important node's role/description + pub/sub/srv/act, strict schema), `show` (L1, read back), **`diagnose` (L1 — knowledge-augmented diagnosis: cross-references the learned knowledge base + snapshot against the LIVE graph: missing / new / drift / topic_drift)**, **`search` (L1 — efficient retrieval in the knowledge archive: reverse-lookup by topic / keyword match on name/role/description/connections)** |
 | `ros2_zero_pose_semantics` (L2) | Calibrate zero pose via render + VLM + user confirm (arm/elbow/palm combos or free text); the profile auto-includes it |
 
 Two bundled skills complete the workflow: **`robot-registration`** (first-contact
@@ -384,7 +384,7 @@ dsh-ros2/
 ├── offscreen/            # ROS2 package dsh_ros2_rviz_offscreen (C++): rviz_offscreen_node (OGRE offscreen render → /rviz/scene)
 ├── safety/               # ROS2 package dsh_ros2_safety (Python): safety_monitor node + safety_core (pure logic, --selftest) + safety_vlm_arbitrate + SafetyState/Event msgs + Unlock/SetLock srvs
 ├── docs/                 # architecture.md · compatibility.md · safety.md / safety-handover.md / safety-todo.md / safety-gpt-review.md · test-robot-state-vision.md / test-gpu-passthrough.md · screenshots
-├── tests/                # vitest (114 cases; CLI outputs mocked)
+├── tests/                # vitest (115 cases; CLI outputs mocked)
 ├── .github/workflows/    # CI: Node 22/24 → typecheck/test/build/pack validation
 ├── PUBLISH.md            # open-source publishing checklist (GitHub + npm + DSH community)
 └── CHANGELOG.md          # version history (Keep a Changelog)
@@ -410,7 +410,7 @@ dsh-ros2/
 ```bash
 pnpm install
 pnpm run typecheck   # tsc --noEmit
-pnpm run test        # vitest (114 cases; CLI outputs mocked)
+pnpm run test        # vitest (115 cases; CLI outputs mocked)
 pnpm run build       # tsc -> lib/ + lib/types/
 ```
 
