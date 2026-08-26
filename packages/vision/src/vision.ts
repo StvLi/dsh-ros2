@@ -1,23 +1,8 @@
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
+import { type DescribeOptions, type VisionConfig, type VisionProvider } from 'dsh-ros2-common'
 
-/** Pluggable vision configuration (P7: keys are user-supplied, never logged). */
-export interface VisionConfig {
-  provider: string
-  apiKey?: string
-  model?: string
-  baseUrl?: string
-}
-
-export interface DescribeOptions {
-  signal?: AbortSignal
-}
-
-/** A vision backend that turns an image file + prompt into a text description. */
-export interface VisionProvider {
-  readonly name: string
-  describe(imagePath: string, prompt: string, opts?: DescribeOptions): Promise<string>
-}
+export type { DescribeOptions, VisionConfig, VisionProvider }
 
 export function createVisionProvider(config: VisionConfig): VisionProvider {
   switch (config.provider) {

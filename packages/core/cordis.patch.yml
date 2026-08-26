@@ -1,0 +1,4 @@
+- insert:
+    - id: dsh-ros2-core
+      name: dsh-ros2-core
+      config: {}

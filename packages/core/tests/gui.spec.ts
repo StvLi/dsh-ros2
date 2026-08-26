@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { GuiManager, type InteractFn, type ScreenshotFn, type SpawnedProcess, type SpawnFn, type WindowCmdFn } from '../src/gui.js'
-import { MockVisionProvider, createVisionProvider } from '../src/vision.js'
-import { createRos2Tools, type ToolDeps, type ToolResult } from '../src/tools.js'
+import { type VisionProvider } from 'dsh-ros2-common'
+// CoreToolDeps comes from ../src/tools.js (createRos2Tools accepts plain ToolDeps)
+import { createRos2Tools } from '../src/tools.js'
+import { type ToolDeps, type ToolResult } from 'dsh-ros2-common'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -245,44 +247,20 @@ describe('GuiManager', () => {
 
 // ── vision providers ─────────────────────────────────────────────────────
 
-describe('vision providers', () => {
-  it('mock provider returns a description', async () => {
-    const provider = createVisionProvider({ provider: 'mock' })
-    const description = await provider.describe('/tmp/x.png', 'what is this?')
-    expect(description).toContain('[mock vision]')
-  })
 
-  it('gemini/openai require an apiKey', () => {
-    expect(() => createVisionProvider({ provider: 'gemini' })).toThrow(/apiKey/)
-    expect(() => createVisionProvider({ provider: 'openai' })).toThrow(/apiKey/)
-    expect(() => createVisionProvider({ provider: 'bogus' })).toThrow(/unknown vision provider/)
-  })
-
-  it('readImageBase64 reports mime by extension', async () => {
-    const dir = await mkdtemp(path.join(os.tmpdir(), 'dsh-vision-'))
-    try {
-      const png = path.join(dir, 'img.png')
-      const jpg = path.join(dir, 'img.jpg')
-      await writeFile(png, Buffer.from([0x89, 0x50, 0x4e, 0x47]))
-      await writeFile(jpg, Buffer.from([0xff, 0xd8]))
-      const { mime: pngMime, data } = await import('../src/vision.js').then((m) => m.readImageBase64(png))
-      expect(pngMime).toBe('image/png')
-      expect(data.length).toBeGreaterThan(0)
-      const { mime: jpgMime } = await import('../src/vision.js').then((m) => m.readImageBase64(jpg))
-      expect(jpgMime).toBe('image/jpeg')
-    } finally {
-      await rm(dir, { recursive: true, force: true })
-    }
-  })
-})
 
 // ── L3 tools ─────────────────────────────────────────────────────────────
 
 const execStub = { agent: { id: 'test' }, signal: new AbortController().signal } as never
 
+class LocalMockVision implements VisionProvider {
+  readonly name = 'mock'
+  async describe(): Promise<string> { return '[mock vision] ok' }
+}
+
 function visualDeps() {
   const { manager } = makeManager()
-  const deps: ToolDeps = { run: async () => ({ ok: true, command: '', stdout: '', stderr: '', exitCode: 0, timedOut: false, durationMs: 0 }), gui: manager, vision: new MockVisionProvider() }
+  const deps: ToolDeps = { run: async () => ({ ok: true, command: '', stdout: '', stderr: '', exitCode: 0, timedOut: false, durationMs: 0 }), gui: manager, vision: new LocalMockVision() }
   return { deps, manager }
 }
 
@@ -328,16 +306,6 @@ describe('L3 visualization tools', () => {
     expect(out.data).toMatchObject({ path: expect.stringContaining('.png') })
   })
 
-  it('ros2_vision_describe uses the provider; fails without one', async () => {
-    const { deps } = visualDeps()
-    const out = (await tool(deps, 'ros2_vision_describe').execute({ imagePath: '/tmp/x.png', prompt: 'describe' }, execStub)) as ToolResult
-    expect(out.ok).toBe(true)
-    expect(out.data).toMatchObject({ imagePath: '/tmp/x.png' })
-    expect((out.data as { description: string }).description).toContain('[mock vision]')
-    const bare: ToolDeps = { run: deps.run }
-    const noVision = (await tool(bare, 'ros2_vision_describe').execute({ imagePath: '/tmp/x.png' }, execStub)) as ToolResult
-    expect(noVision.error?.code).toBe('VISION_UNAVAILABLE')
-  })
 
   it('ros2_gui_observe starts, captures and describes', async () => {
     const { deps } = visualDeps()

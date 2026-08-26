@@ -1,0 +1,4 @@
+- insert:
+    - id: dsh-ros2-vision
+      name: dsh-ros2-vision
+      config: {}

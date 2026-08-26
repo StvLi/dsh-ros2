@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process'
 import { mkdir } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { runCommand, type RosResult } from './runner.js'
+import { runCommand, type RosResult } from 'dsh-ros2-common'
 
 /** One tracked GUI session started by the plugin. */
 export interface GuiSession {

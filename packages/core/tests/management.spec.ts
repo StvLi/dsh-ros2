@@ -2,8 +2,9 @@ import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { createRos2Tools, type JobsApi, type RunFn, type ToolDeps, type ToolResult } from '../src/tools.js'
-import type { RosResult } from '../src/runner.js'
+import { createRos2Tools } from '../src/tools.js'
+import { type JobsApi, type RunFn, type ToolDeps, type ToolResult } from 'dsh-ros2-common'
+import { type RosResult } from 'dsh-ros2-common'
 
 function makeRun(handler: (bin: string, args: string[]) => Partial<RosResult>): RunFn {
   return async (bin, args) => {

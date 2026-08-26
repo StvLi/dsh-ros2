@@ -1,72 +1,14 @@
 {
-  "name": "dsh-ros2",
-  "version": "0.15.0",
-  "description": "ROS2 debugging tools and diagnostics skills for DeepSeek Harness (DSH): package/workspace/dependency inspection, node/topic/service/action/param/interface enumeration, topic sampling, TF tree, graph topology JSON, approval-gated builds and message scaffolding, GUI screenshot and multimodal vision observation, headless realtime vision (parallel VLM ROS2 node + image-topic acquisition), offscreen RViz2 scene rendering, a generic real-time safety framework (safety_monitor node with latched /safety/state, motion/feedback/watchdog/torque checkers, VLM semantic arbitration — see docs/safety-handover.md), and deterministic pre-execution motion validation (motion_validator: plan → validate → approve → execute → verify — see docs/safety.md).",
-  "type": "module",
-  "main": "./lib/index.js",
-  "types": "./lib/types/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./lib/types/index.d.ts",
-      "default": "./lib/index.js"
-    },
-    "./package.json": "./package.json"
-  },
-  "files": [
-    "lib",
-    "cordis.patch.yml",
-    "README.md",
-    "LICENSE",
-    "scripts",
-    "safety"
-  ],
+  "name": "dsh-ros2-workspace",
+  "version": "0.0.0",
+  "private": true,
+  "description": "pnpm workspace for the dsh-ros2 plugin family (7 cordis bundles: common/core/profile/moveit/safety/vision/aggregate)",
   "scripts": {
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "build": "tsc -p tsconfig.build.json"
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "build": "pnpm -r build"
   },
   "engines": {
     "node": "^22.19.0 || >=24.0.0"
-  },
-  "keywords": [
-    "dsh",
-    "dsh-plugin",
-    "deepseek-harness",
-    "ros2",
-    "robot",
-    "diagnostics",
-    "plugin"
-  ],
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/StvLi/dsh-ros2.git"
-  },
-  "homepage": "https://github.com/StvLi/dsh-ros2",
-  "bugs": {
-    "url": "https://github.com/StvLi/dsh-ros2/issues"
-  },
-  "publishConfig": {
-    "access": "public"
-  },
-  "dsh": {
-    "bundle": {
-      "patch": "./cordis.patch.yml"
-    }
-  },
-  "dependencies": {
-    "@deepseek-ai/dsh-tools": "0.1.0-rc.6",
-    "@deepseek-ai/schemastery": "^3.18.1"
-  },
-  "peerDependencies": {
-    "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-skill": "0.1.0-rc.6"
-  },
-  "devDependencies": {
-    "@deepseek-ai/cordis": "4.0.1",
-    "@deepseek-ai/dsh-skill": "0.1.0-rc.6",
-    "@types/node": "^24.0.0",
-    "typescript": "^5.6.0",
-    "vitest": "^3.0.0"
   }
 }

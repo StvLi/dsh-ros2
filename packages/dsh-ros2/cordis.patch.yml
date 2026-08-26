@@ -1,0 +1,19 @@
+- insert:
+    - id: dsh-ros2
+      name: dsh-ros2
+      config: {}
+    - id: dsh-ros2-core
+      name: dsh-ros2-core
+      config: {}
+    - id: dsh-ros2-profile
+      name: dsh-ros2-profile
+      config: {}
+    - id: dsh-ros2-moveit
+      name: dsh-ros2-moveit
+      config: {}
+    - id: dsh-ros2-safety
+      name: dsh-ros2-safety
+      config: {}
+    - id: dsh-ros2-vision
+      name: dsh-ros2-vision
+      config: {}
