@@ -16,6 +16,7 @@
     "lib",
     "cordis.patch.yml",
     "safety",
+    "!safety/scripts/__pycache__",
     "README.md",
     "LICENSE"
   ],
