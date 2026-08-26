@@ -371,26 +371,40 @@ knowledge base improves with every session and every diagnosis gets faster.
 ## Project layout
 
 ```
-dsh-ros2/
-├── src/                  # DSH plugin core (TypeScript)
-│   ├── index.ts          # entry: registers 51 tools + 4 skills
-│   ├── tools.ts          # tool definitions (L1/L2/L3 params & command mapping)
-│   ├── vision.ts         # L4 vision tools (snapshot / analyze / topics)
-│   ├── gui.ts            # L3 GUI lifecycle & interaction
-│   ├── skill.ts          # 4 skills: diagnostics / vision / registration / retrieval
-│   ├── runner.ts         # command runner (timeout/log/approval/background-job seams)
-│   └── config.ts         # configuration read & validation
-├── vlm/                  # ROS2 package dsh_ros2_vlm (Python): vlm_node / vision_bringup / vlm_bridge_node / image_snapshot / vlm_call / vlm_bridge_call
-├── offscreen/            # ROS2 package dsh_ros2_rviz_offscreen (C++): rviz_offscreen_node (OGRE offscreen render → /rviz/scene)
-├── safety/               # ROS2 package dsh_ros2_safety (Python): safety_monitor node + safety_core (pure logic, --selftest) + safety_vlm_arbitrate + SafetyState/Event msgs + Unlock/SetLock srvs
-├── docs/                 # architecture.md · compatibility.md · safety.md / safety-handover.md / safety-todo.md / safety-gpt-review.md · test-robot-state-vision.md / test-gpu-passthrough.md · screenshots
-├── tests/                # vitest (115 cases; CLI outputs mocked)
-├── .github/workflows/    # CI: Node 22/24 → typecheck/test/build/pack validation
-├── PUBLISH.md            # open-source publishing checklist (GitHub + npm + DSH community)
-└── CHANGELOG.md          # version history (Keep a Changelog)
+dsh-ros2/                      # pnpm monorepo (workspace root, private)
+├── pnpm-workspace.yaml        # packages/*
+├── tsconfig.base.json
+├── packages/
+│   ├── common/                # dsh-ros2-common (not a bundle): runner / parse / toolkit + scripts/robot_profile.py (zero-copy)
+│   ├── core/                  # dsh-ros2-core (33 tools): L1 diagnostics + L2 management + L3 GUI + ros2-diagnostics skill + gui.ts + pty_session.py
+│   ├── profile/               # dsh-ros2-profile (4 tools): robot_register/load/topology + zero-pose calibration + registration/retrieval skills
+│   ├── moveit/                # dsh-ros2-moveit (4 tools): discover/status/motion_validate/moveit_move + moveit_*.py + motion_validator.py
+│   ├── safety/                # dsh-ros2-safety (5 tools): robot_safety_* + safety/ ROS2 pkg + safetyStrict config
+│   ├── vision/                # dsh-ros2-vision (5 tools): vision tools + vlm/ + offscreen/ ROS2 pkgs + vision provider service + state-vision skill
+│   └── dsh-ros2/              # aggregate bundle (empty apply, backward compat)
+├── docs/                      # architecture.md · safety.md / safety-handover.md / safety-todo.md / safety-gpt-review.md · test-*.md · plugin-split-plan.md
+├── .github/workflows/         # CI: Node 22/24 → workspace typecheck/test/build + per-package tarball validation
+└── CHANGELOG.md               # version history (Keep a Changelog)
 ```
 
 ---
+
+## Plugin split (7 packages)
+
+Since v0.15.0 the plugin is a **pnpm monorepo** of 7 npm packages (per
+[`docs/plugin-split-plan.md`](docs/plugin-split-plan.md), ISP-tightened): 51 tools +
+4 skills preserved with **unchanged names and behavior**. Install the domain
+bundles you need (or the `dsh-ros2` aggregate for the full set):
+
+- `dsh-ros2-common` is a plain library (not a cordis bundle) — shared runner,
+  parsers, toolkit and `scripts/robot_profile.py` (zero-copy).
+- Cross-package runtime contracts stay unchanged: `/vlm/describe`,
+  `/safety/state`, `/safety/set_lock` …; `safetyStrict` semantics unchanged.
+- `dsh-ros2-vision` **fixes the npm publish defect**: its `files` include
+  `vlm/` + `offscreen/`.
+- The vision provider is an optional cordis service (`dshRos2.vision`);
+  `ros2_gui_observe` (core) and `ros2_zero_pose_semantics` (profile) degrade to
+  `VISION_UNAVAILABLE` when it is absent.
 
 ## Troubleshooting / FAQ
 

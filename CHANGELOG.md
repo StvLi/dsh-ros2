@@ -4,6 +4,24 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [SemVer](https://semver.org/).
 
+## [monorepo split] - 2026-08-26
+
+### Changed
+
+- **dsh-ros2 拆分为 7 包 pnpm monorepo**（`docs/plugin-split-plan.md`，ISP 收紧版）：
+  `dsh-ros2-common`（共享库 + robot_profile.py 零复制）/ `dsh-ros2-core`（33 工具：
+  L1 诊断 + L2 管理 + L3 GUI + ros2-diagnostics skill）/ `dsh-ros2-profile`（4 工具 +
+  注册/检索 skills）/ `dsh-ros2-moveit`（4 工具）/ `dsh-ros2-safety`（5 工具 +
+  safety/ ROS2 包 + safetyStrict）/ `dsh-ros2-vision`（5 工具 + vlm/+offscreen/
+  修复 npm 发布缺陷 + vision provider 服务 + 状态视觉 skill）/ `dsh-ros2`（聚合包，
+  空 apply，向后兼容）。51 工具 + 4 skills 保留、名称与行为不变。
+- 根目录改为私有 pnpm 工作区；测试按包拆分（common 10 / core 58 / profile 11 /
+  moveit 16 / safety 8 / vision 14 = 117 全绿）；各包独立版本（0.1.0 起）。
+- profile web 集成：5 个域 bundle 以 link: 依赖 + bundles 列表 + patch config
+  精确映射（run 配置逐包、vision{} 归 vision 包）；`dsh --profile web --dump-config`
+  确认 6 个 provider 组合、三既有插件（mcp-mermaid / dsh-deepcybo-lite / archify）
+  原样保留；51 工具零重复注册验证通过。
+
 ## [0.15.0] - 2026-08-24
 
 ### Added

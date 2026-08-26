@@ -24,5 +24,12 @@ jobs:
       - run: pnpm run typecheck
       - run: pnpm run test
       - run: pnpm run build
-      # The published tarball must be installable and contain the patch layer.
-      - run: pnpm pack --pack-destination /tmp && tar -tzf /tmp/dsh-ros2-*.tgz | grep -E "cordis.patch.yml|lib/index.js|lib/types/index.d.ts"
+      # Every bundle tarball must be installable and contain its patch layer;
+      # dsh-ros2-common must carry the shared robot_profile.py script.
+      - run: |
+          for p in core profile moveit safety vision dsh-ros2; do
+            (cd packages/$p && pnpm pack --pack-destination /tmp >/dev/null && tar -tzf /tmp/dsh-ros2-${p}-*.tgz | grep -qE "cordis.patch.yml|lib/index.js")
+            echo "$p tarball OK"
+          done
+          (cd packages/common && pnpm pack --pack-destination /tmp >/dev/null && tar -tzf /tmp/dsh-ros2-common-*.tgz | grep -q "scripts/robot_profile.py")
+          echo "common tarball OK"

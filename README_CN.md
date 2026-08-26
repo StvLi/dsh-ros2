@@ -365,6 +365,20 @@ dsh-ros2/
 
 ---
 
+## 插件拆分（7 个包）
+
+自 v0.15.0 起插件为 **pnpm monorepo**，含 7 个 npm 包（见
+[`docs/plugin-split-plan.md`](docs/plugin-split-plan.md)，ISP 收紧版）：51 工具 +
+4 skills 全部保留、**名称与行为不变**。按需安装域包（或安装 `dsh-ros2` 聚合包获得全集）：
+
+- `dsh-ros2-common` 为纯库（非 cordis bundle）——共享 runner/解析/toolkit 与
+  `scripts/robot_profile.py`（零复制）；
+- 跨包运行时契约不变：`/vlm/describe`、`/safety/state`、`/safety/set_lock` 等；
+  `safetyStrict` 语义不变；
+- `dsh-ros2-vision` **修复 npm 发布缺陷**：`files` 已含 `vlm/` + `offscreen/`；
+- vision provider 为可选 cordis 服务（`dshRos2.vision`）；`ros2_gui_observe`（core）
+  与 `ros2_zero_pose_semantics`（profile）在缺失时降级报 `VISION_UNAVAILABLE`。
+
 ## 故障排查 / FAQ
 
 - **`~/.ros/log` Permission denied**：ROS2 写日志目录失败。设 `rosLogDir`（如 `/tmp/ros-log`）即可；`runCommand` 也会自动回退。
