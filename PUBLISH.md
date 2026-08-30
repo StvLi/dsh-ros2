@@ -13,17 +13,37 @@ git remote -v                                   # 确认 origin 指向 https://g
 git push -u origin main
 ```
 
-## 2. npm 发布
+## 2. npm 发布（monorepo：7 个包，0.1.0）
+
+仓库已拆分为 pnpm monorepo（`packages/*`，见 `docs/plugin-split-plan.md`），
+发布 7 个 npm 包：`dsh-ros2-common`（纯库）+ 5 个 cordis bundle
+（core/profile/moveit/safety/vision）+ `dsh-ros2`（聚合包）。
 
 ```bash
-npm login                              # 你的 npm 账号
-pnpm run typecheck && pnpm run test && pnpm run build
-pnpm publish --access public           # package.json 已含 publishConfig.access=public
-npm view dsh-ros2                      # 验证
+# 0) 一次登录（token 写入 ~/.npmrc，勿进仓库）
+npm login --registry=https://registry.npmjs.org
+# 1) 工作区全绿
+pnpm install
+CI=true pnpm run typecheck && CI=true pnpm run test && CI=true pnpm run build
+# 2) 按依赖序发布（common 先行；pnpm publish 会自动把 workspace: 重写为 ^0.1.0）
+cd packages/common && pnpm publish --registry=https://registry.npmjs.org --access public
+cd ../core && pnpm publish --registry=https://registry.npmjs.org --access public
+cd ../profile && pnpm publish --registry=https://registry.npmjs.org --access public
+cd ../moveit && pnpm publish --registry=https://registry.npmjs.org --access public
+cd ../safety && pnpm publish --registry=https://registry.npmjs.org --access public
+cd ../vision && pnpm publish --registry=https://registry.npmjs.org --access public
+cd ../dsh-ros2 && pnpm publish --registry=https://registry.npmjs.org --access public
+# 3) 验证
+npm view dsh-ros2-core version --registry=https://registry.npmjs.org
 ```
 
-> 前置：`package.json` 的 `name: dsh-ros2` 需在 npm 上未被占用（`npm view dsh-ros2` 返回 404 即可发）。
-> 版本管理：后续用 `pnpm version patch/minor/major` 打 tag，GitHub 建 Release 指向 v0.1.0。
+> 注意：
+> - 本机 npm registry 可能是镜像（npmmirror）——发布必须显式
+>   `--registry=https://registry.npmjs.org`；
+> - 每个 cordis bundle 的 tarball 必须含 `cordis.patch.yml` 与 `lib/`；
+>   `dsh-ros2-vision` 的 `files` 含 `vlm/` + `offscreen/`（修复了单体发布缺陷）；
+>   `dsh-ros2-common` 含 `scripts/robot_profile.py`；CI 会自动校验这些。
+> - 版本管理：每包独立 `pnpm version patch/minor/major`，GitHub Release 指向对应 tag。
 
 ## 3. 社区目录收录（已具备条件：`dsh.bundle` manifest ✅ / `dsh-plugin` topic ✅）
 

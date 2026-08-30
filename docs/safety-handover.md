@@ -1,6 +1,6 @@
 # dsh-ros2 安全框架 · 本体适配交接文档
 
-> 版本 0.14.0（规划）· 配套 `README.md`（使用）· `architecture.md`（总体架构）
+> 版本 0.14.0+（已实现于 0.14.0/0.14.1；monorepo 拆分后位于 `dsh-ros2-safety` 包）· 配套 `README.md`（使用）· `architecture.md`（总体架构）
 > 本文档用于与**后续具体机器人本体适配 agent** 交接，划分清晰的职能边界。
 
 ---
@@ -251,7 +251,7 @@ class LockAction:
 
 ---
 
-## 8. 0.14.0 交付范围（文档通过后实施）
+## 8. 交付范围（已实施：0.14.0 → 0.14.1 → 0.15.0 拆分）
 
 **实现（通用框架，本仓库）**
 - `safety/` ROS2 包（`dsh_ros2_safety`，构建到 vlm 工作区，与 `vlm/` 同模式）：
@@ -259,7 +259,7 @@ class LockAction:
   - `scripts/safety_core.py`：纯逻辑（无 rclpy）——motion（tracking/stall + 迟滞）、feedback_loss、watchdog（critical/observed 分级）、torque（可选）、锁存状态机、取证环形缓冲；`--selftest` 跑 12 个故障注入场景
   - `scripts/safety_monitor`：rclpy 节点封装（订阅关节/指令/力矩 + 慢速 watchdog 扫描 + `/safety/state`(transient-local) + `/safety/heartbeat` + `/safety/lock_active` + 三个服务）
   - `scripts/safety_vlm_arbitrate`：固定格式化 + 缺省 prompt（§5）+ 既有 `/vlm/describe` 网关
-- `scripts/robot_profile.py` 扩展：register 写入 `safety` 段（URDF 限位自动派生）+ `safety show/set` + 校验
+- `dsh-ros2-common/scripts/robot_profile.py` 扩展：register 写入 `safety` 段（URDF 限位自动派生）+ `safety show/set` + 校验
 - 工具集成（+5 工具，共 50）：`robot_safety_start`（L2，后台拉起监视器）/ `robot_safety_state`（L1）/ `robot_safety_arbitrate`（VLM 仲裁，非 safe 提示人工）/ `robot_safety_lock` / `robot_safety_unlock`（L2 人工门）；`moveit_move` 执行前查锁（LOCKED 恒拒，`safetyStrict: 'reject'` 时监视器失联 fail-closed）；`robot_register` 成功后自动拉起监视器
 - 故障注入测试：vitest 工具层（+13 例，共 109）+ `safety_core --selftest`（12 场景）+ 实机 ROS2 链路验证（发布→NORMAL→停发→LOCKED→解锁→恢复）
 

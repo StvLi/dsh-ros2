@@ -1,6 +1,6 @@
 # dsh-ros2 安全边界（Safety.md）
 
-> 版本 0.14.1 · 配套 `safety-handover.md`（本体适配交接）· `safety-todo.md`（GPT
+> 版本 0.14.1+（monorepo 拆分后位于 `dsh-ros2-safety` 包）· 配套 `safety-handover.md`（本体适配交接）· `safety-todo.md`（GPT
 > 意见评审与批次）· `README.md`（使用）
 
 本文档明确 dsh-ros2 安全体系的**边界**：什么被覆盖、什么不被覆盖、各层的职责

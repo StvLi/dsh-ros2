@@ -63,7 +63,7 @@ GPT 的核心方向**采纳**：把当前"审批即执行"升级为
 
 **技术路线**（全部通用、确定性、profile 驱动）：
 
-1. **`scripts/motion_validator.py`（新，纯 Python，无 rclpy）**
+1. **`packages/moveit/scripts/motion_validator.py`（新，纯 Python，无 rclpy）**
    - 输入：轨迹 JSON `{joint_names, points[{time_from_start, positions, velocities?}]}` +
      上下文 `{profile safety 段, group, mode, 目标, 当前状态(含时间戳)}`；
    - 检查项：关节名合法/完整、NaN/Inf、位置限位（连续关节回绕）、速度/加速度限位

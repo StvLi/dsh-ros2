@@ -89,6 +89,8 @@ ros2_doctor                         # 系统健康报告
 
 ## 工具参考
 
+> 工具按域归属包：L1/L2/L3 在 `dsh-ros2-core`；`motion_validate`/`moveit_*` 在 `dsh-ros2-moveit`；`robot_*`/`ros2_zero_pose_semantics` 在 `dsh-ros2-profile`；`robot_safety_*` 在 `dsh-ros2-safety`；视觉工具在 `dsh-ros2-vision`。
+
 ### L1 只读诊断
 
 | Tool | 底层命令 | 用途 |
@@ -268,7 +270,7 @@ ln -s <repo>/safety /tmp/vlm_ws/src/dsh_ros2_safety
 cd /tmp/vlm_ws && colcon build --symlink-install && source install/setup.bash
 ```
 
-`safety_core` 纯逻辑自带故障注入自测（`python3 safety/scripts/safety_core.py
+`safety_core` 纯逻辑自带故障注入自测（`python3 packages/safety/safety/scripts/safety_core.py
 --selftest`，12 个场景）——无需 ROS2 即可验证状态机。
 
 ## 机器人注册与通信拓扑维护

@@ -53,26 +53,39 @@ All tools run plain `ros2` / `colcon` / `rosdep` CLI commands on the host; L1 ne
 - Node `^22.19 || >=24` (DSH host requirement);
 - L4 vision additionally needs Python 3 `rclpy` and an OpenAI-compatible VLM gateway (e.g. Gemini or a self-hosted gateway).
 
-### Install the plugin
+### Install the plugins (7 packages, since the monorepo split)
+
+Install the domain bundles you need — or the **`dsh-ros2` aggregate** for the
+full 51 tools + 4 skills (its patch inserts all domain ids):
 
 ```bash
+# full set (aggregate; pulls core/profile/moveit/safety/vision via its patch)
 dsh plugin --profile <profile> add dsh-ros2
+# or lean installs — e.g. diagnostics only:
+dsh plugin --profile <profile> add dsh-ros2-core
+# dsh-ros2-common is a plain library, auto-installed as a dependency.
 ```
 
-### Minimal configuration
+### Minimal configuration (per-bundle, whole-object replacement)
+
+After the split, each bundle carries its **own run-seam config** (same keys
+repeated per id) and the vision provider lives only on `dsh-ros2-vision`:
 
 ```yaml
-# fragment of a DSH profile plugin config
-- insert:
-    - id: dsh-ros2
-      name: dsh-ros2
-      config:
-        rosSetup: source /opt/ros/jazzy/setup.bash &&   # prepare the ROS2 environment
-        workspaceRoot: /home/you/ros2_ws                 # default cwd for colcon/rosdep
-        vision:
-          provider: gemini                               # mock | gemini | openai
-          apiKey: ${GEMINI_API_KEY}                      # inject via env/secret manager, never hard-code
-        safetyStrict: warn                               # motion-tool gate when the safety monitor is unreachable: 'warn' (default) | 'reject' (fail-closed); LOCKED always rejects
+# fragment of a DSH profile patch (id-targeted config overrides)
+- id: dsh-ros2-core                 # also: -profile / -moveit / -safety
+  config:
+    rosSetup: source /opt/ros/jazzy/setup.bash &&   # prepare the ROS2 environment
+    workspaceRoot: /home/you/ros2_ws                 # default cwd for colcon/rosdep
+- id: dsh-ros2-vision
+  config:
+    rosSetup: source /opt/ros/jazzy/setup.bash &&
+    vision:
+      provider: gemini                               # mock | gemini | openai
+      apiKey: ${GEMINI_API_KEY}                      # inject via env/secret manager, never hard-code
+- id: dsh-ros2-safety
+  config:
+    safetyStrict: warn                               # 'warn' (default) | 'reject' (fail-closed); LOCKED always rejects
 ```
 
 ### Three-minute taste
@@ -88,6 +101,8 @@ ros2_doctor                         # system health report
 ---
 
 ## Tool reference
+
+> Tools live in domain packages: L1/L2/L3 → `dsh-ros2-core`; `motion_validate`/`moveit_*` → `dsh-ros2-moveit`; `robot_*`/`ros2_zero_pose_semantics` → `dsh-ros2-profile`; `robot_safety_*` → `dsh-ros2-safety`; vision tools → `dsh-ros2-vision`.
 
 ### L1 read-only diagnostics
 
@@ -286,7 +301,7 @@ cd /tmp/vlm_ws && colcon build --symlink-install && source install/setup.bash
 ```
 
 The `safety_core` pure logic ships with a fault-injection self test
-(`python3 safety/scripts/safety_core.py --selftest`, 12 scenarios) — no ROS2
+(`python3 packages/safety/safety/scripts/safety_core.py --selftest`, 12 scenarios) — no ROS2
 needed to verify the state machine.
 
 ## Robot profiles & communication topology

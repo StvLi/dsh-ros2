@@ -21,6 +21,15 @@ All notable changes to **dsh-ros2** are documented here. Format follows
   精确映射（run 配置逐包、vision{} 归 vision 包）；`dsh --profile web --dump-config`
   确认 6 个 provider 组合、三既有插件（mcp-mermaid / dsh-deepcybo-lite / archify）
   原样保留；51 工具零重复注册验证通过。
+- 发布：7 包 0.1.0 全部发布 npm（registry.npmjs.org，依赖序，`workspace:` 自动
+  重写为 `^0.1.0`）；GitHub tag+release `v0.1.0-plugins`。
+- CI 修复（云端双矩阵绿）：根 typecheck/test 先构建 common（否则新 checkout 下
+  `Cannot find module 'dsh-ros2-common'`）；pack 校验改用 pnpm pack 实际输出路径
+  （聚合包 tarball 名是 `dsh-ros2-0.1.0.tgz` 而非 `dsh-ros2-dsh-ros2-*`）；聚合包
+  补冒烟测试（消除 "No test files found"）。
+- 文档全量同步：README 安装/配置章节改为按包形态、architecture.md 头部与路径、
+  safety 文档路径/状态、PUBLISH.md 重写为 monorepo 发布流程、plugin-split-plan
+  标记已执行。
 
 ## [0.15.0] - 2026-08-24
 

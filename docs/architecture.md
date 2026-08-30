@@ -1,6 +1,6 @@
 # dsh-ros2 架构
 
-> 版本 0.14.1（51 工具 + 4 skills）· 配套 `README.md`（使用）· `compatibility.md`（兼容基线）· `safety.md`（安全边界）· `safety-handover.md`（本体适配交接）
+> 版本 0.15.0+（monorepo 7 包，51 工具 + 4 skills）· 配套 `README.md`（使用）· `compatibility.md`（兼容基线）· `safety.md`（安全边界）· `safety-handover.md`（本体适配交接）· `plugin-split-plan.md`（拆分依据）
 
 ---
 
@@ -66,9 +66,9 @@ service 清单）/ `ros2_vision_analyze`（按话题路由到对应 bridge 分�
 DSH 会话 → tools/skills 服务
    │ createRos2Tools({run, approval, jobs, gui, vision})
    ▼
-工具层 tools.ts ──▶ runner.ts（CLI 执行）│ approval（L2 审批）
+工具层（各包 src/tools.ts）──▶ runner.ts（common 包）│ approval（L2 审批）
                  ──▶ jobs（后台任务）    │ gui.ts（GUI 生命周期/截图/xdotool）
-                 ──▶ vision（L3 多模态） │ vlm/ offscreen/（L4 ROS2 包）
+                 ──▶ vision（L3 多模态） │ vlm/ offscreen/（vision 包随附 ROS2 包）
 ```
 
 | 缝隙 | 生产实现 | 测试 |
@@ -180,7 +180,7 @@ ROS2 通信），图像全部来自话题，杜绝 X11 截图依赖与窗口层�
 
 | 手段 | 做法 | 效果 |
 | --- | --- | --- |
-| **① 渲染低模 mesh** | `scripts/simplify_visual_meshes.py` 用 **open3d** quadric decimation 把大 STL 降到 25k/15k 面（实测 276 万 → 38.7 万面，7.1×） | 稳定帧率 1.9 → 7.1 Hz；内存 962 → 386 MB；mesh 加载 ~90s → ~40s；渲染内容保留 99.7% |
+| **① 渲染低模 mesh** | `packages/vision/scripts/simplify_visual_meshes.py` 用 **open3d** quadric decimation 把大 STL 降到 25k/15k 面（实测 276 万 → 38.7 万面，7.1×） | 稳定帧率 1.9 → 7.1 Hz；内存 962 → 386 MB；mesh 加载 ~90s → ~40s；渲染内容保留 99.7% |
 | **② 直接读像素（跳过 PNG）** | `rviz_offscreen_node` 用 `Ogre::RenderSystem::getRenderTargetIterator` + `copyContentsToMemory` 直读帧缓冲（不再 `captureScreenShot` 写 PNG + libpng 解码） | capture 38ms → 1-2ms/帧；每帧 74ms → 31ms；帧率 7.1 → 10.2 Hz |
 
 **注意**：
