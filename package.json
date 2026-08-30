@@ -4,8 +4,8 @@
   "private": true,
   "description": "pnpm workspace for the dsh-ros2 plugin family (7 cordis bundles: common/core/profile/moveit/safety/vision/aggregate)",
   "scripts": {
-    "typecheck": "pnpm -r typecheck",
-    "test": "pnpm -r test",
+    "typecheck": "pnpm --filter dsh-ros2-common run build && pnpm -r typecheck",
+    "test": "pnpm --filter dsh-ros2-common run build && pnpm -r test",
     "build": "pnpm -r build"
   },
   "engines": {
