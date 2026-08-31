@@ -1,0 +1,294 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "dsh-ros2 · ROS2 到 Harness 的转接桥",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "transfer",
+        "label": "主转接路径",
+        "focus": [
+          "agent",
+          "tool",
+          "seam",
+          "bridge",
+          "ros2entry",
+          "graph",
+          "nodes"
+        ],
+        "note": "一次工具调用穿过缝隙层到 ROS2 并返回 JSON。"
+      },
+      {
+        "id": "control-loop",
+        "label": "实时回路（留在 ROS2）",
+        "focus": [
+          "nodes",
+          "movegroup",
+          "vision"
+        ],
+        "note": "安全监视 / 视觉仲裁 / 运动执行的重活由常驻 ROS2 节点承担，桥接只触发或订阅一次。"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "agent",
+      "type": "external",
+      "label": "DSH Agent",
+      "sublabel": "deepseek-v4",
+      "pos": [
+        40,
+        320
+      ],
+      "size": [
+        130,
+        64
+      ]
+    },
+    {
+      "id": "tool",
+      "type": "backend",
+      "label": "插件工具 defineTool",
+      "sublabel": "core 33 · profile 4 · moveit 4 · safety 5 · vision 5",
+      "pos": [
+        290,
+        320
+      ],
+      "size": [
+        230,
+        64
+      ]
+    },
+    {
+      "id": "seam",
+      "type": "backend",
+      "label": "ToolDeps 缝隙",
+      "sublabel": "run · approval · jobs · gui · vision",
+      "pos": [
+        600,
+        320
+      ],
+      "size": [
+        220,
+        64
+      ]
+    },
+    {
+      "id": "bridge",
+      "type": "backend",
+      "label": "runCommand 桥",
+      "sublabel": "execFile / bash -lc rosSetup",
+      "pos": [
+        880,
+        320
+      ],
+      "size": [
+        200,
+        64
+      ]
+    },
+    {
+      "id": "ros2entry",
+      "type": "backend",
+      "label": "ROS2 执行入口",
+      "sublabel": "ros2 CLI（L1, 经 daemon）· python rclpy（脚本直连）",
+      "pos": [
+        1140,
+        320
+      ],
+      "size": [
+        260,
+        64
+      ]
+    },
+    {
+      "id": "graph",
+      "type": "messagebus",
+      "label": "ROS 图",
+      "sublabel": "图发现缓存",
+      "pos": [
+        1460,
+        320
+      ],
+      "size": [
+        170,
+        58
+      ]
+    },
+    {
+      "id": "nodes",
+      "type": "messagebus",
+      "label": "常驻 ROS2 节点/服务",
+      "sublabel": "/vlm/describe · /safety/state · /rviz/scene",
+      "pos": [
+        1700,
+        320
+      ],
+      "size": [
+        220,
+        70
+      ]
+    },
+    {
+      "id": "movegroup",
+      "type": "backend",
+      "label": "move_group",
+      "sublabel": "规划 + execute_trajectory",
+      "pos": [
+        1990,
+        320
+      ],
+      "size": [
+        190,
+        58
+      ]
+    },
+    {
+      "id": "vision",
+      "type": "backend",
+      "label": "vision provider 服务",
+      "sublabel": "dshRos2.vision · gemini/openai/mock",
+      "pos": [
+        290,
+        100
+      ],
+      "size": [
+        210,
+        60
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "层 1 · Harness（DeepSeek Harness）",
+      "wraps": [
+        "agent",
+        "tool",
+        "vision"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "层 2 · 通用缝隙 dsh-ros2-common",
+      "wraps": [
+        "seam",
+        "bridge"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "层 3 · ROS2 世界（Jazzy）",
+      "wraps": [
+        "ros2entry",
+        "graph",
+        "nodes",
+        "movegroup"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "agent-to-tool",
+      "from": "agent",
+      "to": "tool",
+      "label": "调用",
+      "variant": "emphasis"
+    },
+    {
+      "id": "tool-to-seam",
+      "from": "tool",
+      "to": "seam",
+      "label": "ToolDeps"
+    },
+    {
+      "id": "seam-to-bridge",
+      "from": "seam",
+      "to": "bridge",
+      "label": "makeRun"
+    },
+    {
+      "id": "bridge-to-ros2entry",
+      "from": "bridge",
+      "to": "ros2entry",
+      "label": "deps.run"
+    },
+    {
+      "id": "ros2entry-to-graph",
+      "from": "ros2entry",
+      "to": "graph",
+      "label": "CLI→daemon",
+      "labelDy": -30
+    },
+    {
+      "id": "ros2entry-to-nodes",
+      "from": "ros2entry",
+      "to": "nodes",
+      "label": "rclpy 直连服务",
+      "fromSide": "top",
+      "toSide": "top",
+      "via": [
+        [
+          1270,
+          260
+        ],
+        [
+          1810,
+          260
+        ]
+      ]
+    },
+    {
+      "id": "graph-to-nodes",
+      "from": "graph",
+      "to": "nodes",
+      "label": "发现"
+    },
+    {
+      "id": "nodes-to-movegroup",
+      "from": "nodes",
+      "to": "movegroup",
+      "label": "move_action",
+      "variant": "dashed",
+      "labelDy": -30
+    },
+    {
+      "id": "tool-to-vision",
+      "from": "tool",
+      "to": "vision",
+      "label": "deps.vision.describe",
+      "variant": "dashed",
+      "fromSide": "top",
+      "toSide": "bottom"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "转接核心：缝隙 + 契约",
+      "items": [
+        "ToolDeps 注入 run/approval/jobs/gui/vision，测试全用 fake",
+        "跨包用 ROS2 服务契约：/vlm/describe、/safety/state、/move_action",
+        "JSON 为桥接唯一数据格式（无 ROS2 类型泄漏入 Harness）"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "两条执行模式",
+      "items": [
+        "L1/L2 诊断：ros2 CLI（经 daemon）· 一次工具 = 一次子进程",
+        "重活（安全/视觉/运动）：常驻 ROS2 节点/服务，桥接只触发或订阅"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "效率观察点",
+      "items": [
+        "有 rosSetup 时每调用走一次 bash -lc 包装（≈ +20-60ms）",
+        "L1 一次工具含 daemon 往返（数百 ms），agent 节奏下可接受",
+        "moveit_move 单路径约 5-6 次子进程 + 探测，可合并为常驻流程"
+      ]
+    }
+  ]
+}
