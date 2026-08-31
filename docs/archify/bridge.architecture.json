@@ -2,293 +2,43 @@
   "schema_version": 1,
   "diagram_type": "architecture",
   "meta": {
-    "title": "dsh-ros2 · ROS2 到 Harness 的转接桥",
+    "title": "dsh-ros2 · ROS2 到 Harness 的转接桥（含 Sidecar 数据平面）",
     "quality_profile": "showcase",
     "views": [
-      {
-        "id": "transfer",
-        "label": "主转接路径",
-        "focus": [
-          "agent",
-          "tool",
-          "seam",
-          "bridge",
-          "ros2entry",
-          "graph",
-          "nodes"
-        ],
-        "note": "一次工具调用穿过缝隙层到 ROS2 并返回 JSON。"
-      },
-      {
-        "id": "control-loop",
-        "label": "实时回路（留在 ROS2）",
-        "focus": [
-          "nodes",
-          "movegroup",
-          "vision"
-        ],
-        "note": "安全监视 / 视觉仲裁 / 运动执行的重活由常驻 ROS2 节点承担，桥接只触发或订阅一次。"
-      }
+      { "id": "timely", "label": "逻辑直连（Sidecar 数据平面）", "focus": ["agent", "state_tool", "state_client", "sidecar", "topics"], "note": "Agent 经 StateClient 长连接读取 Sidecar 降维缓存，毫秒级拿到新鲜语义状态。" },
+      { "id": "pull", "label": "Pull 问答（逐次子进程）", "focus": ["agent", "ros_tool", "bridge", "ros2cli", "graph"], "note": "L1/L2 诊断仍经 runCommand 逐次调用 ros2 CLI（agent 节奏）。" }
     ]
   },
   "components": [
-    {
-      "id": "agent",
-      "type": "external",
-      "label": "DSH Agent",
-      "sublabel": "deepseek-v4",
-      "pos": [
-        40,
-        320
-      ],
-      "size": [
-        130,
-        64
-      ]
-    },
-    {
-      "id": "tool",
-      "type": "backend",
-      "label": "插件工具 defineTool",
-      "sublabel": "core 33 · profile 4 · moveit 4 · safety 5 · vision 5",
-      "pos": [
-        290,
-        320
-      ],
-      "size": [
-        230,
-        64
-      ]
-    },
-    {
-      "id": "seam",
-      "type": "backend",
-      "label": "ToolDeps 缝隙",
-      "sublabel": "run · approval · jobs · gui · vision",
-      "pos": [
-        600,
-        320
-      ],
-      "size": [
-        220,
-        64
-      ]
-    },
-    {
-      "id": "bridge",
-      "type": "backend",
-      "label": "runCommand 桥",
-      "sublabel": "execFile / bash -lc rosSetup",
-      "pos": [
-        880,
-        320
-      ],
-      "size": [
-        200,
-        64
-      ]
-    },
-    {
-      "id": "ros2entry",
-      "type": "backend",
-      "label": "ROS2 执行入口",
-      "sublabel": "ros2 CLI（L1, 经 daemon）· python rclpy（脚本直连）",
-      "pos": [
-        1140,
-        320
-      ],
-      "size": [
-        260,
-        64
-      ]
-    },
-    {
-      "id": "graph",
-      "type": "messagebus",
-      "label": "ROS 图",
-      "sublabel": "图发现缓存",
-      "pos": [
-        1460,
-        320
-      ],
-      "size": [
-        170,
-        58
-      ]
-    },
-    {
-      "id": "nodes",
-      "type": "messagebus",
-      "label": "常驻 ROS2 节点/服务",
-      "sublabel": "/vlm/describe · /safety/state · /rviz/scene",
-      "pos": [
-        1700,
-        320
-      ],
-      "size": [
-        220,
-        70
-      ]
-    },
-    {
-      "id": "movegroup",
-      "type": "backend",
-      "label": "move_group",
-      "sublabel": "规划 + execute_trajectory",
-      "pos": [
-        1990,
-        320
-      ],
-      "size": [
-        190,
-        58
-      ]
-    },
-    {
-      "id": "vision",
-      "type": "backend",
-      "label": "vision provider 服务",
-      "sublabel": "dshRos2.vision · gemini/openai/mock",
-      "pos": [
-        290,
-        100
-      ],
-      "size": [
-        210,
-        60
-      ]
-    }
+    { "id": "agent", "type": "external", "label": "DSH Agent", "sublabel": "deepseek-v4", "pos": [40, 430], "size": [150, 70] },
+    { "id": "state_tool", "type": "backend", "label": "state_get / state_snapshot", "sublabel": "dsh-ros2-state · 读缓存", "pos": [300, 240], "size": [220, 64] },
+    { "id": "state_client", "type": "backend", "label": "StateClient", "sublabel": "UDS · newline-JSON · 并发", "pos": [580, 240], "size": [210, 64] },
+    { "id": "sidecar", "type": "backend", "label": "Sidecar 数据平面", "sublabel": "reducer 降维 + 缓存", "pos": [860, 240], "size": [220, 70] },
+    { "id": "topics", "type": "messagebus", "label": "高频话题", "sublabel": "/camera · /scan", "pos": [1160, 240], "size": [190, 60] },
+    { "id": "ros_tool", "type": "backend", "label": "ros2_* 工具", "sublabel": "L1/L2 诊断", "pos": [300, 620], "size": [200, 64], "tag": "pull 路径" },
+    { "id": "bridge", "type": "backend", "label": "runCommand 桥", "sublabel": "execFile / bash -lc rosSetup", "pos": [580, 620], "size": [210, 64] },
+    { "id": "ros2cli", "type": "backend", "label": "ros2 CLI", "sublabel": "topic echo / node info", "pos": [860, 620], "size": [200, 62] },
+    { "id": "graph", "type": "messagebus", "label": "ROS 图", "sublabel": "图发现缓存", "pos": [1150, 620], "size": [180, 58] }
   ],
   "boundaries": [
-    {
-      "kind": "region",
-      "label": "层 1 · Harness（DeepSeek Harness）",
-      "wraps": [
-        "agent",
-        "tool",
-        "vision"
-      ]
-    },
-    {
-      "kind": "region",
-      "label": "层 2 · 通用缝隙 dsh-ros2-common",
-      "wraps": [
-        "seam",
-        "bridge"
-      ]
-    },
-    {
-      "kind": "region",
-      "label": "层 3 · ROS2 世界（Jazzy）",
-      "wraps": [
-        "ros2entry",
-        "graph",
-        "nodes",
-        "movegroup"
-      ]
-    }
+    { "kind": "region", "label": "层 1 · Harness（控制平面）", "wraps": ["agent", "state_tool", "ros_tool"] },
+    { "kind": "region", "label": "层 2 · 转接层（dsh-ros2-common / dsh-ros2-state）", "wraps": ["state_client", "bridge"] },
+    { "kind": "region", "label": "数据平面 · Sidecar（独立进程）", "wraps": ["sidecar"] },
+    { "kind": "region", "label": "层 3 · ROS2 世界（Jazzy）", "wraps": ["topics", "ros2cli", "graph"] }
   ],
   "connections": [
-    {
-      "id": "agent-to-tool",
-      "from": "agent",
-      "to": "tool",
-      "label": "调用",
-      "variant": "emphasis"
-    },
-    {
-      "id": "tool-to-seam",
-      "from": "tool",
-      "to": "seam",
-      "label": "ToolDeps"
-    },
-    {
-      "id": "seam-to-bridge",
-      "from": "seam",
-      "to": "bridge",
-      "label": "makeRun"
-    },
-    {
-      "id": "bridge-to-ros2entry",
-      "from": "bridge",
-      "to": "ros2entry",
-      "label": "deps.run"
-    },
-    {
-      "id": "ros2entry-to-graph",
-      "from": "ros2entry",
-      "to": "graph",
-      "label": "CLI→daemon",
-      "labelDy": -30
-    },
-    {
-      "id": "ros2entry-to-nodes",
-      "from": "ros2entry",
-      "to": "nodes",
-      "label": "rclpy 直连服务",
-      "fromSide": "top",
-      "toSide": "top",
-      "via": [
-        [
-          1270,
-          260
-        ],
-        [
-          1810,
-          260
-        ]
-      ]
-    },
-    {
-      "id": "graph-to-nodes",
-      "from": "graph",
-      "to": "nodes",
-      "label": "发现"
-    },
-    {
-      "id": "nodes-to-movegroup",
-      "from": "nodes",
-      "to": "movegroup",
-      "label": "move_action",
-      "variant": "dashed",
-      "labelDy": -30
-    },
-    {
-      "id": "tool-to-vision",
-      "from": "tool",
-      "to": "vision",
-      "label": "deps.vision.describe",
-      "variant": "dashed",
-      "fromSide": "top",
-      "toSide": "bottom"
-    }
+    { "id": "agent-to-state", "from": "agent", "to": "state_tool", "label": "调用", "variant": "emphasis" },
+    { "id": "state-to-client", "from": "state_tool", "to": "state_client", "label": "deps.state" },
+    { "id": "client-to-sidecar", "from": "state_client", "to": "sidecar", "label": "UDS 长连接", "variant": "emphasis" },
+    { "id": "sidecar-to-topics", "from": "sidecar", "to": "topics", "label": "订阅·降维", "variant": "dashed" },
+    { "id": "agent-to-ros", "from": "agent", "to": "ros_tool", "label": "调用", "variant": "dashed" },
+    { "id": "ros-to-bridge", "from": "ros_tool", "to": "bridge", "label": "deps.run" },
+    { "id": "bridge-to-ros2cli", "from": "bridge", "to": "ros2cli", "label": "bash -lc" },
+    { "id": "ros2cli-to-graph", "from": "ros2cli", "to": "graph", "label": "ros2 CLI" }
   ],
   "cards": [
-    {
-      "dot": "emerald",
-      "title": "转接核心：缝隙 + 契约",
-      "items": [
-        "ToolDeps 注入 run/approval/jobs/gui/vision，测试全用 fake",
-        "跨包用 ROS2 服务契约：/vlm/describe、/safety/state、/move_action",
-        "JSON 为桥接唯一数据格式（无 ROS2 类型泄漏入 Harness）"
-      ]
-    },
-    {
-      "dot": "cyan",
-      "title": "两条执行模式",
-      "items": [
-        "L1/L2 诊断：ros2 CLI（经 daemon）· 一次工具 = 一次子进程",
-        "重活（安全/视觉/运动）：常驻 ROS2 节点/服务，桥接只触发或订阅"
-      ]
-    },
-    {
-      "dot": "rose",
-      "title": "效率观察点",
-      "items": [
-        "有 rosSetup 时每调用走一次 bash -lc 包装（≈ +20-60ms）",
-        "L1 一次工具含 daemon 往返（数百 ms），agent 节奏下可接受",
-        "moveit_move 单路径约 5-6 次子进程 + 探测，可合并为常驻流程"
-      ]
-    }
+    { "dot": "emerald", "title": "逻辑直连 · 物理分离", "items": ["控制平面（插件）经 UDS 长连接读 Sidecar 降维缓存", "Sidecar 持续把 /camera /scan 降维成语义缓存，查询毫秒级命中", "value 给逻辑、text 给 LLM——语义与逻辑出自同一回调"] },
+    { "dot": "cyan", "title": "两条路径并存", "items": ["timely：Sidecar 缓存读（毫秒，新鲜语义状态）", "pull：L1/L2 逐次子进程 + daemon 往返（agent 节奏）"] },
+    { "dot": "rose", "title": "失效闭环", "items": ["缓存带 stamp/ttl，过旧返回 STALE", "心跳 + 断线判 DOWN；安全相关读 fail-closed", "STALE/DOWN 均为结构化错误，工具层原样透传"] }
   ]
 }

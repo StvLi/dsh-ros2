@@ -1,0 +1,17 @@
+{
+  "name": "dsh-ros2-sidecar",
+  "version": "0.1.0",
+  "description": "dsh-ros2 data-plane sidecar framework (逻辑直连·物理分离). An independent process that subscribes high-frequency ROS2 topics, reduces them to semantic cache entries (value for logic / text for the LLM), and serves the control plane over a Unix Domain Socket. The concrete reducers (obstacle boolean, cup pose TF) are by-design NOT implemented — this ships the template framework only. Not a cordis bundle.",
+  "type": "module",
+  "main": "./lib/index.js",
+  "types": "./lib/types/index.d.ts",
+  "exports": { ".": { "types": "./lib/types/index.d.ts", "default": "./lib/index.js" }, "./package.json": "./package.json" },
+  "files": ["lib", "sidecar", "README.md", "LICENSE"],
+  "scripts": { "typecheck": "tsc --noEmit", "test": "python3 -m sidecar.selftest", "build": "tsc -p tsconfig.build.json", "selftest": "python3 -m sidecar.selftest" },
+  "engines": { "node": "^22.19.0 || >=24.0.0" },
+  "keywords": ["dsh", "dsh-plugin", "deepseek-harness", "ros2", "sidecar"],
+  "license": "MIT",
+  "repository": { "type": "git", "url": "git+https://github.com/StvLi/dsh-ros2.git" },
+  "publishConfig": { "access": "public" },
+  "devDependencies": { "@types/node": "^24.0.0", "typescript": "^5.6.0" }
+}

@@ -1,0 +1,8 @@
+# dsh-ros2-state bundle patch.
+- insert:
+    - id: dsh-ros2-state
+      name: dsh-ros2-state
+      config:
+        state:
+          socketPath: /tmp/dsh-ros2-sidecar.sock
+          timeoutMs: 1000
