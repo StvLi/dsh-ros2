@@ -51,7 +51,7 @@
       "sublabel": "deepseek-v4",
       "pos": [
         60,
-        270
+        265
       ],
       "size": [
         150,
@@ -65,7 +65,7 @@
       "sublabel": "dsh-ros2-state · 读缓存",
       "pos": [
         260,
-        152
+        150
       ],
       "size": [
         200,
@@ -79,7 +79,7 @@
       "sublabel": "UDS · newline-JSON · 并发",
       "pos": [
         540,
-        150
+        148
       ],
       "size": [
         200,
@@ -92,8 +92,8 @@
       "label": "Sidecar 数据平面",
       "sublabel": "reducer 降维 + 缓存",
       "pos": [
-        900,
-        147
+        880,
+        145
       ],
       "size": [
         210,
@@ -106,8 +106,8 @@
       "label": "高频话题",
       "sublabel": "/camera · /scan",
       "pos": [
-        910,
-        37
+        890,
+        40
       ],
       "size": [
         190,
@@ -148,7 +148,7 @@
       "label": "ros2 CLI",
       "sublabel": "topic echo / node info",
       "pos": [
-        905,
+        885,
         389
       ],
       "size": [
@@ -162,8 +162,8 @@
       "label": "ROS 图",
       "sublabel": "图发现缓存",
       "pos": [
-        1150,
-        391
+        895,
+        520
       ],
       "size": [
         180,
@@ -245,8 +245,8 @@
       "fromSide": "bottom",
       "toSide": "top",
       "labelAt": [
-        1005,
-        121
+        985,
+        120
       ]
     },
     {
@@ -270,8 +270,12 @@
       "from": "ros2cli",
       "to": "graph",
       "label": "ros2 CLI",
-      "fromSide": "right",
-      "toSide": "left"
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelAt": [
+        985,
+        485
+      ]
     },
     {
       "id": "discover-to-build",
@@ -282,8 +286,8 @@
       "fromSide": "top",
       "toSide": "bottom",
       "labelAt": [
-        1058,
-        302
+        1000,
+        300
       ]
     }
   ],
