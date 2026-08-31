@@ -5,42 +5,323 @@
     "title": "dsh-ros2 · ROS2 到 Harness 的转接桥（含 Sidecar 数据平面）",
     "quality_profile": "showcase",
     "views": [
-      { "id": "timely", "label": "逻辑直连（数据平面）", "focus": ["agent", "state_tool", "state_client", "sidecar", "topics"], "note": "Agent 经 StateClient 长连接读 Sidecar 降维缓存，毫秒级拿到新鲜语义状态。" },
-      { "id": "pull", "label": "Pull 问答（逐次子进程）", "focus": ["agent", "ros_tool", "bridge", "ros2cli", "graph"], "note": "L1/L2 诊断仍经 runCommand 逐次调用 ros2 CLI（agent 节奏）。" },
-      { "id": "build", "label": "构建期耦合（低频）", "focus": ["agent", "ros_tool", "sidecar"], "note": "Agent 先用 pull 链（工具+runCommand）发现话题基础信息，再据此基于基类构建 reducer 注册进 sidecar——低频、可标准化为 skill 流程。" }
+      {
+        "id": "timely",
+        "label": "逻辑直连 · 数据平面",
+        "focus": [
+          "agent",
+          "state_tool",
+          "state_client",
+          "sidecar",
+          "topics"
+        ],
+        "note": "Agent 经 StateClient 长连接读 Sidecar 降维缓存，毫秒级拿到新鲜语义状态。"
+      },
+      {
+        "id": "pull",
+        "label": "Pull 问答 · 诊断链",
+        "focus": [
+          "agent",
+          "ros_tool",
+          "bridge",
+          "ros2cli",
+          "graph"
+        ],
+        "note": "L1/L2 诊断仍经 runCommand 逐次调用 ros2 CLI（agent 节奏）。"
+      },
+      {
+        "id": "build",
+        "label": "两线相关 · 构建期",
+        "focus": [
+          "agent",
+          "ros_tool",
+          "bridge",
+          "ros2cli",
+          "sidecar"
+        ],
+        "note": "Agent 先用 pull 链（工具+runCommand→CLI）发现话题基础信息，再据此基于基类构建 reducer 注册进 sidecar——低频、可标准化为 skill 流程。"
+      }
     ]
   },
   "components": [
-    { "id": "agent", "type": "external", "label": "DSH Agent", "sublabel": "deepseek-v4", "pos": [80, 340], "size": [150, 70] },
-    { "id": "state_tool", "type": "backend", "label": "state_get / state_snapshot", "sublabel": "dsh-ros2-state · 读缓存", "pos": [360, 340], "size": [200, 60] },
-    { "id": "state_client", "type": "backend", "label": "StateClient", "sublabel": "UDS · newline-JSON · 并发", "pos": [660, 340], "size": [200, 64] },
-    { "id": "sidecar", "type": "backend", "label": "Sidecar 数据平面", "sublabel": "reducer 降维 + 缓存", "pos": [655, 110], "size": [210, 70] },
-    { "id": "topics", "type": "messagebus", "label": "高频话题", "sublabel": "/camera · /scan", "pos": [220, 110], "size": [190, 58] },
-    { "id": "ros_tool", "type": "backend", "label": "ros2_* 工具", "sublabel": "L1/L2 诊断", "pos": [360, 480], "size": [200, 60] },
-    { "id": "bridge", "type": "backend", "label": "runCommand 桥", "sublabel": "execFile / bash -lc", "pos": [660, 480], "size": [200, 64] },
-    { "id": "ros2cli", "type": "backend", "label": "ros2 CLI", "sublabel": "topic echo / node info", "pos": [660, 620], "size": [200, 62] },
-    { "id": "graph", "type": "messagebus", "label": "ROS 图", "sublabel": "图发现缓存", "pos": [920, 620], "size": [180, 58] }
+    {
+      "id": "agent",
+      "type": "external",
+      "label": "DSH Agent",
+      "sublabel": "deepseek-v4",
+      "pos": [
+        60,
+        270
+      ],
+      "size": [
+        150,
+        70
+      ]
+    },
+    {
+      "id": "state_tool",
+      "type": "backend",
+      "label": "state_get / state_snapshot",
+      "sublabel": "dsh-ros2-state · 读缓存",
+      "pos": [
+        260,
+        152
+      ],
+      "size": [
+        200,
+        60
+      ]
+    },
+    {
+      "id": "state_client",
+      "type": "backend",
+      "label": "StateClient",
+      "sublabel": "UDS · newline-JSON · 并发",
+      "pos": [
+        540,
+        150
+      ],
+      "size": [
+        200,
+        64
+      ]
+    },
+    {
+      "id": "sidecar",
+      "type": "backend",
+      "label": "Sidecar 数据平面",
+      "sublabel": "reducer 降维 + 缓存",
+      "pos": [
+        900,
+        147
+      ],
+      "size": [
+        210,
+        70
+      ]
+    },
+    {
+      "id": "topics",
+      "type": "messagebus",
+      "label": "高频话题",
+      "sublabel": "/camera · /scan",
+      "pos": [
+        910,
+        37
+      ],
+      "size": [
+        190,
+        58
+      ]
+    },
+    {
+      "id": "ros_tool",
+      "type": "backend",
+      "label": "ros2_* 工具",
+      "sublabel": "L1/L2 诊断",
+      "pos": [
+        260,
+        390
+      ],
+      "size": [
+        200,
+        60
+      ]
+    },
+    {
+      "id": "bridge",
+      "type": "backend",
+      "label": "runCommand 桥",
+      "sublabel": "execFile / bash -lc",
+      "pos": [
+        540,
+        388
+      ],
+      "size": [
+        200,
+        64
+      ]
+    },
+    {
+      "id": "ros2cli",
+      "type": "backend",
+      "label": "ros2 CLI",
+      "sublabel": "topic echo / node info",
+      "pos": [
+        905,
+        389
+      ],
+      "size": [
+        200,
+        62
+      ]
+    },
+    {
+      "id": "graph",
+      "type": "messagebus",
+      "label": "ROS 图",
+      "sublabel": "图发现缓存",
+      "pos": [
+        1150,
+        391
+      ],
+      "size": [
+        180,
+        58
+      ]
+    }
   ],
   "boundaries": [
-    { "kind": "region", "label": "控制平面 · Harness 进程", "wraps": ["agent", "state_tool", "state_client", "ros_tool", "bridge"] },
-    { "kind": "region", "label": "数据平面 · Sidecar 独立进程", "wraps": ["sidecar", "topics"] },
-    { "kind": "region", "label": "ROS2 世界 · Pull 路径", "wraps": ["ros2cli", "graph"] }
+    {
+      "kind": "region",
+      "label": "控制平面 · Harness 进程",
+      "wraps": [
+        "agent",
+        "state_tool",
+        "state_client",
+        "ros_tool",
+        "bridge"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "数据平面 · Sidecar 独立进程",
+      "wraps": [
+        "sidecar",
+        "topics"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "ROS2 世界 · Pull 路径",
+      "wraps": [
+        "ros2cli",
+        "graph"
+      ]
+    }
   ],
   "connections": [
-    { "id": "agent-to-state", "from": "agent", "to": "state_tool", "label": "调用", "variant": "emphasis" },
-    { "id": "state-to-client", "from": "state_tool", "to": "state_client", "label": "deps.state" },
-    { "id": "client-to-sidecar", "from": "state_client", "to": "sidecar", "label": "UDS 长连接 · 逻辑直连", "variant": "emphasis", "fromSide": "top", "toSide": "bottom" },
-    { "id": "topics-to-sidecar", "from": "topics", "to": "sidecar", "label": "订阅 · 降维", "variant": "dashed" },
-    { "id": "agent-to-ros", "from": "agent", "to": "ros_tool", "label": "调用", "variant": "dashed", "fromSide": "right", "toSide": "left" },
-    { "id": "agent-to-build", "from": "agent", "to": "sidecar", "label": "低频 · 基类构建 reducer", "variant": "dashed", "fromSide": "right", "toSide": "bottom" },
-    { "id": "ros-to-bridge", "from": "ros_tool", "to": "bridge", "label": "deps.run" },
-    { "id": "bridge-to-ros2cli", "from": "bridge", "to": "ros2cli", "label": "bash -lc", "fromSide": "bottom", "toSide": "top", "labelAt": [760, 580] },
-    { "id": "ros2cli-to-graph", "from": "ros2cli", "to": "graph", "label": "ros2 CLI" }
+    {
+      "id": "agent-to-state",
+      "from": "agent",
+      "to": "state_tool",
+      "label": "调用",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "bottom"
+    },
+    {
+      "id": "agent-to-ros",
+      "from": "agent",
+      "to": "ros_tool",
+      "label": "调用",
+      "variant": "dashed",
+      "fromSide": "right",
+      "toSide": "top"
+    },
+    {
+      "id": "state-to-client",
+      "from": "state_tool",
+      "to": "state_client",
+      "label": "deps.state",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "client-to-sidecar",
+      "from": "state_client",
+      "to": "sidecar",
+      "label": "UDS 长连接 · 逻辑直连",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "topics-to-sidecar",
+      "from": "topics",
+      "to": "sidecar",
+      "label": "订阅 · 降维",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelAt": [
+        1005,
+        121
+      ]
+    },
+    {
+      "id": "ros-to-bridge",
+      "from": "ros_tool",
+      "to": "bridge",
+      "label": "deps.run",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "bridge-to-ros2cli",
+      "from": "bridge",
+      "to": "ros2cli",
+      "label": "bash -lc",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "ros2cli-to-graph",
+      "from": "ros2cli",
+      "to": "graph",
+      "label": "ros2 CLI",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "discover-to-build",
+      "from": "ros2cli",
+      "to": "sidecar",
+      "label": "话题基础信息 → 构建 reducer",
+      "variant": "dashed",
+      "fromSide": "top",
+      "toSide": "bottom",
+      "labelAt": [
+        1058,
+        302
+      ]
+    }
   ],
   "cards": [
-    { "dot": "emerald", "title": "逻辑直连 · 物理分离", "items": ["控制平面（插件）经 UDS 长连接读 Sidecar 降维缓存", "Sidecar 持续把 /camera /scan 降维成语义缓存，查询毫秒级命中", "value 给逻辑、text 给 LLM——语义与逻辑出自同一回调"] },
-    { "dot": "cyan", "title": "两条路径并存", "items": ["timely：数据平面缓存读（毫秒，新鲜语义状态）", "pull：L1/L2 逐次子进程 + daemon 往返（agent 节奏）"] },
-    { "dot": "amber", "title": "构建期耦合（低频 · 可标准化 skill）", "items": ["Agent 先经 ros2_topic_list / topic info（工具+runCommand 链）发现话题基础信息", "据此基于数据平面 Reducer 基类写 on_message 并注册进 sidecar", "低频、构建期触发，可固化为标准 skill 流程：发现→建模→注册"] },
-    { "dot": "rose", "title": "失效闭环", "items": ["缓存带 stamp/ttl，过旧返回 STALE", "心跳 + 断线判 DOWN；安全相关读 fail-closed", "STALE/DOWN 均为结构化错误，工具层原样透传"] }
+    {
+      "dot": "emerald",
+      "title": "逻辑直连 · 物理分离",
+      "items": [
+        "控制平面（插件）经 UDS 长连接读 Sidecar 降维缓存",
+        "Sidecar 持续把 /camera /scan 降维成语义缓存，查询毫秒级命中",
+        "value 给逻辑、text 给 LLM——语义与逻辑出自同一回调"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "两条路径并存",
+      "items": [
+        "timely：数据平面缓存读（毫秒，新鲜语义状态）",
+        "pull：L1/L2 逐次子进程 + daemon 往返（agent 节奏）"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "两线相关 · 构建期（低频 · 可标准化 skill）",
+      "items": [
+        "Agent 先经 pull 链（工具+runCommand→CLI）发现话题基础信息",
+        "据此基于数据平面 Reducer 基类写 on_message 并注册进 sidecar",
+        "低频、构建期触发，可固化为标准 skill 流程：发现→建模→注册"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "失效闭环",
+      "items": [
+        "缓存带 stamp/ttl，过旧返回 STALE",
+        "心跳 + 断线判 DOWN；安全相关读 fail-closed",
+        "STALE/DOWN 均为结构化错误，工具层原样透传"
+      ]
+    }
   ]
 }
