@@ -13,7 +13,7 @@
           "state_tool",
           "state_client",
           "sidecar",
-          "topics"
+          "ros_topic"
         ],
         "note": "Agent 经 StateClient 长连接读 Sidecar 降维缓存，毫秒级拿到新鲜语义状态。"
       },
@@ -25,7 +25,7 @@
           "ros_tool",
           "bridge",
           "ros2cli",
-          "graph"
+          "ros_graph"
         ],
         "note": "L1/L2 诊断仍经 runCommand 逐次调用 ros2 CLI（agent 节奏）。"
       },
@@ -50,7 +50,7 @@
       "label": "DSH Agent",
       "sublabel": "deepseek-v4",
       "pos": [
-        60,
+        40,
         265
       ],
       "size": [
@@ -64,7 +64,7 @@
       "label": "state_get / state_snapshot",
       "sublabel": "dsh-ros2-state · 读缓存",
       "pos": [
-        260,
+        200,
         150
       ],
       "size": [
@@ -78,7 +78,7 @@
       "label": "StateClient",
       "sublabel": "UDS · newline-JSON · 并发",
       "pos": [
-        540,
+        480,
         148
       ],
       "size": [
@@ -89,10 +89,10 @@
     {
       "id": "sidecar",
       "type": "backend",
-      "label": "Sidecar 数据平面",
+      "label": "Sidecar",
       "sublabel": "reducer 降维 + 缓存",
       "pos": [
-        880,
+        980,
         145
       ],
       "size": [
@@ -101,26 +101,12 @@
       ]
     },
     {
-      "id": "topics",
-      "type": "messagebus",
-      "label": "高频话题",
-      "sublabel": "/camera · /scan",
-      "pos": [
-        890,
-        40
-      ],
-      "size": [
-        190,
-        58
-      ]
-    },
-    {
       "id": "ros_tool",
       "type": "backend",
       "label": "ros2_* 工具",
       "sublabel": "L1/L2 诊断",
       "pos": [
-        260,
+        200,
         390
       ],
       "size": [
@@ -134,7 +120,7 @@
       "label": "runCommand 桥",
       "sublabel": "execFile / bash -lc",
       "pos": [
-        540,
+        460,
         388
       ],
       "size": [
@@ -148,7 +134,7 @@
       "label": "ros2 CLI",
       "sublabel": "topic echo / node info",
       "pos": [
-        885,
+        700,
         389
       ],
       "size": [
@@ -157,13 +143,27 @@
       ]
     },
     {
-      "id": "graph",
+      "id": "ros_topic",
       "type": "messagebus",
-      "label": "ROS 图",
+      "label": "ROS话题",
+      "sublabel": "/camera · /scan",
+      "pos": [
+        1300,
+        145
+      ],
+      "size": [
+        190,
+        58
+      ]
+    },
+    {
+      "id": "ros_graph",
+      "type": "messagebus",
+      "label": "ROS图",
       "sublabel": "图发现缓存",
       "pos": [
-        895,
-        520
+        1300,
+        389
       ],
       "size": [
         180,
@@ -180,23 +180,23 @@
         "state_tool",
         "state_client",
         "ros_tool",
-        "bridge"
+        "bridge",
+        "ros2cli"
       ]
     },
     {
       "kind": "region",
       "label": "数据平面 · Sidecar 独立进程",
       "wraps": [
-        "sidecar",
-        "topics"
+        "sidecar"
       ]
     },
     {
       "kind": "region",
-      "label": "ROS2 世界 · Pull 路径",
+      "label": "ROS世界 · Jazzy",
       "wraps": [
-        "ros2cli",
-        "graph"
+        "ros_topic",
+        "ros_graph"
       ]
     }
   ],
@@ -225,7 +225,11 @@
       "to": "state_client",
       "label": "deps.state",
       "fromSide": "right",
-      "toSide": "left"
+      "toSide": "left",
+      "labelAt": [
+        440,
+        165
+      ]
     },
     {
       "id": "client-to-sidecar",
@@ -234,19 +238,23 @@
       "label": "UDS 长连接 · 逻辑直连",
       "variant": "emphasis",
       "fromSide": "right",
-      "toSide": "left"
+      "toSide": "left",
+      "labelAt": [
+        830,
+        180
+      ]
     },
     {
-      "id": "topics-to-sidecar",
-      "from": "topics",
-      "to": "sidecar",
+      "id": "sidecar-to-topic",
+      "from": "sidecar",
+      "to": "ros_topic",
       "label": "订阅 · 降维",
       "variant": "dashed",
-      "fromSide": "bottom",
-      "toSide": "top",
+      "fromSide": "right",
+      "toSide": "left",
       "labelAt": [
-        985,
-        120
+        1245,
+        180
       ]
     },
     {
@@ -255,7 +263,11 @@
       "to": "bridge",
       "label": "deps.run",
       "fromSide": "right",
-      "toSide": "left"
+      "toSide": "left",
+      "labelAt": [
+        430,
+        405
+      ]
     },
     {
       "id": "bridge-to-ros2cli",
@@ -263,18 +275,22 @@
       "to": "ros2cli",
       "label": "bash -lc",
       "fromSide": "right",
-      "toSide": "left"
+      "toSide": "left",
+      "labelAt": [
+        680,
+        463
+      ]
     },
     {
       "id": "ros2cli-to-graph",
       "from": "ros2cli",
-      "to": "graph",
+      "to": "ros_graph",
       "label": "ros2 CLI",
-      "fromSide": "bottom",
-      "toSide": "top",
+      "fromSide": "right",
+      "toSide": "left",
       "labelAt": [
-        985,
-        485
+        1100,
+        411
       ]
     },
     {
@@ -286,8 +302,18 @@
       "fromSide": "top",
       "toSide": "bottom",
       "labelAt": [
-        1000,
+        942,
         300
+      ],
+      "via": [
+        [
+          800,
+          300
+        ],
+        [
+          1085,
+          300
+        ]
       ]
     }
   ],
