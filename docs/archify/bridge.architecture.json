@@ -6,7 +6,8 @@
     "quality_profile": "showcase",
     "views": [
       { "id": "timely", "label": "逻辑直连（数据平面）", "focus": ["agent", "state_tool", "state_client", "sidecar", "topics"], "note": "Agent 经 StateClient 长连接读 Sidecar 降维缓存，毫秒级拿到新鲜语义状态。" },
-      { "id": "pull", "label": "Pull 问答（逐次子进程）", "focus": ["agent", "ros_tool", "bridge", "ros2cli", "graph"], "note": "L1/L2 诊断仍经 runCommand 逐次调用 ros2 CLI（agent 节奏）。" }
+      { "id": "pull", "label": "Pull 问答（逐次子进程）", "focus": ["agent", "ros_tool", "bridge", "ros2cli", "graph"], "note": "L1/L2 诊断仍经 runCommand 逐次调用 ros2 CLI（agent 节奏）。" },
+      { "id": "build", "label": "构建期耦合（低频）", "focus": ["agent", "ros_tool", "sidecar"], "note": "Agent 先用 pull 链（工具+runCommand）发现话题基础信息，再据此基于基类构建 reducer 注册进 sidecar——低频、可标准化为 skill 流程。" }
     ]
   },
   "components": [
@@ -31,6 +32,7 @@
     { "id": "client-to-sidecar", "from": "state_client", "to": "sidecar", "label": "UDS 长连接 · 逻辑直连", "variant": "emphasis", "fromSide": "top", "toSide": "bottom" },
     { "id": "topics-to-sidecar", "from": "topics", "to": "sidecar", "label": "订阅 · 降维", "variant": "dashed" },
     { "id": "agent-to-ros", "from": "agent", "to": "ros_tool", "label": "调用", "variant": "dashed", "fromSide": "right", "toSide": "left" },
+    { "id": "agent-to-build", "from": "agent", "to": "sidecar", "label": "低频 · 基类构建 reducer", "variant": "dashed", "fromSide": "right", "toSide": "bottom" },
     { "id": "ros-to-bridge", "from": "ros_tool", "to": "bridge", "label": "deps.run" },
     { "id": "bridge-to-ros2cli", "from": "bridge", "to": "ros2cli", "label": "bash -lc", "fromSide": "bottom", "toSide": "top", "labelAt": [760, 580] },
     { "id": "ros2cli-to-graph", "from": "ros2cli", "to": "graph", "label": "ros2 CLI" }
@@ -38,6 +40,7 @@
   "cards": [
     { "dot": "emerald", "title": "逻辑直连 · 物理分离", "items": ["控制平面（插件）经 UDS 长连接读 Sidecar 降维缓存", "Sidecar 持续把 /camera /scan 降维成语义缓存，查询毫秒级命中", "value 给逻辑、text 给 LLM——语义与逻辑出自同一回调"] },
     { "dot": "cyan", "title": "两条路径并存", "items": ["timely：数据平面缓存读（毫秒，新鲜语义状态）", "pull：L1/L2 逐次子进程 + daemon 往返（agent 节奏）"] },
+    { "dot": "amber", "title": "构建期耦合（低频 · 可标准化 skill）", "items": ["Agent 先经 ros2_topic_list / topic info（工具+runCommand 链）发现话题基础信息", "据此基于数据平面 Reducer 基类写 on_message 并注册进 sidecar", "低频、构建期触发，可固化为标准 skill 流程：发现→建模→注册"] },
     { "dot": "rose", "title": "失效闭环", "items": ["缓存带 stamp/ttl，过旧返回 STALE", "心跳 + 断线判 DOWN；安全相关读 fail-closed", "STALE/DOWN 均为结构化错误，工具层原样透传"] }
   ]
 }

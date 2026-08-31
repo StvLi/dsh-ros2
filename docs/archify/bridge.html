@@ -4846,7 +4846,7 @@
       </div>
     </div>
 
-    <script id="archify-guided-views-data" type="application/json">[{"id":"timely","label":"逻辑直连（数据平面）","focus":["agent","state_tool","state_client","sidecar","topics"],"note":"Agent 经 StateClient 长连接读 Sidecar 降维缓存，毫秒级拿到新鲜语义状态。"},{"id":"pull","label":"Pull 问答（逐次子进程）","focus":["agent","ros_tool","bridge","ros2cli","graph"],"note":"L1/L2 诊断仍经 runCommand 逐次调用 ros2 CLI（agent 节奏）。"}]</script>
+    <script id="archify-guided-views-data" type="application/json">[{"id":"timely","label":"逻辑直连（数据平面）","focus":["agent","state_tool","state_client","sidecar","topics"],"note":"Agent 经 StateClient 长连接读 Sidecar 降维缓存，毫秒级拿到新鲜语义状态。"},{"id":"pull","label":"Pull 问答（逐次子进程）","focus":["agent","ros_tool","bridge","ros2cli","graph"],"note":"L1/L2 诊断仍经 runCommand 逐次调用 ros2 CLI（agent 节奏）。"},{"id":"build","label":"构建期耦合（低频）","focus":["agent","ros_tool","sidecar"],"note":"Agent 先用 pull 链（工具+runCommand）发现话题基础信息，再据此基于基类构建 reducer 注册进 sidecar——低频、可标准化为 skill 流程。"}]</script>
 
     <div class="guided-views no-print" id="guided-views" hidden aria-label="Guided diagram views">
       <button id="guided-view-prev" type="button" aria-label="Previous guided view" title="Previous guided view ([)">&#8592;</button>
@@ -4940,14 +4940,15 @@
         <text x="638" y="608" class="t-cloud" font-size="9" font-weight="600">ROS2 世界 · Pull 路径</text>
 
         <!-- Connection paths (before components for correct z-order) -->
-        <path data-edge-from="agent" data-edge-to="state_tool" data-edge-label="调用" data-edge-key="0" data-edge-id="agent-to-state" data-composition-points="230,368;360,368" d="M 230 368 L 360 368" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="agent" data-edge-to="state_tool" data-edge-label="调用" data-edge-key="0" data-edge-id="agent-to-state" data-composition-points="230,375;360,375" d="M 230 375 L 360 375" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
         <path data-edge-from="state_tool" data-edge-to="state_client" data-edge-label="deps.state" data-edge-key="1" data-edge-id="state-to-client" data-composition-points="560,370;660,370" d="M 560 370 L 660 370" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
-        <path data-edge-from="state_client" data-edge-to="sidecar" data-edge-label="UDS 长连接 · 逻辑直连" data-edge-key="2" data-edge-id="client-to-sidecar" data-composition-points="760,340;760,180" d="M 760 340 L 760 180" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="state_client" data-edge-to="sidecar" data-edge-label="UDS 长连接 · 逻辑直连" data-edge-key="2" data-edge-id="client-to-sidecar" data-composition-points="767,340;767,180" d="M 767 340 L 767 180" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
         <path data-edge-from="topics" data-edge-to="sidecar" data-edge-label="订阅 · 降维" data-edge-key="3" data-edge-id="topics-to-sidecar" data-composition-points="410,139;655,139" d="M 410 139 L 655 139" class="a-dashed" stroke-width="1.5" marker-end="url(#arrowhead-dashed)"/>
-        <path data-edge-from="agent" data-edge-to="ros_tool" data-edge-label="调用" data-edge-key="4" data-edge-id="agent-to-ros" data-composition-points="230,382;295,382;295,510;360,510" d="M 230 382 L 287 382 Q 295 382 295 390 L 295 502 Q 295 510 303 510 L 360 510" class="a-dashed" stroke-width="1.5" marker-end="url(#arrowhead-dashed)"/>
-        <path data-edge-from="ros_tool" data-edge-to="bridge" data-edge-label="deps.run" data-edge-key="5" data-edge-id="ros-to-bridge" data-composition-points="560,510;660,510" d="M 560 510 L 660 510" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
-        <path data-edge-from="bridge" data-edge-to="ros2cli" data-edge-label="bash -lc" data-edge-key="6" data-edge-id="bridge-to-ros2cli" data-composition-points="760,544;760,620" d="M 760 544 L 760 620" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
-        <path data-edge-from="ros2cli" data-edge-to="graph" data-edge-label="ros2 CLI" data-edge-key="7" data-edge-id="ros2cli-to-graph" data-composition-points="860,651;920,651" d="M 860 651 L 920 651" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="agent" data-edge-to="ros_tool" data-edge-label="调用" data-edge-key="4" data-edge-id="agent-to-ros" data-composition-points="230,389;295,389;295,510;360,510" d="M 230 389 L 287 389 Q 295 389 295 397 L 295 502 Q 295 510 303 510 L 360 510" class="a-dashed" stroke-width="1.5" marker-end="url(#arrowhead-dashed)"/>
+        <path data-edge-from="agent" data-edge-to="sidecar" data-edge-label="低频 · 基类构建 reducer" data-edge-key="5" data-edge-id="agent-to-build" data-composition-points="230,361;254,361;254,204;753,204;753,180" d="M 230 361 L 246 361 Q 254 361 254 353 L 254 212 Q 254 204 262 204 L 745 204 Q 753 204 753 196 L 753 180" class="a-dashed" stroke-width="1.5" marker-end="url(#arrowhead-dashed)"/>
+        <path data-edge-from="ros_tool" data-edge-to="bridge" data-edge-label="deps.run" data-edge-key="6" data-edge-id="ros-to-bridge" data-composition-points="560,510;660,510" d="M 560 510 L 660 510" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="bridge" data-edge-to="ros2cli" data-edge-label="bash -lc" data-edge-key="7" data-edge-id="bridge-to-ros2cli" data-composition-points="760,544;760,620" d="M 760 544 L 760 620" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="ros2cli" data-edge-to="graph" data-edge-label="ros2 CLI" data-edge-key="8" data-edge-id="ros2cli-to-graph" data-composition-points="860,651;920,651" d="M 860 651 L 920 651" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
 
         <!-- Components -->
         <g id="node-agent" data-node-id="agent" data-node-label="DSH Agent" tabindex="0" role="button" aria-label="Focus DSH Agent, deepseek-v4, 控制平面 · Harness 进程" aria-pressed="false" data-node-kind="external" data-node-sublabel="deepseek-v4" data-node-context="控制平面 · Harness 进程">
@@ -5058,34 +5059,38 @@
 
         <!-- Connection labels -->
         <g data-detail="context" data-edge-from="agent" data-edge-to="state_tool" data-edge-label="调用" data-edge-key="0" data-edge-id="agent-to-state">
-          <rect x="280" y="348" width="30" height="14" rx="3" class="c-mask"/>
-          <text x="295" y="358" class="t-backend" font-size="8" text-anchor="middle">调用</text>
+          <rect x="280" y="355" width="30" height="14" rx="3" class="c-mask"/>
+          <text x="295" y="365" class="t-backend" font-size="8" text-anchor="middle">调用</text>
         </g>
         <g data-detail="context" data-edge-from="state_tool" data-edge-to="state_client" data-edge-label="deps.state" data-edge-key="1" data-edge-id="state-to-client">
           <rect x="581" y="350" width="58" height="14" rx="3" class="c-mask"/>
           <text x="610" y="360" class="t-muted" font-size="8" text-anchor="middle">deps.state</text>
         </g>
         <g data-detail="context" data-edge-from="state_client" data-edge-to="sidecar" data-edge-label="UDS 长连接 · 逻辑直连" data-edge-key="2" data-edge-id="client-to-sidecar">
-          <rect x="704.6" y="320" width="110.8" height="14" rx="3" class="c-mask"/>
-          <text x="760" y="330" class="t-backend" font-size="8" text-anchor="middle">UDS 长连接 · 逻辑直连</text>
+          <rect x="711.6" y="320" width="110.8" height="14" rx="3" class="c-mask"/>
+          <text x="767" y="330" class="t-backend" font-size="8" text-anchor="middle">UDS 长连接 · 逻辑直连</text>
         </g>
         <g data-detail="context" data-edge-from="topics" data-edge-to="sidecar" data-edge-label="订阅 · 降维" data-edge-key="3" data-edge-id="topics-to-sidecar">
           <rect x="501.1" y="119" width="62.8" height="14" rx="3" class="c-mask"/>
           <text x="532.5" y="129" class="t-messagebus" font-size="8" text-anchor="middle">订阅 · 降维</text>
         </g>
         <g data-detail="context" data-edge-from="agent" data-edge-to="ros_tool" data-edge-label="调用" data-edge-key="4" data-edge-id="agent-to-ros">
-          <rect x="280" y="426" width="30" height="14" rx="3" class="c-mask"/>
-          <text x="295" y="436" class="t-messagebus" font-size="8" text-anchor="middle">调用</text>
+          <rect x="280" y="429.5" width="30" height="14" rx="3" class="c-mask"/>
+          <text x="295" y="439.5" class="t-messagebus" font-size="8" text-anchor="middle">调用</text>
         </g>
-        <g data-detail="context" data-edge-from="ros_tool" data-edge-to="bridge" data-edge-label="deps.run" data-edge-key="5" data-edge-id="ros-to-bridge">
+        <g data-detail="context" data-edge-from="agent" data-edge-to="sidecar" data-edge-label="低频 · 基类构建 reducer" data-edge-key="5" data-edge-id="agent-to-build">
+          <rect x="193.8" y="262.5" width="120.39999999999999" height="14" rx="3" class="c-mask"/>
+          <text x="254" y="272.5" class="t-messagebus" font-size="8" text-anchor="middle">低频 · 基类构建 reducer</text>
+        </g>
+        <g data-detail="context" data-edge-from="ros_tool" data-edge-to="bridge" data-edge-label="deps.run" data-edge-key="6" data-edge-id="ros-to-bridge">
           <rect x="585.8" y="490" width="48.4" height="14" rx="3" class="c-mask"/>
           <text x="610" y="500" class="t-muted" font-size="8" text-anchor="middle">deps.run</text>
         </g>
-        <g data-detail="context" data-edge-from="bridge" data-edge-to="ros2cli" data-edge-label="bash -lc" data-edge-key="6" data-edge-id="bridge-to-ros2cli">
+        <g data-detail="context" data-edge-from="bridge" data-edge-to="ros2cli" data-edge-label="bash -lc" data-edge-key="7" data-edge-id="bridge-to-ros2cli">
           <rect x="735.8" y="570" width="48.4" height="14" rx="3" class="c-mask"/>
           <text x="760" y="580" class="t-muted" font-size="8" text-anchor="middle">bash -lc</text>
         </g>
-        <g data-detail="context" data-edge-from="ros2cli" data-edge-to="graph" data-edge-label="ros2 CLI" data-edge-key="7" data-edge-id="ros2cli-to-graph">
+        <g data-detail="context" data-edge-from="ros2cli" data-edge-to="graph" data-edge-label="ros2 CLI" data-edge-key="8" data-edge-id="ros2cli-to-graph">
           <rect x="865.8" y="631" width="48.4" height="14" rx="3" class="c-mask"/>
           <text x="890" y="641" class="t-muted" font-size="8" text-anchor="middle">ros2 CLI</text>
         </g>
@@ -5309,6 +5314,18 @@
         <ul>
           <li>&bull; timely：数据平面缓存读（毫秒，新鲜语义状态）</li>
           <li>&bull; pull：L1/L2 逐次子进程 + daemon 往返（agent 节奏）</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-dot amber"></div>
+          <h3>构建期耦合（低频 · 可标准化 skill）</h3>
+        </div>
+        <ul>
+          <li>&bull; Agent 先经 ros2_topic_list / topic info（工具+runCommand 链）发现话题基础信息</li>
+          <li>&bull; 据此基于数据平面 Reducer 基类写 on_message 并注册进 sidecar</li>
+          <li>&bull; 低频、构建期触发，可固化为标准 skill 流程：发现→建模→注册</li>
         </ul>
       </div>
 
