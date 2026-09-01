@@ -22,6 +22,16 @@ import sys
 import time
 
 
+def jpeg_size(path):
+    """Read (width, height) from a JPEG via Pillow; (0, 0) when unavailable."""
+    try:
+        from PIL import Image as PILImage
+        with PILImage.open(path) as im:
+            return im.size
+    except Exception:  # noqa: BLE001
+        return (0, 0)
+
+
 def topic_frame(topic, output, timeout, compressed):
     """Subscribe to the topic and save one frame. Returns ((path,w,h), note)."""
     try:
@@ -65,10 +75,10 @@ def topic_frame(topic, output, timeout, compressed):
         data = bytes(got["comp"].data)
         if PILImage is not None:
             PILImage.open(io.BytesIO(data)).save(output, "JPEG")
-            return (output, 0, 0), None
+            return (output, *jpeg_size(output)), None
         with open(output, "wb") as f:
             f.write(data)
-        return (output, 0, 0), "Pillow 不可用——已保存压缩帧原始字节（非 JPEG）"
+        return (output, *jpeg_size(output)), "Pillow 不可用——已保存压缩帧原始字节（非 JPEG）"
     if "img" in got:
         m = got["img"]
         arr = np.frombuffer(bytes(m.data), np.uint8)
@@ -97,7 +107,7 @@ def v4l_frame(dev, output):
     except Exception as e:  # noqa: BLE001
         return None, "ffmpeg V4L 抓取失败：{}".format(e)
     if os.path.exists(output) and os.path.getsize(output) > 0:
-        return (output, 0, 0), None
+        return (output, *jpeg_size(output)), None
     return None, "ffmpeg V4L 未产出文件（{}）——确认设备存在且未被占用".format(dev)
 
 

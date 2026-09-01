@@ -4,6 +4,14 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [SemVer](https://semver.org/).
 
+## [dsh-ros2-vision 0.1.3] - 2026-09-02
+
+### Fixed
+
+- `image_snapshot.py`：话题（compressed/raw）与 `--v4l` 路径现在从 JPEG 头部
+  解析真实宽高（Pillow），不再恒报 `width:0,height:0`——在三路 USB 相机实战
+  调试中发现（`{"ok":true,...,"width":640,"height":480}`）。
+
 ## [dsh-ros2-vision 0.1.2] - 2026-09-02
 
 ### Added

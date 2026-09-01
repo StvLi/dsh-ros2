@@ -106,6 +106,7 @@ describe('resolveApiKey chain (config → env → secrets → missing)', () => {
     expect(r.key).toBeUndefined()
   })
   it('handles an undefined meta', async () => {
+    await makeSecretsDir() // isolate from any real ~/.dsh-ros2/secrets.json
     const r = await resolveApiKey(undefined)
     expect(r.source).toBe('missing')
   })
