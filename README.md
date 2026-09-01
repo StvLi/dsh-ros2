@@ -478,7 +478,7 @@ Release workflow (npm & GitHub Releases): see [`PUBLISH.md`](PUBLISH.md).
 
 - [x] `vision_bringup` polling/refresh discovery (auto-bridge late topics, stop bridges for gone topics);
 - [x] Zero-pose semantics: generic calibration flow (`ros2_zero_pose_semantics`, render + VLM + user confirm, 3-axis combos) linked into robot profiles;
-- [ ] npm publishing (`pnpm publish --access public`, requires `npm login`);
+- [x] npm publishing (9 packages @ 0.1.0 on npmjs, published 2026-08-30; `dsh-ros2-state`/`dsh-ros2-sidecar` added 2026-09; see [docs/versioning.md](docs/versioning.md));
 - [ ] More ROS2 distros (Humble / Rolling) compatibility validation.
 
 ---

@@ -458,7 +458,7 @@ CI（`.github/workflows/ci.yml`）：push 到 `main` / PR 时在 Node 22 与 24 
 
 - [x] `vision_bringup` 轮询/刷新发现（晚出现话题自动补桥、消失自动停桥）；
 - [x] 零位语义：通用校准流程（`ros2_zero_pose_semantics`，渲染 + VLM + 使用者确认，三维组合）并联动进机器人档案；
-- [ ] npm 发布（`pnpm publish --access public`，需 `npm login`）；
+- [x] npm 发布（9 个包 @ 0.1.0 已发布到 npmjs，2026-08-30；`dsh-ros2-state`/`dsh-ros2-sidecar` 于 2026-09 补齐；见 [docs/versioning.md](docs/versioning.md)）；
 - [ ] 更多 ROS2 版本（Humble / Rolling）兼容验证。
 
 ---
