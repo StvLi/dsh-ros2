@@ -1,4 +1,6 @@
 import { execFile, spawn, type ExecFileOptions } from 'node:child_process'
+import path from 'node:path'
+import { accessSync, existsSync, readdirSync } from 'node:fs'
 
 export interface RosResult {
   ok: boolean
@@ -11,6 +13,10 @@ export interface RosResult {
   timedOut: boolean
   durationMs: number
   error?: string
+  /** Whether the environment (ros setup) resolved cleanly (P1 error contract). */
+  sourceOk?: boolean
+  /** Human-readable environment diagnostics (missing paths, fallback used). */
+  envNote?: string
 }
 
 export interface RunOptions {
@@ -18,6 +24,8 @@ export interface RunOptions {
   cwd?: string
   rosLogDir?: string
   rosSetup?: string
+  /** Workspace root used for the `workspaceRoot/install/setup.bash` fallback. */
+  workspaceRoot?: string
   env?: Record<string, string>
 }
 
@@ -45,6 +53,94 @@ function shq(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`
 }
 
+// ── session-scoped workspace override + ros setup fallback chain ──────────
+// "装好即用、用错自纠、切环境不重启": a mutable per-session override (set by the
+// ros2_workspace tool) beats the configured rosSetup; an empty/missing setup
+// falls back through workspaceRoot/install/setup.bash -> /opt/ros/<distro>/setup.bash
+// -> no source; failures carry actionable diagnostics (sourceOk / envNote).
+
+let sessionRosSetup: string | null = null
+
+/** Set/clear the session-level ros setup prefix (ros2_workspace use/reset). */
+export function setSessionRosSetup(prefix: string | null): void {
+  sessionRosSetup = prefix
+}
+
+/** Current session-level ros setup prefix (null = not overridden). */
+export function getSessionRosSetup(): string | null {
+  return sessionRosSetup
+}
+
+/** Extract the first `source <path>` from a shell prefix, if any. */
+function extractSourcePath(prefix: string): string | undefined {
+  const m = /\bsource\s+([^\s&;|]+)/.exec(prefix)
+  return m ? m[1] : undefined
+}
+
+/** First existing candidate for `/opt/ros/<distro>/setup.bash`. */
+function globFirstRosSetup(): string | null {
+  try {
+    const entries = readdirSync('/opt/ros').sort()
+    for (const e of entries) {
+      const cand = path.join('/opt/ros', e, 'setup.bash')
+      if (existsSync(cand)) return cand
+    }
+  } catch {
+    /* /opt/ros missing */
+  }
+  return null
+}
+
+/** Auto-detect: workspaceRoot/install/setup.bash, then /opt/ros/<distro>/setup.bash. */
+function autoDetectSetup(opts: RunOptions): string | null {
+  if (opts.workspaceRoot) {
+    const cand = path.join(opts.workspaceRoot, 'install', 'setup.bash')
+    if (existsSync(cand)) return cand
+  }
+  return globFirstRosSetup()
+}
+
+export interface SetupResolution {
+  /** Final shell prefix ('' = no source). */
+  prefix: string
+  /** The source path used, if any. */
+  sourcePath: string | null
+  /** Whether an explicit rosSetup/session override was configured. */
+  explicit: boolean
+  /** The auto-detected path that would work (when the explicit one is wrong). */
+  autoCandidate: string | null
+  /** Human note (fallback used / misconfiguration) — becomes envNote on errors. */
+  note: string
+}
+
+/** Resolve the effective setup prefix (session override -> config -> auto). */
+export function resolveSetup(opts: RunOptions): SetupResolution {
+  const explicit = sessionRosSetup ?? opts.rosSetup ?? ''
+  if (explicit) {
+    const src = extractSourcePath(explicit)
+    if (src && !existsSync(src)) {
+      // explicit source path is wrong: report + auto-correct via the chain
+      const auto = autoDetectSetup(opts)
+      return {
+        prefix: auto ? `source ${auto} && ` : '',
+        sourcePath: auto ?? null,
+        explicit: true,
+        autoCandidate: auto ?? null,
+        note: `配置的 rosSetup source 路径不存在：${src}；已自动回退${auto ? `到 ${auto}` : '（无可用 setup，直接调用 ros2，依赖宿主 PATH）'}。建议修正配置。`,
+      }
+    }
+    return { prefix: explicit, sourcePath: src ?? null, explicit: true, autoCandidate: null, note: '' }
+  }
+  const auto = autoDetectSetup(opts)
+  return {
+    prefix: auto ? `source ${auto} && ` : '',
+    sourcePath: auto ?? null,
+    explicit: false,
+    autoCandidate: auto ?? null,
+    note: auto ? '' : '未检测到 ros setup（直接调用 ros2，依赖宿主 PATH；可用 ros2_env_check 诊断）',
+  }
+}
+
 /**
  * Run a CLI command (default binary `ros2`) and normalize the outcome.
  * Non-zero exits and timeouts are reported as `ok: false` — the caller decides
@@ -68,15 +164,32 @@ export async function runCommand(bin: string, args: string[], opts: RunOptions =
     cwd,
     env,
   }
+  const setup = resolveSetup(opts)
+  const cmd = setup.prefix ? `${setup.prefix}${command}` : command
+  const envNote = setup.note
   try {
-    const { stdout, stderr } = opts.rosSetup
-      ? await execFileP('bash', ['-lc', `${opts.rosSetup} ${command}`], baseOptions)
+    const { stdout, stderr } = setup.prefix
+      ? await execFileP('bash', ['-lc', cmd], baseOptions)
       : await execFileP(bin, args, baseOptions)
-    return { ok: true, command, stdout, stderr, exitCode: 0, timedOut: false, durationMs: Date.now() - startedAt }
+    return {
+      ok: true, command, stdout, stderr, exitCode: 0, timedOut: false, durationMs: Date.now() - startedAt,
+      sourceOk: true,
+      ...(envNote ? { envNote: `[env] ${envNote}` } : {}),
+    }
   } catch (error) {
     const e = error as NodeJS.ErrnoException & { stdout?: string; stderr?: string; killed?: boolean; signal?: string }
     const timedOut = e.killed === true || e.signal === 'SIGKILL'
     const exitCode = typeof e.code === 'number' ? e.code : null
+    const hostEnv = `AMENT_PREFIX_PATH=${process.env.AMENT_PREFIX_PATH ?? ''} COLCON_PREFIX_PATH=${process.env.COLCON_PREFIX_PATH ?? ''}`
+    const diag = [
+      envNote ? `[env] ${envNote}` : '',
+      setup.explicit && !setup.sourcePath ? '[env] 未检测到 source 路径（rosSetup 不含 source 或非标准格式）' : '',
+      timedOut ? '' : `[env] 宿主环境：${hostEnv}`,
+    ].filter(Boolean).join('\n')
+    const message = [
+      timedOut ? `timed out after ${timeoutMs}ms` : e.message,
+      diag ? `\n${diag}` : '',
+    ].join('')
     return {
       ok: false,
       command,
@@ -85,7 +198,9 @@ export async function runCommand(bin: string, args: string[], opts: RunOptions =
       exitCode,
       timedOut,
       durationMs: Date.now() - startedAt,
-      error: timedOut ? `timed out after ${timeoutMs}ms` : e.message,
+      error: message,
+      sourceOk: setup.explicit && !setup.sourcePath ? false : setup.prefix ? true : undefined,
+      ...(diag ? { envNote: diag } : {}),
     }
   }
 }

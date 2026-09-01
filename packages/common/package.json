@@ -1,6 +1,6 @@
 {
   "name": "dsh-ros2-common",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Shared runtime for the dsh-ros2 plugin family: command runner, parsers, ToolDeps toolkit, and the robot-profile script (zero-copy across packages). Not a cordis bundle.",
   "type": "module",
   "main": "./lib/index.js",

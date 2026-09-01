@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![ROS2](https://img.shields.io/badge/ROS2-Jazzy-orange)]()
 ![Node](https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-brightgreen)
-![Tools](https://img.shields.io/badge/tools-75-blue)
+![Tools](https://img.shields.io/badge/tools-77-blue)
 
 > **版本对应关系**：npm 上的 `dsh-ros2@0.1.0` 就是本仓库当前版本（monorepo 布局）。
 > GitHub 的 `v0.8.0 ~ v0.15.0` 标签是已废弃的旧单体布局历史，从未发布到 npm。
@@ -39,7 +39,7 @@
 
 ## 特性一览
 
-- **零侵入诊断**：75 个工具覆盖 ROS2 调试的绝大多数场景，从"包装了没有"到"这一帧话题里是什么"，一条命令一个结果；
+- **零侵入诊断**：77 个工具覆盖 ROS2 调试的绝大多数场景，从"包装了没有"到"这一帧话题里是什么"，一条命令一个结果；
 - **全图拓扑**：`ros2_graph` 将节点/发布/订阅/服务/动作折叠为一份 JSON，几秒看清系统结构；
 - **审批门控的写操作**：构建、装依赖、生成消息骨架等写操作通过 DSH 审批服务，fail-closed，拒绝即失败；
 - **可视化即服务**：无头也能"看"——截图/多模态描述/窗口交互全部本地化，不依赖远程显示；
@@ -157,6 +157,8 @@ ros2_doctor                         # 系统健康报告
 | `ros2_topic_info` | `ros2 topic info <topic> [-v]` | 话题元数据 / QoS |
 | `ros2_topic_echo` | `ros2 topic echo <topic> --once` | 单帧消息（尽量 JSON）；`--qos-reliability` / `--qos-durability` 透传，可读 TRANSIENT_LOCAL 锁存话题 |
 | `ros2_topic_hz` | `ros2 topic hz <topic> [--window N]` | 测量话题发布频率（窗口内均值/最小/最大/标准差）；自然终止 = 测量超时 |
+| `ros2_env_check` | 环境解析探测 | 自检：当前 source 哪个 setup、路径是否存在、可见包/节点数 |
+| `ros2_workspace` | `source <ws>/install/setup.bash &&` | 会话内切换/查看工作区（use/show/reset）——不改配置、不重启 |
 | `ros2_topic_bw` / `ros2_topic_delay` | `ros2 topic bw|delay <topic>` | 测量话题带宽 / 端到端延迟；超时终止 |
 | `ros2_service_list` | `ros2 service list -t` | 服务及类型 |
 | `ros2_service_type` / `ros2_service_find` | `ros2 service type|find ...` | 服务类型 / 按类型找服务 |
@@ -421,7 +423,7 @@ dsh-ros2/                      # pnpm monorepo（工作区根，private）
 ├── tsconfig.base.json
 ├── packages/
 │   ├── common/                # dsh-ros2-common（非 bundle）：runner / parse / toolkit + scripts/robot_profile.py（零复制）
-│   ├── core/                  # dsh-ros2-core（57 工具）：L1 诊断 + L2 管理 + L3 GUI + ros2-diagnostics skill + gui.ts + pty_session.py
+│   ├── core/                  # dsh-ros2-core（59 工具）：L1 诊断 + L2 管理 + L3 GUI + ros2-diagnostics skill + gui.ts + pty_session.py
 │   ├── profile/               # dsh-ros2-profile（4 工具）：robot_register/load/topology + 零位校准 + registration/retrieval skills
 │   ├── moveit/                # dsh-ros2-moveit（4 工具）：discover/status/motion_validate/moveit_move + moveit_*.py + motion_validator.py
 │   ├── safety/                # dsh-ros2-safety（5 工具）：robot_safety_* + safety/ ROS2 包 + safetyStrict 配置
@@ -466,7 +468,7 @@ dsh-ros2/                      # pnpm monorepo（工作区根，private）
 ```bash
 pnpm install
 pnpm run typecheck   # tsc --noEmit
-pnpm run test        # vitest（158 例；另有 10 个 sidecar Python 场景）
+pnpm run test        # vitest（166 例；另有 10 个 sidecar Python 场景）
 pnpm run build       # tsc -> lib/ + lib/types/
 ```
 

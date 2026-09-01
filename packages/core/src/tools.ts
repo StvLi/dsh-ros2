@@ -41,6 +41,9 @@ import {
   type NodeInfo,
   tail,
   jsonOf,
+  setSessionRosSetup,
+  getSessionRosSetup,
+  resolveSetup,
 } from 'dsh-ros2-common'
 import { spawnJob } from 'dsh-ros2-common'
 
@@ -1342,7 +1345,110 @@ export function createRos2Tools(deps: ToolDeps) {
     tools.push(makeParamDeleteTool(coreDeps))
     tools.push(makeLifecycleTool(coreDeps))
     tools.push(makeComponentTool(coreDeps))
+    // 0.1.5: environment self-healing (env_check + session workspace switch).
+    tools.push(makeEnvCheckTool(coreDeps))
+    tools.push(makeWorkspaceTool(coreDeps))
   return tools
+}
+
+/**
+ * L1: self-check the ROS2 environment resolution — which setup is sourced
+ * (session override / config / auto-detected), path existence, and visible
+ * packages/nodes. Read-only, no approval.
+ */
+function makeEnvCheckTool(deps: CoreToolDeps) {
+  return defineTool({
+    name: 'ros2_env_check',
+    description:
+      'Self-check the ROS2 environment resolution: which setup is sourced (session override / configured rosSetup / auto-detected), whether paths exist, and what packages/nodes are visible. Read-only, no approval.',
+    parameters: {},
+    output: { schema: resultSchema, render: renderResult },
+    async execute() {
+      const setup = resolveSetup({ workspaceRoot: deps.workspaceRoot })
+      const probe = `${setup.prefix}echo "__AMENT=$AMENT_PREFIX_PATH"; echo "__COLCON=$COLCON_PREFIX_PATH"; echo "__PKGS=$(ros2 pkg list 2>/dev/null | wc -l)"; echo "__NODES=$(ros2 node list 2>/dev/null | wc -l)"`
+      const res = await deps.run('bash', ['-lc', probe], { timeoutMs: 20000, workspaceRoot: deps.workspaceRoot })
+      const out: Record<string, unknown> = {
+        setup: {
+          prefix: setup.prefix || '(无 source，直接调用 ros2，依赖宿主 PATH)',
+          sourcePath: setup.sourcePath,
+          explicit: setup.explicit,
+          sessionOverride: getSessionRosSetup(),
+        },
+      }
+      const grab = (key: string) => {
+        const m = new RegExp(`__${key}=(.*)`).exec(res.stdout)
+        if (m && m[1] !== undefined) out[key === 'PKGS' ? 'visiblePackages' : key === 'NODES' ? 'visibleNodes' : key === 'AMENT' ? 'amentPrefixPath' : 'colconPrefixPath'] = key === 'PKGS' || key === 'NODES' ? Number(m[1]) : m[1]
+      }
+      grab('AMENT'); grab('COLCON'); grab('PKGS'); grab('NODES')
+      if (setup.note) out.note = setup.note
+      const result = okResult('ros2_env_check', 'ros2 env probe', out as JsonValue)
+      const pkgs = out.visiblePackages as number | undefined
+      if (pkgs === undefined || pkgs === 0) {
+        result.warnings = ['未检测到可见 ROS2 包——环境可能未 source 或 rosSetup 路径无效；可用 ros2_workspace use <workspace> 切换']
+      }
+      return result
+    },
+  })
+}
+
+/**
+ * L1: switch/show the ROS2 workspace for subsequent tool calls WITHOUT
+ * editing config or restarting DSH (session-scoped in-memory override).
+ */
+function makeWorkspaceTool(deps: CoreToolDeps) {
+  return defineTool({
+    name: 'ros2_workspace',
+    description:
+      'Switch or show the ROS2 workspace for subsequent tool calls WITHOUT editing config or restarting (session-scoped). ' +
+      'use <path>: validate <path>/install/setup.bash and set it as the source prefix; ' +
+      'show: report the effective setup (session override / configured rosSetup / auto-detected); ' +
+      'reset: clear the session override and return to the configured fallback chain.',
+    parameters: {
+      action: { type: 'string', enum: ['use', 'show', 'reset'], default: 'show', description: 'use | show | reset.' },
+      path: { type: 'string', default: '', description: 'use: workspace root whose install/setup.bash will be sourced.' },
+    },
+    output: { schema: resultSchema, render: renderResult },
+    async execute(args) {
+      const params = args as Record<string, unknown>
+      const action = String(params.action ?? 'show')
+      if (action === 'use') {
+        const p = strOrUndefined(params.path) ?? ''
+        if (!p) return toolError('ros2_workspace', 'ros2_workspace', 'MISSING_PARAM', 'use 需要 path（工作区根目录）')
+        const setup = path.join(p, 'install', 'setup.bash')
+        let exists = false
+        try {
+          await access(setup)
+          exists = true
+        } catch {
+          exists = false
+        }
+        if (!exists) {
+          return toolError('ros2_workspace', 'ros2_workspace', 'SETUP_NOT_FOUND',
+            `未找到 ${setup}。请确认该工作区已 colcon build；或检查路径下是否有 install/setup.bash。当前会话覆盖：${getSessionRosSetup() ?? '（无）'}。`)
+        }
+        setSessionRosSetup(`source ${setup} && `)
+        return okResult('ros2_workspace', 'ros2_workspace', {
+          action: 'use', path: p, setup,
+          sessionRosSetup: getSessionRosSetup(),
+          note: '后续工具调用将使用该工作区（无需重启 DSH）',
+        })
+      }
+      if (action === 'reset') {
+        setSessionRosSetup(null)
+        return okResult('ros2_workspace', 'ros2_workspace', {
+          action: 'reset', sessionRosSetup: null,
+          note: '会话覆盖已清除——恢复配置的 rosSetup 与自动回退链',
+        })
+      }
+      const setup = resolveSetup({ workspaceRoot: deps.workspaceRoot })
+      return okResult('ros2_workspace', 'ros2_workspace', {
+        action: 'show',
+        sessionOverride: getSessionRosSetup() ?? null,
+        effective: { prefix: setup.prefix || '(无 source)', sourcePath: setup.sourcePath, explicit: setup.explicit },
+        ...(setup.note ? { note: setup.note } : {}),
+      })
+    },
+  })
 }
 
 /**

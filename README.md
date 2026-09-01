@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![ROS2](https://img.shields.io/badge/ROS2-Jazzy-orange)]()
 ![Node](https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-brightgreen)
-![Tools](https://img.shields.io/badge/tools-75-blue)
+![Tools](https://img.shields.io/badge/tools-77-blue)
 
 > **版本对应关系**：npm 上的 `dsh-ros2@0.1.0` 就是本仓库当前版本（monorepo 布局）。
 > GitHub 的 `v0.8.0 ~ v0.15.0` 标签是已废弃的旧单体布局历史，从未发布到 npm。
@@ -39,7 +39,7 @@ All tools run plain `ros2` / `colcon` / `rosdep` CLI commands on the host; L1 ne
 
 ## Features
 
-- **Zero-intrusion diagnostics**: 75 tools cover most ROS2 debugging scenarios — from "is the package installed?" to "what is on this topic right now?", one command, one answer;
+- **Zero-intrusion diagnostics**: 77 tools cover most ROS2 debugging scenarios — from "is the package installed?" to "what is on this topic right now?", one command, one answer;
 - **Whole-graph topology**: `ros2_graph` folds nodes/publishers/subscribers/services/actions into one JSON — see the system structure in seconds;
 - **Approval-gated writes**: builds, dependency installs, message scaffolding etc. go through the DSH approval service; fail-closed, denial = failure;
 - **Visualization as a service**: "see" headlessly — screenshots / multimodal description / window interaction are fully local, no remote display;
@@ -61,7 +61,7 @@ All tools run plain `ros2` / `colcon` / `rosdep` CLI commands on the host; L1 ne
 ### Install the plugins (9 npm packages, since the monorepo split)
 
 Install the domain bundles you need — or the **`dsh-ros2` aggregate** for the
-full 75 tools + 4 skills (its patch inserts all domain ids). All packages are
+full 77 tools + 4 skills (its patch inserts all domain ids). All packages are
 published to npm at **0.1.0** (see [docs/versioning.md](docs/versioning.md) for
 the GitHub ↔ npm version correspondence).
 
@@ -144,6 +144,8 @@ ros2_doctor                         # system health report
 | `ros2_topic_info` | `ros2 topic info <topic> [-v]` | Topic metadata / QoS |
 | `ros2_topic_echo` | `ros2 topic echo <topic> --once` | One message sample (JSON when possible); `--qos-reliability` / `--qos-durability` overrides reach TRANSIENT_LOCAL latched topics |
 | `ros2_topic_hz` | `ros2 topic hz <topic> [--window N]` | Measure publish frequency (average/min/max/std dev over the window); natural termination = measurement timeout |
+| `ros2_env_check` | resolved-setup probe | Self-check the environment: which setup is sourced, path existence, visible packages/nodes |
+| `ros2_workspace` | `source <ws>/install/setup.bash &&` | Switch/show the workspace in-session (use/show/reset) — no config edit, no restart |
 | `ros2_topic_bw` / `ros2_topic_delay` | `ros2 topic bw|delay <topic>` | Measure topic bandwidth / end-to-end delay; timeout-terminated |
 | `ros2_service_list` | `ros2 service list -t` | Services with types |
 | `ros2_service_type` / `ros2_service_find` | `ros2 service type|find ...` | Service type / find services by type |
@@ -435,7 +437,7 @@ dsh-ros2/                      # pnpm monorepo (workspace root, private)
 ├── tsconfig.base.json
 ├── packages/
 │   ├── common/                # dsh-ros2-common (not a bundle): runner / parse / toolkit + scripts/robot_profile.py (zero-copy)
-│   ├── core/                  # dsh-ros2-core (57 tools): L1 diagnostics + L2 management + L3 GUI + ros2-diagnostics skill + gui.ts + pty_session.py
+│   ├── core/                  # dsh-ros2-core (59 tools): L1 diagnostics + L2 management + L3 GUI + ros2-diagnostics skill + gui.ts + pty_session.py
 │   ├── profile/               # dsh-ros2-profile (4 tools): robot_register/load/topology + zero-pose calibration + registration/retrieval skills
 │   ├── moveit/                # dsh-ros2-moveit (4 tools): discover/status/motion_validate/moveit_move + moveit_*.py + motion_validator.py
 │   ├── safety/                # dsh-ros2-safety (5 tools): robot_safety_* + safety/ ROS2 pkg + safetyStrict config
@@ -483,7 +485,7 @@ bundles you need (or the `dsh-ros2` aggregate for the full set):
 ```bash
 pnpm install
 pnpm run typecheck   # tsc --noEmit
-pnpm run test        # vitest (158 cases; plus 10 sidecar Python scenarios)
+pnpm run test        # vitest (166 cases; plus 10 sidecar Python scenarios)
 pnpm run build       # tsc -> lib/ + lib/types/
 ```
 

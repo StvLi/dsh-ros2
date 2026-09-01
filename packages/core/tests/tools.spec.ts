@@ -270,7 +270,9 @@ describe('tool inventory', () => {
     expect(names).toContain('ros2_service_type')
     expect(names).toContain('ros2_service_find')
     expect(names).toContain('ros2_action_type')
-    expect(names).toHaveLength(57)
+    expect(names).toContain('ros2_env_check')
+    expect(names).toContain('ros2_workspace')
+    expect(names).toHaveLength(59)
   })
 })
 
@@ -550,5 +552,55 @@ describe('ros2_service_type / find / action_type', () => {
     const run = makeRun(() => ({ stdout: 'nav2_msgs/action/NavigateToPose\n' }))
     const out = await call('ros2_action_type', run, { action: '/navigate' })
     expect(out.data).toMatchObject({ type: 'nav2_msgs/action/NavigateToPose' })
+  })
+})
+
+// ── environment self-healing (env_check / workspace switch) ──
+
+describe('ros2_env_check', () => {
+  it('reports the resolved setup and visible packages/nodes', async () => {
+    const run = makeRun(() => ({ stdout: '__AMENT=/opt/ros/jazzy\n__COLCON=\n__PKGS=120\n__NODES=3\n' }))
+    const out = await call('ros2_env_check', run, {})
+    expect(out.ok).toBe(true)
+    const data = out.data as { setup: Record<string, unknown>; amentPrefixPath: string; visiblePackages: number; visibleNodes: number }
+    expect(data.amentPrefixPath).toBe('/opt/ros/jazzy')
+    expect(data.visiblePackages).toBe(120)
+    expect(data.visibleNodes).toBe(3)
+    expect(data.setup).toHaveProperty('sourcePath')
+  })
+  it('warns when no packages are visible', async () => {
+    const run = makeRun(() => ({ stdout: '__AMENT=\n__COLCON=\n__PKGS=0\n__NODES=0\n' }))
+    const out = await call('ros2_env_check', run, {})
+    expect(out.ok).toBe(true)
+    expect(out.warnings?.[0]).toContain('未检测到可见 ROS2 包')
+  })
+})
+
+describe('ros2_workspace', () => {
+  it('show is read-only without approval', async () => {
+    const run = makeRun(() => ({ stdout: '' }))
+    const out = await call('ros2_workspace', run, {})
+    expect(out.ok).toBe(true)
+    expect((out.data as { action: string }).action).toBe('show')
+  })
+  it('use validates the setup path and errors when missing', async () => {
+    const run = makeRun(() => ({ stdout: '' }))
+    const out = await call('ros2_workspace', run, { action: 'use', path: '/definitely/not/a/workspace' })
+    expect(out.ok).toBe(false)
+    expect(out.error?.code).toBe('SETUP_NOT_FOUND')
+  })
+  it('use sets the session override when the setup exists', async () => {
+    const { mkdirSync, writeFileSync, rmSync } = await import('node:fs')
+    const dir = '/tmp/dsh-ws-tool-test'
+    mkdirSync(`${dir}/install`, { recursive: true })
+    writeFileSync(`${dir}/install/setup.bash`, 'true\n')
+    try {
+      const run = makeRun(() => ({ stdout: '' }))
+      const out = await call('ros2_workspace', run, { action: 'use', path: dir })
+      expect(out.ok).toBe(true)
+      expect((out.data as { sessionRosSetup: string }).sessionRosSetup).toContain(`${dir}/install/setup.bash`)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })

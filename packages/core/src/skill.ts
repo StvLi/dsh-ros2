@@ -79,25 +79,27 @@ instead of from scratch:
    the knowledge base improves with every session (it is progressively updated
    exactly for this).
 
-## ROS2 missing on the host (one-click install)
+## Environment recovery (self-healing, no restart)
 
-- If \`ros2_* \` tools fail because ROS2 is not available, run
-  \`ros2_install {action: "check"}\` first: it distinguishes "not installed"
-  from "installed but not sourced" (detects \`/opt/ros/*/setup.bash\`) — in the
-  latter case configure \`rosSetup\` / source the environment, do NOT reinstall.
-- Only when the check reports **not installed**, ask the user for confirmation
-  (approval covers it) and run \`ros2_install {action: "start"}\` — it launches
-  the FishROS one-click installer (http://fishros.com/install) in an interactive
-  PTY session. Then drive its menus with
-  \`ros2_install {action: "send", session, input: "<menu number>"}\` and watch
-  progress with \`ros2_install {action: "status", session}\` (e.g. menu "1" →
-  choose the ROS2 distro) until the session reports exited; cancel anytime with
-  \`ros2_install {action: "stop", session}\`.
+When \`ros2_*\` tools fail with environment problems, do NOT edit config and
+restart — fix it in-session:
 
-## MoveIt2 motions (generic, not package-bound)
+1. **Diagnose first**: \`ros2_env_check\` — reports which setup is sourced
+   (session override / configured \`rosSetup\` / auto-detected), whether the
+   source path exists, and how many packages/nodes are visible. A 0-package
+   result means the environment is not sourced.
+2. **Switch workspace in-session**: \`ros2_workspace {action: "use", path}\`
+   validates \`<path>/install/setup.bash\` and sets it as the source prefix for
+   all subsequent tool calls — no config edit, no DSH restart.
+   \`ros2_workspace {action: "show"}\` reports the effective setup;
+   \`{action: "reset"}\` clears the override.
+3. **Fallback chain** (automatic): configured \`rosSetup\` →
+   \`workspaceRoot/install/setup.bash\` → \`/opt/ros/<distro>/setup.bash\` → no
+   source (raw host PATH). A wrong explicit source path is auto-corrected to
+   the chain and reported in the error (\`[env] ...\`) with the detected
+   \`AMENT_PREFIX_PATH\` / \`COLCON_PREFIX_PATH\`.
 
-- To move a robot arm via MoveIt, first run \`moveit_discover\`: it scans any
-  installed MoveIt config package (or accepts \`srdf\` for a direct path), returns
+s \`srdf\` for a direct path), returns
   the planning **groups** and their **named poses** (from the SRDF), and reports
   whether the standard interfaces (\`/move_action\`, \`/execute_trajectory\`,
   \`/compute_cartesian_path\`, controller_manager) are online.

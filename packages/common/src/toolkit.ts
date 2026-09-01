@@ -122,8 +122,8 @@ export const resultSchema = {
 export const renderResult = (_args: unknown, value: JsonValue) => [{ type: 'text' as const, text: JSON.stringify(value) }]
 
 export { type JsonValue, parseJsonOrRaw }
-export { runCommand, spawnJob } from './runner.js'
-export type { RosResult, RunOptions, JobHooks } from './runner.js'
+export { runCommand, spawnJob, setSessionRosSetup, getSessionRosSetup, resolveSetup } from './runner.js'
+export type { RosResult, RunOptions, JobHooks, SetupResolution } from './runner.js'
 export { foldGraph, parseLines, parseNodeInfo, parseTopicList, parseTransforms } from './parse.js'
 
 /** Run-seam config (each domain package carries its own copy via Config). */
@@ -142,6 +142,7 @@ export function makeRun(config: RunConfig): RunFn {
     rosLogDir: opts.rosLogDir ?? config.rosLogDir,
     cwd: opts.cwd ?? (config.workspaceRoot.length > 0 ? config.workspaceRoot : undefined),
     rosSetup: opts.rosSetup ?? config.rosSetup,
+    workspaceRoot: config.workspaceRoot,
     env: opts.env,
   })
 }

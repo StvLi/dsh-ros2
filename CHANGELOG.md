@@ -4,6 +4,27 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [SemVer](https://semver.org/).
 
+## [dsh-ros2-common 0.1.1 / dsh-ros2-core 0.1.5] - 2026-09-01
+
+### Added
+
+- **环境自愈 + 会话级工作区切换**（反馈：多工作区 ROS2 仓库环境配置痛点）：
+  - **setup 回退链**（common `runCommand`）：会话覆盖 → 配置 `rosSetup` →
+    `workspaceRoot/install/setup.bash` → `/opt/ros/<distro>/setup.bash` → 无 source。
+    显式 source 路径不存在时**自动回退到链上可用项**，并在结果/错误中给出可操作诊断
+    （`sourceOk` / `envNote`：缺失路径、已回退项、宿主 `AMENT_PREFIX_PATH`/`COLCON_PREFIX_PATH`）。
+  - **`ros2_env_check`**（L1）：一次报告当前 source 哪个 overlay、路径是否存在、
+    可见包/节点数——"环境没配好"一眼可见。
+  - **`ros2_workspace`**（L1）：`use <ws>` 校验并设置会话级 source 前缀（**不改配置、
+    不重启 DSH**）；`show` 查看生效 setup；`reset` 清除覆盖回到回退链。
+  - **P2 技能**：`ros2-diagnostics` 新增"Environment recovery"章节——环境报错时的
+    在会话内修复路径（env_check → workspace use → 回退链），不再默认工具可用。
+
+### Changed
+
+- common 0.1.0 → **0.1.1**；core 0.1.4 → **0.1.5**；core 工具 57 → **59**，全集 75 → **77**；
+  common 测试 10 → **13**，core 测试 89 → **94**。
+
 ## [docs/build-fixes] - 2026-09-01
 
 ### Fixed
