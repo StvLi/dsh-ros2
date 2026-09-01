@@ -60,9 +60,49 @@
 
 ### 安装插件
 
+全部 9 个 npm 包以 **0.1.0** 发布（GitHub ↔ npm 版本对应关系见
+[docs/versioning.md](docs/versioning.md)）。
+
+**方式一：DSH 插件 CLI（推荐；经 npm 解析）**
+
 ```bash
+# 全集（聚合包；自动拉取 core/profile/moveit/safety/vision 依赖）
 dsh plugin --profile <profile> add dsh-ros2
+# 按需瘦身安装——例如只装诊断：
+dsh plugin --profile <profile> add dsh-ros2-core
+# dsh-ros2-common 为纯库，随依赖自动安装。
 ```
+
+**方式二：直接 npm 安装**（同一批包；也用于安装可选附加包）
+
+```bash
+# 聚合包（自动拉取 dsh-ros2-common/core/profile/moveit/safety/vision）
+npm install dsh-ros2
+# 可选附加：sidecar 数据面守护进程 + 控制面状态客户端
+npm install dsh-ros2-state dsh-ros2-sidecar
+```
+
+**方式三：墙内版（走 npmmirror 镜像，推荐大陆网络环境）**
+
+```bash
+# ① 全局切换镜像源（推荐——DSH 插件 CLI 同样生效，一次配置处处可用）：
+npm config set registry https://registry.npmmirror.com
+# 之后正常执行方式一/方式二的命令即可。
+
+# ② 或单次安装走镜像（不改全局配置）：
+npm install dsh-ros2 --registry=https://registry.npmmirror.com
+npm install dsh-ros2-state dsh-ros2-sidecar --registry=https://registry.npmmirror.com
+```
+
+> 镜像说明：本项目发布走 npm 官方源；npmmirror 会定期同步，新发布的小版本
+> 可能有几分钟到几十分钟的传播延迟——若镜像上暂缺，可用
+> `--registry=https://registry.npmjs.org` 直连官方源验证或应急安装。
+>
+> 包角色：`dsh-ros2`（聚合）· `dsh-ros2-common`（共享库）·
+> `dsh-ros2-core`（核心诊断）· `dsh-ros2-profile`（档案/拓扑）·
+> `dsh-ros2-moveit`（MoveIt 运动）· `dsh-ros2-safety`（安全框架）·
+> `dsh-ros2-vision`（视觉流水线）· `dsh-ros2-state`（状态客户端）·
+> `dsh-ros2-sidecar`（数据面守护进程）。
 
 ### 最小配置
 

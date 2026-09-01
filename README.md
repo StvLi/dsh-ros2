@@ -58,18 +58,38 @@ All tools run plain `ros2` / `colcon` / `rosdep` CLI commands on the host; L1 ne
 - Node `^22.19 || >=24` (DSH host requirement);
 - L4 vision additionally needs Python 3 `rclpy` and an OpenAI-compatible VLM gateway (e.g. Gemini or a self-hosted gateway).
 
-### Install the plugins (7 packages, since the monorepo split)
+### Install the plugins (9 npm packages, since the monorepo split)
 
 Install the domain bundles you need — or the **`dsh-ros2` aggregate** for the
-full 51 tools + 4 skills (its patch inserts all domain ids):
+full 51 tools + 4 skills (its patch inserts all domain ids). All packages are
+published to npm at **0.1.0** (see [docs/versioning.md](docs/versioning.md) for
+the GitHub ↔ npm version correspondence).
+
+**Via the DSH plugin CLI** (recommended; resolves through npm):
 
 ```bash
-# full set (aggregate; pulls core/profile/moveit/safety/vision via its patch)
+# full set (aggregate; pulls core/profile/moveit/safety/vision as deps)
 dsh plugin --profile <profile> add dsh-ros2
 # or lean installs — e.g. diagnostics only:
 dsh plugin --profile <profile> add dsh-ros2-core
 # dsh-ros2-common is a plain library, auto-installed as a dependency.
 ```
+
+**Via npm directly** (same packages; useful for inspecting/installing the
+optional add-ons):
+
+```bash
+# the aggregate (pulls dsh-ros2-common/core/profile/moveit/safety/vision)
+npm install dsh-ros2
+# optional add-ons — the sidecar data plane + its control-plane state client:
+npm install dsh-ros2-state dsh-ros2-sidecar
+```
+
+> Package roles: `dsh-ros2` (aggregate) · `dsh-ros2-common` (shared library) ·
+> `dsh-ros2-core` (core diagnostics) · `dsh-ros2-profile` (profiles/topology) ·
+> `dsh-ros2-moveit` (MoveIt motion) · `dsh-ros2-safety` (safety framework) ·
+> `dsh-ros2-vision` (vision pipeline) · `dsh-ros2-state` (state client) ·
+> `dsh-ros2-sidecar` (data-plane daemon).
 
 ### Minimal configuration (per-bundle, whole-object replacement)
 
