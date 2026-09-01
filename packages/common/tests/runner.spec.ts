@@ -36,38 +36,46 @@ describe('ensureWritableRosLogDir', () => {
 })
 
 describe('resolveSetup fallback chain + session override', () => {
+  function tempSetup(sub: string): string {
+    const { mkdirSync, writeFileSync } = require('node:fs')
+    const dir = `/tmp/dsh-runner-${sub}-${process.pid}`
+    mkdirSync(`${dir}/install`, { recursive: true })
+    writeFileSync(`${dir}/install/setup.bash`, 'true\n')
+    return `${dir}/install/setup.bash`
+  }
+
   it('uses the explicit rosSetup when its source path exists', async () => {
     const { resolveSetup } = await import('../src/runner.js')
-    const setup = resolveSetup({ rosSetup: 'source /opt/ros/jazzy/setup.bash && ' })
+    const src = tempSetup('explicit')
+    const setup = resolveSetup({ rosSetup: `source ${src} && ` })
     expect(setup.explicit).toBe(true)
-    expect(setup.prefix).toBe('source /opt/ros/jazzy/setup.bash && ')
+    expect(setup.prefix).toBe(`source ${src} && `)
   })
 
   it('falls back to auto-detect when the explicit source path is missing', async () => {
     const { resolveSetup } = await import('../src/runner.js')
     const setup = resolveSetup({ rosSetup: 'source /nonexistent/ros/setup.bash && ', workspaceRoot: '' })
-    // auto-detect tries /opt/ros/*/setup.bash; on this host it exists
     expect(setup.explicit).toBe(true)
     expect(setup.note).toContain('不存在')
-    expect(setup.prefix.startsWith('source /opt/ros/')).toBe(true)
+    // never keeps the broken explicit prefix; either auto-detected or empty
+    expect(setup.prefix.includes('nonexistent')).toBe(false)
+    expect(['', 'source /opt/ros/']).toContain(setup.prefix.slice(0, 'source /opt/ros/'.length))
   })
 
-  it('session override beats the configured rosSetup (real path)', async () => {
-    const { mkdirSync, writeFileSync, rmSync } = await import('node:fs')
+  it('session override beats the configured rosSetup (real paths)', async () => {
     const { resolveSetup, setSessionRosSetup, getSessionRosSetup } = await import('../src/runner.js')
-    const dir = '/tmp/dsh-runner-session-test'
-    mkdirSync(`${dir}/install`, { recursive: true })
-    writeFileSync(`${dir}/install/setup.bash`, 'true\n')
+    const override = tempSetup('override')
+    const configured = tempSetup('configured')
     try {
-      setSessionRosSetup(`source ${dir}/install/setup.bash && `)
-      const setup = resolveSetup({ rosSetup: 'source /opt/ros/jazzy/setup.bash && ' })
-      expect(setup.prefix).toBe(`source ${dir}/install/setup.bash && `)
+      setSessionRosSetup(`source ${override} && `)
+      const setup = resolveSetup({ rosSetup: `source ${configured} && ` })
+      expect(setup.prefix).toBe(`source ${override} && `)
       setSessionRosSetup(null)
       expect(getSessionRosSetup()).toBeNull()
-      const after = resolveSetup({ rosSetup: 'source /opt/ros/jazzy/setup.bash && ' })
-      expect(after.prefix).toBe('source /opt/ros/jazzy/setup.bash && ')
+      const after = resolveSetup({ rosSetup: `source ${configured} && ` })
+      expect(after.prefix).toBe(`source ${configured} && `)
     } finally {
-      rmSync(dir, { recursive: true, force: true })
+      setSessionRosSetup(null)
     }
   })
 })
