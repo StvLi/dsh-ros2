@@ -263,9 +263,7 @@ dsh-ros2 将它们抽象为 **一个工具 `moveit_move` + `mode` 参数**——
 | --- | --- |
 | `moveit_discover`（L1） | 读取任意 MoveIt 包的 SRDF：规划组、命名姿态、chain 末端；探测标准接口（`/move_action`、`/execute_trajectory`…）在线状态 |
 | `moveit_status`（L1） | 运行时探测：接口在线 + 当前 `/joint_states` 采样 + SRDF 规划帧 |
-| `moveit_move`（L2 审批） | **一个工具五种模式**：`joint_abs`、`joint_rel`（当前 + 增量）、`pose_abs`、`pose_rel`（frame ee/world）、`trajectory`。**单一路径：规划 → 确定性校验（`robot` 档案完整限位）→ 人工审批（展示校验摘要）→ 执行 → 验证**。执行前查 `/safety/state`：LOCKED 恒拒；监视器失联按 `safetyStrict` |
-| `robot_safety_start` | `ros2 run dsh_ros2_safety safety_monitor --profile <yaml>` | 后台启动通用安全监视器（审批门控）；本体相关值全部来自档案 `safety` 段 |
-| `robot_safety_lock` / `robot_safety_unlock` | `ros2 service call /safety/set_lock\|unlock ...` | **人工门**显式锁死 / 解锁（调用前 L2 审批）；锁存直至人工解锁（恢复：解锁 → 回 home → 恢复） |
+| `moveit_move`（L2 审批） | **一个工具五种模式**：`joint_abs`（joints "j1:=v1 j2:=v2"）、`joint_rel`（deltaJoints = 当前 + 增量）、`pose_abs`（pose "x y z rx ry rz" 规划帧）、`pose_rel`（deltaPose "dx dy dz drx dry drz"，frame ee/world）、`trajectory`（执行已保存的轨迹 JSON） |
 
 ```json
 moveit_move {mode: "joint_abs", group: "right_arm", joints: "right_shoulder_roll:=0.5"}
