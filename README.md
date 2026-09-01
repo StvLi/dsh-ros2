@@ -9,6 +9,11 @@
 ![Node](https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-brightgreen)
 ![Tools](https://img.shields.io/badge/tools-51-blue)
 
+> **版本对应关系**：npm 上的 `dsh-ros2@0.1.0` 就是本仓库当前版本（monorepo 布局）。
+> GitHub 的 `v0.8.0 ~ v0.15.0` 标签是已废弃的旧单体布局历史，从未发布到 npm。
+> 版本号在 2026-08 monorepo 拆分时重新基线。详见 [docs/versioning.md](docs/versioning.md)。
+
+
 **dsh-ros2** gives a DSH agent full robot development / debugging capabilities on any host with ROS2, organized in four capability tiers:
 
 | Tier | Capability | Safety boundary |
@@ -470,6 +475,7 @@ Release workflow (npm & GitHub Releases): see [`PUBLISH.md`](PUBLISH.md).
 | [`docs/test-robot-state-vision.md`](docs/test-robot-state-vision.md) | End-to-end real-robot tests: pipeline, realtime, mesh/TF binding fix & verification, 4-channel joint analysis (with images) |
 | [`docs/test-gpu-passthrough.md`](docs/test-gpu-passthrough.md) | GPU passthrough verification: hardware, troubleshooting, results, usage |
 | [`CHANGELOG.md`](CHANGELOG.md) | Version history (Keep a Changelog) |
+| [`docs/versioning.md`](docs/versioning.md) | GitHub tag ↔ npm package version correspondence (monorepo re-baseline; old single-package tags v0.8–v0.15 were never on npm) |
 
 ---
 

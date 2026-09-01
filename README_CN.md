@@ -9,6 +9,11 @@
 ![Node](https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-brightgreen)
 ![Tools](https://img.shields.io/badge/tools-51-blue)
 
+> **版本对应关系**：npm 上的 `dsh-ros2@0.1.0` 就是本仓库当前版本（monorepo 布局）。
+> GitHub 的 `v0.8.0 ~ v0.15.0` 标签是已废弃的旧单体布局历史，从未发布到 npm。
+> 版本号在 2026-08 的 monorepo 拆分时重新基线。详见 [docs/versioning.md](docs/versioning.md)。
+
+
 **dsh-ros2** 让 DSH 智能体在一台装有 ROS2 的主机上获得完整的机器人开发/调试能力，分为四个能力层：
 
 | 层级 | 能力 | 安全边界 |
@@ -358,7 +363,7 @@ dsh-ros2/
 ├── vlm/                  # ROS2 包 dsh_ros2_vlm（Python）：vlm_node / vision_bringup / vlm_bridge_node / image_snapshot / vlm_call / vlm_bridge_call
 ├── offscreen/            # ROS2 包 dsh_ros2_rviz_offscreen（C++）：rviz_offscreen_node（OGRE 离屏渲染 → /rviz/scene）
 ├── safety/               # ROS2 包 dsh_ros2_safety（Python）：safety_monitor 节点 + safety_core（纯逻辑，--selftest）+ safety_vlm_arbitrate + SafetyState/Event msg + Unlock/SetLock srv
-├── docs/                 # 架构（architecture.md）· 兼容基线（compatibility.md）· 安全（safety.md / safety-handover.md / safety-todo.md / safety-gpt-review.md）· 实测（test-robot-state-vision.md / test-gpu-passthrough.md）· 截图
+├── docs/                 # 架构（architecture.md）· 兼容基线（compatibility.md）· 安全（safety.md / safety-handover.md / safety-todo.md / safety-gpt-review.md）· 实测（test-robot-state-vision.md / test-gpu-passthrough.md）· **versioning.md** · 截图
 ├── tests/                # vitest（115 例，CLI 输出 mock）
 ├── .github/workflows/    # CI：Node 22/24 → typecheck/test/build/pack 校验
 ├── PUBLISH.md            # 开源发布清单（GitHub + npm + DSH 社区目录）
