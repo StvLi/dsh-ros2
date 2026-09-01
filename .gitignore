@@ -11,6 +11,12 @@ lib/
 *.env
 .env
 
+# secrets files — must NEVER enter the repo or any upload
+# (default location is outside the repo: ~/.dsh-ros2/secrets.json)
+secrets.json
+*.secrets.json
+.dsh-ros2/
+
 # colcon build artifacts (vlm/ ROS2 package; builds normally live outside the repo)
 build/
 install/

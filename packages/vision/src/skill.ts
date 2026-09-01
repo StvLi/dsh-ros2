@@ -28,6 +28,20 @@ One headless pipeline: **status data → offscreen RViz render → parallel VLM 
 - \`ros2_vision_doctor\` (read-only) reports build/node/gateway/topic status
   and gives one-shot build/launch guidance.
 
+## API key: prompt → store locally (never commit / never upload)
+
+- Resolution chain: config \`apiKey\` → \`\${ENV}\` reference → local secrets file
+  (\`~/.dsh-ros2/secrets.json\`, 0600). 
+- When no key resolves, key-consuming tools return \`VLM_API_KEY_REQUIRED\`:
+  **ask the user for the key first**, then store it with
+  \`ros2_vision_set_key {key: "..."}\` (approval-gated write to the secrets
+  file — outside the repo, never committed, never packed into npm, never
+  uploaded, never echoed back). Retry after storing.
+- \`ros2_vision_doctor\` reports the key \`source\` (config/env/secrets/missing)
+  and warns on plaintext \`sk-\` keys in config.
+- The stored key is re-resolved at call time, so a mid-session
+  \`ros2_vision_set_key\` takes effect without restarting.
+
 ## Pipeline
 
 1. **Topology & status (L1).**

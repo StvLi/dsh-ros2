@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![ROS2](https://img.shields.io/badge/ROS2-Jazzy-orange)]()
 ![Node](https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-brightgreen)
-![Tools](https://img.shields.io/badge/tools-78-blue)
+![Tools](https://img.shields.io/badge/tools-79-blue)
 
 > **版本对应关系**：npm 上的 `dsh-ros2@0.1.0` 就是本仓库当前版本（monorepo 布局）。
 > GitHub 的 `v0.8.0 ~ v0.15.0` 标签是已废弃的旧单体布局历史，从未发布到 npm。
@@ -39,7 +39,7 @@ All tools run plain `ros2` / `colcon` / `rosdep` CLI commands on the host; L1 ne
 
 ## Features
 
-- **Zero-intrusion diagnostics**: 78 tools cover most ROS2 debugging scenarios — from "is the package installed?" to "what is on this topic right now?", one command, one answer;
+- **Zero-intrusion diagnostics**: 79 tools cover most ROS2 debugging scenarios — from "is the package installed?" to "what is on this topic right now?", one command, one answer;
 - **Whole-graph topology**: `ros2_graph` folds nodes/publishers/subscribers/services/actions into one JSON — see the system structure in seconds;
 - **Approval-gated writes**: builds, dependency installs, message scaffolding etc. go through the DSH approval service; fail-closed, denial = failure;
 - **Visualization as a service**: "see" headlessly — screenshots / multimodal description / window interaction are fully local, no remote display;
@@ -61,7 +61,7 @@ All tools run plain `ros2` / `colcon` / `rosdep` CLI commands on the host; L1 ne
 ### Install the plugins (9 npm packages, since the monorepo split)
 
 Install the domain bundles you need — or the **`dsh-ros2` aggregate** for the
-full 78 tools + 4 skills (its patch inserts all domain ids). All packages are
+full 79 tools + 4 skills (its patch inserts all domain ids). All packages are
 published to npm at **0.1.0** (see [docs/versioning.md](docs/versioning.md) for
 the GitHub ↔ npm version correspondence).
 
@@ -226,7 +226,8 @@ Perception matches the robot-control stack: the VLM runs in a **separate ROS2 pr
 | `ros2_image_snapshot` | Grab one frame from a topic (raw/compressed) and save as JPEG — plain rclpy script, **no custom ROS2 package needed**; `--v4l` ffmpeg fallback for silent topics; the JPEG is ready for the Agent's own multimodal model |
 | `ros2_vlm_analyze` | Analyze an image file or the bridge's latest frame (`useBridge`) via the parallel VLM |
 | `ros2_vision_topics` | List live image topics with their auto bridge service names |
-| `ros2_vision_doctor` | One-shot pipeline self-check: vlm workspace built / vlm_node+vision_bringup running / gateway reachable / visible image topics / apiKey plaintext warning + build-launch guidance |
+| `ros2_vision_doctor` | One-shot pipeline self-check: vlm workspace built / vlm_node+vision_bringup running / gateway reachable / visible image topics / apiKey resolution status (config/env/secrets/missing) + build-launch guidance |
+| `ros2_vision_set_key` | Store the user-provided VLM API Key into `~/.dsh-ros2/secrets.json` (0600, outside the repo — never committed, never uploaded, never echoed); use it when a tool returns `VLM_API_KEY_REQUIRED` |
 | `ros2_vision_analyze` | Analyze any topic's latest frame via its auto bridge (`ros2_vision_analyze {topic, prompt}`) |
 
 ```bash

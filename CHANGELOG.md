@@ -4,6 +4,32 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [SemVer](https://semver.org/).
 
+## [dsh-ros2-vision 0.1.2] - 2026-09-02
+
+### Added
+
+- **API Key 拉起提示 + 单独存储（不落仓库、不上传）**：
+  - **无 Key 时先拉起提示**：Key 解析链（config `apiKey` → `${ENV}` 引用 →
+    本地密钥文件）全部为空时，key 消费工具返回明确 `VLM_API_KEY_REQUIRED`，
+    指引 Agent **先向用户询问获取 API Key**。
+  - **`ros2_vision_set_key`**（L2，需批准）：把用户提供的 Key 写入
+    `~/.dsh-ros2/secrets.json`（0600 权限、0700 目录，**仓库外**）——永不
+    提交 git、永不打包进 npm、永不参与任何上传、结果永不回显 Key。
+  - **惰性解析**：工具在每次调用时按解析链重新取 Key，会话中途
+    `ros2_vision_set_key` 后无需重启即可生效；apply 时亦会回落到密钥文件。
+  - **`ros2_vision_doctor` 增强**：apiKey 状态含 `source`
+    （config/env/secrets/missing）、密钥文件元信息（路径/存在/权限/是否有
+    key）；`missing` 时告警并给"拉起提示 → set_key"指引。
+  - 密钥文件路径可用 `DSH_ROS2_SECRETS` 覆盖；`.gitignore` 增加
+    `secrets.json` / `*.secrets.json` / `.dsh-ros2/` 兜底，npm `files` 白名单
+    不含密钥文件。
+  - skill 新增 "API key: prompt → store locally" 一节。
+
+### Changed
+
+- vision 0.1.1 → **0.1.2**；vision 工具 6 → **7**（+ros2_vision_set_key），
+  全集 78 → **79**；vision 测试 16 → **30**（新增 secrets 单测）。
+
 ## [dsh-ros2-vision 0.1.1] - 2026-09-01
 
 ### Added

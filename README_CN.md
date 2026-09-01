@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![ROS2](https://img.shields.io/badge/ROS2-Jazzy-orange)]()
 ![Node](https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-brightgreen)
-![Tools](https://img.shields.io/badge/tools-78-blue)
+![Tools](https://img.shields.io/badge/tools-79-blue)
 
 > **版本对应关系**：npm 上的 `dsh-ros2@0.1.0` 就是本仓库当前版本（monorepo 布局）。
 > GitHub 的 `v0.8.0 ~ v0.15.0` 标签是已废弃的旧单体布局历史，从未发布到 npm。
@@ -39,7 +39,7 @@
 
 ## 特性一览
 
-- **零侵入诊断**：78 个工具覆盖 ROS2 调试的绝大多数场景，从"包装了没有"到"这一帧话题里是什么"，一条命令一个结果；
+- **零侵入诊断**：79 个工具覆盖 ROS2 调试的绝大多数场景，从"包装了没有"到"这一帧话题里是什么"，一条命令一个结果；
 - **全图拓扑**：`ros2_graph` 将节点/发布/订阅/服务/动作折叠为一份 JSON，几秒看清系统结构；
 - **审批门控的写操作**：构建、装依赖、生成消息骨架等写操作通过 DSH 审批服务，fail-closed，拒绝即失败；
 - **可视化即服务**：无头也能"看"——截图/多模态描述/窗口交互全部本地化，不依赖远程显示；
@@ -239,7 +239,8 @@ GUI 生命周期 + 截图 + 多模态视觉（"先能看，再谈动"）+ xdotoo
 | `ros2_image_snapshot` | 从话题抓一帧存 JPEG——纯 rclpy 脚本，**无需自建 ROS2 包**；`--v4l` 经 ffmpeg 兜底抓取静默话题；JPEG 可直接交给 Agent 自身多模态模型 |
 | `ros2_vlm_analyze` | 分析图像文件或桥的缓存帧（`useBridge`） |
 | `ros2_vision_topics` | 列出实时图像话题及其自动桥服务名 |
-| `ros2_vision_doctor` | 一次管线自检：vlm 工作区是否构建 / vlm_node+vision_bringup 是否运行 / 网关是否可达 / 可见图像话题 / apiKey 明文告警 + 构建与拉起指引 |
+| `ros2_vision_doctor` | 一次管线自检：vlm 工作区是否构建 / vlm_node+vision_bringup 是否运行 / 网关是否可达 / 可见图像话题 / apiKey 解析状态（config/env/secrets/missing）+ 构建与拉起指引 |
+| `ros2_vision_set_key` | 将用户提供的 VLM API Key 存入 `~/.dsh-ros2/secrets.json`（0600，仓库外——不提交、不上传、不回显）；工具返回 `VLM_API_KEY_REQUIRED` 时使用 |
 | `ros2_vision_analyze` | 经自动桥分析任意话题最新帧（`ros2_vision_analyze {topic, prompt}`） |
 
 ```bash

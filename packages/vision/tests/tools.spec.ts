@@ -118,7 +118,8 @@ describe('tool inventory', () => {
     expect(names).toContain('ros2_vision_analyze')
     expect(names).toContain('ros2_vision_describe')
     expect(names).toContain('ros2_vision_doctor')
-    expect(names).toHaveLength(6)
+    expect(names).toContain('ros2_vision_set_key')
+    expect(names).toHaveLength(7)
   })
 })
 
@@ -163,15 +164,16 @@ describe('ros2_vision_doctor', () => {
       }
       return { stdout: '' }
     })
-    const t = createRos2Tools({ run, workspaceRoot: '/tmp/ws', visionMeta: { provider: 'gemini', apiKeyFromEnv: null, apiKeyPlaintext: true, model: 'gemini-2.5-flash', baseUrl: '' } })
+    const t = createRos2Tools({ run, workspaceRoot: '/tmp/ws', visionMeta: { provider: 'gemini', apiKey: 'sk-plain', apiKeyFromEnv: null, apiKeyPlaintext: true, model: 'gemini-2.5-flash', baseUrl: '' } })
       .find((x) => x.name === 'ros2_vision_doctor')
     if (!t) throw new Error('ros2_vision_doctor not registered')
     const out = (await t.execute({}, execStub)) as ToolResult
     expect(out.ok).toBe(true)
-    const data = out.data as { pipeline: { vlmNode: boolean }; imageTopicCount: number; apiKey: { plaintext: boolean } }
+    const data = out.data as { pipeline: { vlmNode: boolean }; imageTopicCount: number; apiKey: { plaintext: boolean; source: string } }
     expect(data.pipeline.vlmNode).toBe(true)
     expect(data.imageTopicCount).toBe(1)
     expect(data.apiKey.plaintext).toBe(true)
+    expect(data.apiKey.source).toBe('config')
     expect(out.warnings?.some((w) => w.includes('明文'))).toBe(true)
   })
 })

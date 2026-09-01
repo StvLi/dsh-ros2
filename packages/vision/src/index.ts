@@ -9,6 +9,7 @@ import { Config, type VisionPackageConfig } from './config.js'
 import { makeRun, type ApprovalRequest, type JobsApi, type VisionProvider } from 'dsh-ros2-common'
 import { createVisionProvider } from './vision.js'
 import { createRos2Tools, type VisionMeta, type VisionToolDeps } from './tools.js'
+import { readVlmApiKey } from './secrets.js'
 import { robotStateVisionSkill } from './skill.js'
 
 export const name = 'dsh-ros2-vision'
@@ -21,18 +22,26 @@ export type { VisionPackageConfig }
 
 export const VISION_SERVICE = 'dshRos2.vision'
 
-export function apply(ctx: Context, config: VisionPackageConfig): void {
+export async function apply(ctx: Context, config: VisionPackageConfig): Promise<void> {
   const run = makeRun(config)
   const approvalService = (ctx as unknown as { approval: { request(req: unknown): Promise<string> } }).approval
   const approval = (req: ApprovalRequest): Promise<string> => approvalService.request(req)
   const jobs = (ctx as unknown as { jobs: JobsApi }).jobs
 
-  // API key 支持 ${ENV_VAR} 引用：从环境变量解析，避免明文落在 profile 配置里。
+  // API key 解析链：config apiKey → ${ENV_VAR} 引用 → 本地密钥文件
+  // (~/.dsh-ros2/secrets.json，0600，仓库外、不进仓库、不参与上传；由
+  // ros2_vision_set_key 在用户提供 key 时写入)。工具调用时会再次按此链
+  // 惰性解析，因此会话中途 set_key 后无需重启即可生效。
   const envRef = /^\$\{([A-Z0-9_]+)\}$/.exec((config.vision.apiKey ?? '').trim())
   const apiKeyFromEnv = envRef && envRef[1] !== undefined ? envRef[1] : null
-  const resolvedApiKey = apiKeyFromEnv ? (process.env[apiKeyFromEnv] ?? '') : config.vision.apiKey
+  const envKey = apiKeyFromEnv ? (process.env[apiKeyFromEnv] ?? '') : ''
+  const secretsKey = (await readVlmApiKey()) ?? ''
+  const resolvedApiKey = (config.vision.apiKey ?? '').trim() !== '' && !apiKeyFromEnv
+    ? (config.vision.apiKey ?? '')
+    : (envKey || secretsKey)
   const visionMeta: VisionMeta = {
     provider: config.vision.provider,
+    apiKey: resolvedApiKey,
     apiKeyFromEnv,
     apiKeyPlaintext: resolvedApiKey.startsWith('sk-') || resolvedApiKey.startsWith('ghp_'),
     model: config.vision.model,

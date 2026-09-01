@@ -42,6 +42,13 @@ import {
   jsonOf,
 } from 'dsh-ros2-common'
 import { spawnJob } from 'dsh-ros2-common'
+import { createVisionProvider } from './vision.js'
+import {
+  resolveApiKey,
+  secretsFileInfo,
+  writeVlmApiKey,
+  type ApiKeyResolution,
+} from './secrets.js'
 
 /** Path to a helper script shipped with THIS package (scripts/). */
 function scriptPath(name: string): string {
@@ -50,10 +57,39 @@ function scriptPath(name: string): string {
 
 export interface VisionMeta {
   provider: string
+  /** Config/env-resolved key (may be empty). The secrets file is checked at call time. */
+  apiKey: string
   apiKeyFromEnv: string | null
   apiKeyPlaintext: boolean
   model: string
   baseUrl: string
+}
+
+/** Missing-key guidance shared by every key-consuming tool. */
+const KEY_MISSING_MESSAGE =
+  '未配置 VLM API Key。请先向用户拉起提示获取 API Key，然后执行 ros2_vision_set_key 存储到 ~/.dsh-ros2/secrets.json（0600 权限，仓库外、不进仓库、不参与上传），再重试本工具。'
+
+function keyError(tool: string, command: string): ToolResult {
+  return toolError(tool, command, 'VLM_API_KEY_REQUIRED', KEY_MISSING_MESSAGE)
+}
+
+/** Build the provider lazily from the resolution chain (config → env → secrets). */
+async function providerFromMeta(meta: VisionMeta | undefined): Promise<{ provider?: VisionProvider; key?: ApiKeyResolution }> {
+  if (!meta) return {}
+  const key = await resolveApiKey(meta)
+  if (meta.provider === 'mock') return { provider: createVisionProvider({ provider: 'mock' }), key }
+  if (key.source === 'missing') return { key }
+  try {
+    const provider = createVisionProvider({
+      provider: meta.provider as 'gemini' | 'openai',
+      apiKey: key.key ?? '',
+      model: meta.model,
+      baseUrl: meta.baseUrl,
+    })
+    return { provider, key }
+  } catch (error) {
+    return { key, provider: undefined }
+  }
 }
 
 export type VisionToolDeps = ToolDeps & { vision?: VisionProvider; visionMeta?: VisionMeta }
@@ -66,7 +102,7 @@ export function bridgeServiceForTopic(topic: string): string {
 function makeVisionDescribeTool(deps: VisionToolDeps) {
   return defineTool({
     name: 'ros2_vision_describe',
-    description: 'Describe an image file with the configured multimodal model (Gemini/OpenAI, or mock). Requires vision.apiKey for real providers.',
+    description: 'Describe an image file with the configured multimodal model (Gemini/OpenAI, or mock). API key resolution: config apiKey → ${ENV} reference → local secrets file (~/.dsh-ros2/secrets.json, written by ros2_vision_set_key). When no key is found the tool returns VLM_API_KEY_REQUIRED — ask the user for the key and store it with ros2_vision_set_key.',
     parameters: {
       imagePath: { type: 'string', required: true, description: 'Path to a PNG/JPEG/WebP/GIF image.' },
       prompt: { type: 'string', default: '', description: 'Optional instruction for the vision model.' },
@@ -77,9 +113,23 @@ function makeVisionDescribeTool(deps: VisionToolDeps) {
       const imagePath = String(params.imagePath)
       const prompt = strOrUndefined(params.prompt) ?? 'Describe this image in detail, especially any robot/ROS visualization content (transforms, joint states, graphs, diagnostics).'
       const command = `vision describe ${imagePath}`
-      if (!deps.vision) return toolError('ros2_vision_describe', command, 'VISION_UNAVAILABLE', '视觉服务未启用（配置 vision.provider）')
+      // Prefer the apply-time provider (mock / already-constructed with a key);
+      // otherwise resolve lazily so a mid-session ros2_vision_set_key works
+      // without a restart.
+      const meta = deps.visionMeta
+      let provider = deps.vision
+      if (!provider) {
+        const built = await providerFromMeta(meta)
+        if (!built.provider) {
+          if (meta && meta.provider !== 'mock' && built.key?.source === 'missing') {
+            return keyError('ros2_vision_describe', command)
+          }
+          return toolError('ros2_vision_describe', command, 'VISION_UNAVAILABLE', '视觉服务未启用（配置 vision.provider 为 gemini/openai/mock，并确保 API Key 可用）')
+        }
+        provider = built.provider
+      }
       try {
-        const description = await deps.vision.describe(imagePath, prompt, { signal: exec.signal })
+        const description = await provider.describe(imagePath, prompt, { signal: exec.signal })
         const value: ToolResult = { ok: true, tool: 'ros2_vision_describe', command, data: { imagePath, description } }
         return value
       } catch (error) {
@@ -150,6 +200,39 @@ function makeVlmAnalyzeTool(deps: VisionToolDeps) {
         }
       }
       return result
+    },
+  })
+}
+
+/**
+ * L2: persist the VLM API key the user explicitly provided — the ONLY write
+ * path for a key. Stored outside the repo (0600), never committed/uploaded.
+ */
+function makeVisionSetKeyTool(deps: VisionToolDeps) {
+  return defineTool({
+    name: 'ros2_vision_set_key',
+    description:
+      'Store the VLM API Key the user just provided into the local secrets file (~/.dsh-ros2/secrets.json, 0600). ONLY use it when the user explicitly hands you a key (e.g. after ros2_vision_describe returned VLM_API_KEY_REQUIRED). The file lives outside the repository, is never committed to git, never packed into npm, never uploaded anywhere; the key is never echoed in results. Overwrites any previously stored key.',
+    parameters: {
+      key: { type: 'string', required: true, description: 'The VLM API key the user provided (e.g. AIza..., sk-...). It is stored locally, never printed back.' },
+    },
+    output: { schema: resultSchema, render: renderResult },
+    async execute(args, exec) {
+      const params = args as Record<string, unknown>
+      const key = String(params.key ?? '').trim()
+      const command = 'ros2_vision_set_key'
+      if (key.length === 0) return toolError('ros2_vision_set_key', command, 'BAD_INPUT', 'key 为空——请向用户确认后再存储')
+      const approval = await requestApproval(deps, exec, 'ros2_vision_set_key', '将用户提供的 VLM API Key 写入本地密钥文件（~/.dsh-ros2/secrets.json，0600，仓库外）')
+      if (!approval.allowed) return deniedResult('ros2_vision_set_key', command, approval.outcome)
+      const res = await writeVlmApiKey(key)
+      if (!res.ok) return toolError('ros2_vision_set_key', command, 'WRITE_FAILED', `写入失败：${res.error ?? '未知错误'}`)
+      const value: ToolResult = {
+        ok: true,
+        tool: 'ros2_vision_set_key',
+        command,
+        data: { stored: true, source: 'secrets', path: res.path, mode: '0600', hint: 'Key 已存储，可重试 ros2_vision_describe / ros2_vision_doctor' },
+      }
+      return value
     },
   })
 }
@@ -261,21 +344,28 @@ function makeVisionDoctorTool(deps: VisionToolDeps) {
         }
       }
 
+      const keyRes = await resolveApiKey(meta)
+      const secretsInfo = await secretsFileInfo()
+      const apiKeyStatus = meta
+        ? {
+            provider: meta.provider,
+            source: keyRes.source,
+            keyConfigured: keyRes.source !== 'missing',
+            fromEnv: meta.apiKeyFromEnv,
+            plaintext: meta.apiKeyPlaintext,
+            model: meta.model || '(默认)',
+            baseUrl: meta.baseUrl || '(未配置)',
+            secretsFile: secretsInfo,
+          }
+        : { note: 'vision provider 未启用（mock）' }
+
       const data: Record<string, unknown> = {
         workspace: { root: workspaceRoot || '(未配置)', installDirs, built },
         pipeline: { vlmNode, visionBringup: bringup },
         gateway,
         imageTopics,
         imageTopicCount: imageTopics.length,
-        apiKey: meta
-          ? {
-              provider: meta.provider,
-              fromEnv: meta.apiKeyFromEnv,
-              plaintext: meta.apiKeyPlaintext,
-              model: meta.model || '(默认)',
-              baseUrl: meta.baseUrl || '(未配置)',
-            }
-          : { note: 'vision provider 未启用（mock）' },
+        apiKey: apiKeyStatus,
         degradation: 'VLM 管线不可用时：ros2_image_snapshot 取帧 → Agent 自身多模态模型直接看图（无需部署 vlm_node/网关）',
       }
       const ready = built.dsh_ros2_vlm && vlmNode && bringup
@@ -289,8 +379,14 @@ function makeVisionDoctorTool(deps: VisionToolDeps) {
       }
       const result = okResult('ros2_vision_doctor', 'vision pipeline probe', data as JsonValue)
       if (!ready) result.warnings = ['VLM 管线未就绪——可用降级路径取图后由 Agent 直接看图']
+      if (keyRes.source === 'missing') {
+        result.warnings = [
+          ...(result.warnings ?? []),
+          '未解析到 VLM API Key——请先向用户拉起提示获取，再用 ros2_vision_set_key 存储到 ~/.dsh-ros2/secrets.json（0600，仓库外、不上传），之后 ros2_vision_describe 即可使用',
+        ]
+      }
       if (meta?.apiKeyPlaintext) {
-        result.warnings = [...(result.warnings ?? []), '检测到明文 API Key（sk-...）——建议改用环境变量注入（${VLM_API_KEY}）并自查 profile 配置']
+        result.warnings = [...(result.warnings ?? []), '检测到明文 API Key（sk-...）——建议改用环境变量注入（${VLM_API_KEY}）或 ros2_vision_set_key 存储，并自查 profile 配置']
       }
       return result
     },
@@ -304,6 +400,7 @@ export function createRos2Tools(deps: VisionToolDeps) {
     makeVlmAnalyzeTool(deps),
     makeVisionTopicsTool(deps),
     makeVisionAnalyzeTool(deps),
+    makeVisionSetKeyTool(deps),
     makeVisionDoctorTool(deps),
   ]
 }

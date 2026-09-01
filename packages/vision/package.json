@@ -1,6 +1,6 @@
 {
   "name": "dsh-ros2-vision",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "dsh-ros2 realtime vision: image-topic acquisition, parallel VLM analysis, vision pipeline tools + vision provider service (5 tools) + the vlm/ and offscreen/ ROS2 packages (published) + robot-state-vision-analysis skill. Cordis bundle.",
   "type": "module",
   "main": "./lib/index.js",
