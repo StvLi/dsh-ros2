@@ -2,7 +2,7 @@
   "name": "dsh-ros2-workspace",
   "version": "0.0.0",
   "private": true,
-  "description": "pnpm workspace for the dsh-ros2 plugin family (7 cordis bundles: common/core/profile/moveit/safety/vision/aggregate)",
+  "description": "pnpm workspace for the dsh-ros2 plugin family (9 packages: common/core/profile/moveit/safety/vision/state/sidecar/aggregate)",
   "scripts": {
     "typecheck": "pnpm --filter dsh-ros2-common run build && pnpm -r typecheck",
     "test": "pnpm --filter dsh-ros2-common run build && pnpm -r test",
@@ -10,5 +10,6 @@
   },
   "engines": {
     "node": "^22.19.0 || >=24.0.0"
-  }
+  },
+  "packageManager": "pnpm@11.22.0"
 }

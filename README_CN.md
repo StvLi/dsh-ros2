@@ -434,10 +434,10 @@ dsh-ros2/                      # pnpm monorepo（工作区根，private）
 
 ---
 
-## 插件拆分（7 个包）
+## 插件拆分（9 个包）
 
-自 v0.15.0 起插件为 **pnpm monorepo**，含 7 个 npm 包（见
-[`docs/plugin-split-plan.md`](docs/plugin-split-plan.md)，ISP 收紧版）：51 工具 +
+自 v0.15.0 起插件为 **pnpm monorepo**，含 9 个 npm 包（见
+[`docs/plugin-split-plan.md`](docs/plugin-split-plan.md)，ISP 收紧版）：75 工具 +
 4 skills 全部保留、**名称与行为不变**。按需安装域包（或安装 `dsh-ros2` 聚合包获得全集）：
 
 - `dsh-ros2-common` 为纯库（非 cordis bundle）——共享 runner/解析/toolkit 与
@@ -466,7 +466,7 @@ dsh-ros2/                      # pnpm monorepo（工作区根，private）
 ```bash
 pnpm install
 pnpm run typecheck   # tsc --noEmit
-pnpm run test        # vitest（115 例；CLI 输出 mock）
+pnpm run test        # vitest（158 例；另有 10 个 sidecar Python 场景）
 pnpm run build       # tsc -> lib/ + lib/types/
 ```
 

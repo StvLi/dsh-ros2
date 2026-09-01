@@ -1,7 +1,7 @@
 {
   "name": "dsh-ros2",
   "version": "0.1.0",
-  "description": "Aggregate cordis bundle for the dsh-ros2 plugin family — depends on core/profile/moveit/safety/vision/common; empty apply for backward compatibility (install this to get all 51 tools + 4 skills).",
+  "description": "Aggregate cordis bundle for the dsh-ros2 plugin family — depends on core/profile/moveit/safety/vision/common; empty apply for backward compatibility (install this to get all 75 tools + 4 skills).",
   "type": "module",
   "main": "./lib/index.js",
   "types": "./lib/types/index.d.ts",

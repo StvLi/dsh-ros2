@@ -448,10 +448,10 @@ dsh-ros2/                      # pnpm monorepo (workspace root, private)
 
 ---
 
-## Plugin split (7 packages)
+## Plugin split (9 packages)
 
-Since v0.15.0 the plugin is a **pnpm monorepo** of 7 npm packages (per
-[`docs/plugin-split-plan.md`](docs/plugin-split-plan.md), ISP-tightened): 51 tools +
+Since v0.15.0 the plugin is a **pnpm monorepo** of 9 npm packages (per
+[`docs/plugin-split-plan.md`](docs/plugin-split-plan.md), ISP-tightened): 75 tools +
 4 skills preserved with **unchanged names and behavior**. Install the domain
 bundles you need (or the `dsh-ros2` aggregate for the full set):
 
@@ -483,7 +483,7 @@ bundles you need (or the `dsh-ros2` aggregate for the full set):
 ```bash
 pnpm install
 pnpm run typecheck   # tsc --noEmit
-pnpm run test        # vitest (115 cases; CLI outputs mocked)
+pnpm run test        # vitest (158 cases; plus 10 sidecar Python scenarios)
 pnpm run build       # tsc -> lib/ + lib/types/
 ```
 

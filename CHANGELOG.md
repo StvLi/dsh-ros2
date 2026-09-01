@@ -4,6 +4,20 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [SemVer](https://semver.org/).
 
+## [docs/build-fixes] - 2026-09-01
+
+### Fixed
+
+- **pnpm 11 build break**（issue #2）：`pnpm-workspace.yaml` 的
+  `allowBuilds.esbuild` 是未解析占位符（`set this to true or false`），pnpm 11 报
+  `ERR_PNPM_IGNORED_BUILDS`。改为合法值 `esbuild: true`（pnpm 11 格式），保留
+  `onlyBuiltDependencies`（pnpm 10 兼容），并在根 package.json 声明
+  `"packageManager": "pnpm@11.22.0"`。已用全新克隆 + pnpm 11.22.0 验证
+  install/build 通过。
+- **计数陈旧**（issue #3）：state/sidecar 拆分后文档仍写 7 个包 / 51 工具 /
+  115 测试。统一更新为 **9 个包 / 75 工具 / 158 vitest + 10 sidecar Python
+  场景**（README 双语、根 package.json description、聚合包 description）。
+
 ## [dsh-ros2-core 0.1.4] - 2026-09-01
 
 ### Added
