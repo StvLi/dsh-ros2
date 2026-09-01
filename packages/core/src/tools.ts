@@ -1094,6 +1094,31 @@ export function createRos2Tools(deps: ToolDeps) {
       },
     }),
     ros2Tool(deps, {
+      name: 'ros2_pkg_prefix',
+      description: 'Show the install prefix of a package (`ros2 pkg prefix <pkg>`).',
+      parameters: {
+        package: { type: 'string', required: true, description: 'Package name.' },
+      },
+      buildArgs: (params) => ['pkg', 'prefix', String(params.package)],
+      parse: (res) => ({ prefix: res.stdout.trim() }),
+    }),
+    ros2Tool(deps, {
+      name: 'ros2_pkg_executables',
+      description: 'List executables of a package (or all packages) (`ros2 pkg executables [pkg]`).',
+      parameters: {
+        package: { type: 'string', default: '', description: 'Package name (empty = all packages).' },
+      },
+      buildArgs: (params) => ['pkg', 'executables', ...(strOrUndefined(params.package) ? [strOrUndefined(params.package)!] : [])],
+      parse: (res) => {
+        const executables = []
+        for (const line of parseLines(res.stdout)) {
+          const m = /^(\S+)\s+(\S+)$/.exec(line)
+          if (m && m[1] !== undefined && m[2] !== undefined) executables.push({ package: m[1], executable: m[2] })
+        }
+        return { executables, count: executables.length }
+      },
+    }),
+    ros2Tool(deps, {
       name: 'ros2_param_list',
       description: 'List parameters of a node (`ros2 param list <node>`).',
       parameters: {
@@ -1106,6 +1131,19 @@ export function createRos2Tools(deps: ToolDeps) {
       },
     }),
     ros2Tool(deps, {
+      name: 'ros2_param_get',
+      description: 'Read a parameter value (`ros2 param get <node> <param>`).',
+      parameters: {
+        node: { type: 'string', required: true, description: 'Node name, e.g. /controller_manager.' },
+        param: { type: 'string', required: true, description: 'Parameter name.' },
+      },
+      buildArgs: (params) => ['param', 'get', String(params.node), String(params.param)],
+      parse: (res) => {
+        const m = /^\w+ value is:\s*(.+)$/im.exec(res.stdout)
+        return { ...(m && m[1] !== undefined ? { value: m[1].trim() } : { value: res.stdout.trim() }) }
+      },
+    }),
+    ros2Tool(deps, {
       name: 'ros2_interface_show',
       description: 'Show the full field definition of a ROS2 interface type (`ros2 interface show <type>`), e.g. sensor_msgs/msg/JointState.',
       parameters: {
@@ -1113,6 +1151,36 @@ export function createRos2Tools(deps: ToolDeps) {
       },
       buildArgs: (params) => ['interface', 'show', String(params.type)],
       parse: (res) => ({ definition: res.stdout.trim() }),
+    }),
+    ros2Tool(deps, {
+      name: 'ros2_interface_list',
+      description: 'List all available interface types (`ros2 interface list`).',
+      buildArgs: () => ['interface', 'list'],
+      parse: (res) => {
+        const interfaces = parseLines(res.stdout)
+        return { interfaces, count: interfaces.length }
+      },
+    }),
+    ros2Tool(deps, {
+      name: 'ros2_interface_prototype',
+      description: 'Show the default-value prototype of an interface type (`ros2 interface prototype <type>`).',
+      parameters: {
+        type: { type: 'string', required: true, description: 'Interface type, e.g. sensor_msgs/msg/JointState.' },
+      },
+      buildArgs: (params) => ['interface', 'prototype', String(params.type)],
+      parse: (res) => ({ prototype: res.stdout.trim() }),
+    }),
+    ros2Tool(deps, {
+      name: 'ros2_interface_package',
+      description: 'List interface types defined in a package (`ros2 interface package <pkg>`).',
+      parameters: {
+        package: { type: 'string', required: true, description: 'Package name, e.g. std_msgs.' },
+      },
+      buildArgs: (params) => ['interface', 'package', String(params.package)],
+      parse: (res) => {
+        const interfaces = parseLines(res.stdout)
+        return { interfaces, count: interfaces.length }
+      },
     }),
     ros2Tool(deps, {
       name: 'ros2_tf_list',
@@ -1204,7 +1272,228 @@ export function createRos2Tools(deps: ToolDeps) {
     tools.push(makeTopicPubTool(coreDeps))
     tools.push(makeRunTool(coreDeps))
     tools.push(makeProcessCleanupTool(coreDeps))
+    // 0.1.2: everyday-debugging batch 2 (measure / interact / graph control).
+    tools.push(makeTopicBwTool(coreDeps))
+    tools.push(makeTopicDelayTool(coreDeps))
+    tools.push(makeServiceCallTool(coreDeps))
+    tools.push(makeActionSendGoalTool(coreDeps))
+    tools.push(makeDaemonTool(coreDeps))
   return tools
+}
+
+/** Parse a `ros2 service call` response repr like Response(x=1, y='a'). */
+function parseServiceRepr(stdout: string): Record<string, JsonValue> {
+  const out: Record<string, JsonValue> = {}
+  const m = /(?:Response|response)\(([^)]*)\)/.exec(stdout)
+  if (m && m[1] !== undefined) {
+    for (const part of m[1].split(',')) {
+      const kv = /^(\w+)=(.+)$/.exec(part.trim())
+      if (kv && kv[1] !== undefined && kv[2] !== undefined) {
+        let value: JsonValue = kv[2]
+        if (kv[2] === 'True') value = true
+        else if (kv[2] === 'False') value = false
+        else if (kv[2].length >= 2 && ((kv[2].startsWith("'") && kv[2].endsWith("'")) || (kv[2].startsWith('"') && kv[2].endsWith('"')))) value = kv[2].slice(1, -1)
+        else {
+          const n = Number(kv[2])
+          if (Number.isFinite(n)) value = n
+        }
+        out[kv[1]] = value
+      }
+    }
+  }
+  return out
+}
+
+/**
+ * L1: measure a topic's bandwidth (`ros2 topic bw`). Timeout-terminated,
+ * reported as a successful measurement.
+ */
+function makeTopicBwTool(deps: ToolDeps) {
+  return defineTool({
+    name: 'ros2_topic_bw',
+    description:
+      'Measure the bandwidth of a topic (`ros2 topic bw <topic>`). Runs for `timeoutMs` (default 8s) and returns the measured bandwidth (average/mean/min/max over the window). Read-only, no approval.',
+    parameters: {
+      topic: { type: 'string', required: true, description: 'Topic name, e.g. /camera/image.' },
+      window: { type: 'number', default: 0, description: 'Sliding window size (0 = no window).' },
+      timeoutMs: { type: 'number', default: 8000, description: 'Measurement duration in ms (default 8000).' },
+    },
+    output: { schema: resultSchema, render: renderResult },
+    async execute(args) {
+      const params = args as Record<string, unknown>
+      const topic = String(params.topic ?? '')
+      if (!topic) return toolError('ros2_topic_bw', 'ros2_topic_bw', 'MISSING_PARAM', 'topic 必填')
+      const bwArgs = ['topic', 'bw', topic]
+      const window = numOrUndefined(params.window) ?? 0
+      if (window > 0) bwArgs.push('--window', String(window))
+      const timeoutMs = Math.max(1000, numOrUndefined(params.timeoutMs) ?? 8000)
+      const command = `ros2 topic bw ${topic}`
+      const res = await deps.run('ros2', bwArgs, { timeoutMs: timeoutMs + 2000 })
+      const stdout = res.stdout
+      const out: Record<string, unknown> = { topic, raw: stdout.trim().slice(-600) }
+      const grab = (re: RegExp, key: string) => {
+        const m = re.exec(stdout)
+        if (m && m[1] !== undefined) out[key] = Number(m[1])
+      }
+      grab(/average bandwidth:\s*([\d.]+)/, 'average')
+      grab(/mean:\s*([\d.]+)/, 'mean')
+      grab(/min:\s*([\d.]+)/, 'min')
+      grab(/max:\s*([\d.]+)/, 'max')
+      grab(/window:\s*(\d+)/, 'window')
+      const result = okResult('ros2_topic_bw', command, out as JsonValue)
+      if (out.average === undefined) result.warnings = ['未采集到消息（可能无发布者或话题不存在）']
+      return result
+    },
+  })
+}
+
+/**
+ * L1: measure a topic's end-to-end delay (`ros2 topic delay`).
+ * Timeout-terminated, reported as a successful measurement.
+ */
+function makeTopicDelayTool(deps: ToolDeps) {
+  return defineTool({
+    name: 'ros2_topic_delay',
+    description:
+      'Measure the end-to-end delay of a topic (`ros2 topic delay <topic>`). Runs for `timeoutMs` (default 8s) and returns average/mean/min/max delay in seconds. Read-only, no approval.',
+    parameters: {
+      topic: { type: 'string', required: true, description: 'Topic name.' },
+      timeoutMs: { type: 'number', default: 8000, description: 'Measurement duration in ms (default 8000).' },
+    },
+    output: { schema: resultSchema, render: renderResult },
+    async execute(args) {
+      const params = args as Record<string, unknown>
+      const topic = String(params.topic ?? '')
+      if (!topic) return toolError('ros2_topic_delay', 'ros2_topic_delay', 'MISSING_PARAM', 'topic 必填')
+      const timeoutMs = Math.max(1000, numOrUndefined(params.timeoutMs) ?? 8000)
+      const command = `ros2 topic delay ${topic}`
+      const res = await deps.run('ros2', ['topic', 'delay', topic], { timeoutMs: timeoutMs + 2000 })
+      const stdout = res.stdout
+      const out: Record<string, unknown> = { topic, raw: stdout.trim().slice(-600) }
+      const grab = (re: RegExp, key: string) => {
+        const m = re.exec(stdout)
+        if (m && m[1] !== undefined) out[key] = Number(m[1])
+      }
+      grab(/average delay:\s*([\d.]+)/, 'average')
+      grab(/mean:\s*([\d.]+)/, 'mean')
+      grab(/min:\s*([\d.]+)/, 'min')
+      grab(/max:\s*([\d.]+)/, 'max')
+      const result = okResult('ros2_topic_delay', command, out as JsonValue)
+      if (out.average === undefined) result.warnings = ['未采集到消息（可能无发布者或话题不存在）']
+      return result
+    },
+  })
+}
+
+/**
+ * L2: call a ROS2 service (`ros2 service call`). Approval-gated — invokes a
+ * service, which may mutate system/robot state.
+ */
+function makeServiceCallTool(deps: ToolDeps) {
+  return defineTool({
+    name: 'ros2_service_call',
+    description:
+      'Call a ROS2 service (`ros2 service call <service> <type> "<request yaml>"`). Approval-gated (invokes a service; may mutate state). Response parsed from the repr.',
+    parameters: {
+      service: { type: 'string', required: true, description: 'Service name, e.g. /clear.' },
+      type: { type: 'string', required: true, description: 'Service type, e.g. std_srvs/srv/Empty.' },
+      request: { type: 'string', default: '{}', description: 'Request as YAML, e.g. {} or {data: 1}.' },
+      timeoutMs: { type: 'number', default: 10000, description: 'Call timeout in ms.' },
+    },
+    output: { schema: resultSchema, render: renderResult },
+    async execute(args, exec) {
+      const params = args as Record<string, unknown>
+      const service = String(params.service ?? '')
+      const type = String(params.type ?? '')
+      if (!service || !type) return toolError('ros2_service_call', 'ros2_service_call', 'MISSING_PARAM', 'service 与 type 必填')
+      const request = String(params.request ?? '{}')
+      const timeoutMs = Math.max(3000, numOrUndefined(params.timeoutMs) ?? 10000)
+      const callArgs = ['service', 'call', service, type, request, '--timeout', String(Math.max(3, Math.floor(timeoutMs / 1000)))]
+      const command = `ros2 service call ${service} ${type} ...`
+      const approval = await requestApproval(deps, exec, 'ros2_service_call', `将调用服务 ${service}（${type}，request=${request}）。`)
+      if (!approval.allowed) return deniedResult('ros2_service_call', command, approval.outcome)
+      const res = await deps.run('ros2', callArgs, { timeoutMs: timeoutMs + 3000 })
+      if (!res.ok && res.stdout.trim().length === 0) {
+        return toolError('ros2_service_call', command, res.error ?? 'COMMAND_FAILED', res.stderr.trim() || `exit ${res.exitCode ?? 'unknown'}`)
+      }
+      return okResult('ros2_service_call', command, {
+        service, type, response: parseServiceRepr(res.stdout), raw: res.stdout.trim().slice(-1000),
+      })
+    },
+  })
+}
+
+/**
+ * L2: send an action goal (`ros2 action send_goal`). Approval-gated —
+ * triggers robot/task behavior.
+ */
+function makeActionSendGoalTool(deps: ToolDeps) {
+  return defineTool({
+    name: 'ros2_action_send_goal',
+    description:
+      'Send an action goal (`ros2 action send_goal <action> <type> "<goal yaml>"`). Approval-gated (triggers robot/task behavior). Returns the goal id and final status; --feedback shows progress.',
+    parameters: {
+      action: { type: 'string', required: true, description: 'Action name, e.g. /move.' },
+      type: { type: 'string', required: true, description: 'Action type, e.g. nav2_msgs/action/NavigateToPose.' },
+      goal: { type: 'string', required: true, description: 'Goal as YAML, e.g. {pose: {...}}.' },
+      feedback: { type: 'boolean', default: false, description: 'Show feedback while running (--feedback).' },
+      timeoutMs: { type: 'number', default: 30000, description: 'Goal timeout in ms.' },
+    },
+    output: { schema: resultSchema, render: renderResult },
+    async execute(args, exec) {
+      const params = args as Record<string, unknown>
+      const action = String(params.action ?? '')
+      const type = String(params.type ?? '')
+      const goal = String(params.goal ?? '')
+      if (!action || !type || !goal) return toolError('ros2_action_send_goal', 'ros2_action_send_goal', 'MISSING_PARAM', 'action/type/goal 必填')
+      const timeoutMs = Math.max(5000, numOrUndefined(params.timeoutMs) ?? 30000)
+      const goalArgs = ['action', 'send_goal', action, type, goal]
+      if (params.feedback === true) goalArgs.push('--feedback')
+      const command = `ros2 action send_goal ${action} ${type} ...`
+      const approval = await requestApproval(deps, exec, 'ros2_action_send_goal', `将向动作 ${action} 发送目标（${type}，goal=${goal}）。`)
+      if (!approval.allowed) return deniedResult('ros2_action_send_goal', command, approval.outcome)
+      const res = await deps.run('ros2', goalArgs, { timeoutMs: timeoutMs + 5000 })
+      if (!res.ok && res.stdout.trim().length === 0) {
+        return toolError('ros2_action_send_goal', command, res.error ?? 'COMMAND_FAILED', res.stderr.trim() || `exit ${res.exitCode ?? 'unknown'}`)
+      }
+      const out: Record<string, unknown> = { action, type, raw: res.stdout.trim().slice(-1200) }
+      const id = /Goal accepted with ID: (\S+)/.exec(res.stdout)
+      if (id && id[1] !== undefined) out.goalId = id[1]
+      const status = /Status: (\w+)/.exec(res.stdout)
+      if (status && status[1] !== undefined) out.status = status[1]
+      return okResult('ros2_action_send_goal', command, out as JsonValue)
+    },
+  })
+}
+
+/**
+ * L2: manage the ROS2 daemon (`ros2 daemon status|stop|start`). status is
+ * read-only; stop/start are approval-gated (affect whole-graph discovery).
+ */
+function makeDaemonTool(deps: ToolDeps) {
+  return defineTool({
+    name: 'ros2_daemon',
+    description:
+      'Manage the ROS2 daemon (`ros2 daemon status|stop|start`). status is read-only; stop/start are approval-gated (restarting the daemon re-discovers the graph — useful when discovery is stale).',
+    parameters: {
+      action: { type: 'string', enum: ['status', 'stop', 'start'], default: 'status', description: 'status (L1) | stop (L2) | start (L2).' },
+    },
+    output: { schema: resultSchema, render: renderResult },
+    async execute(args, exec) {
+      const params = args as Record<string, unknown>
+      const action = String(params.action ?? 'status')
+      const command = `ros2 daemon ${action}`
+      if (action !== 'status') {
+        const approval = await requestApproval(deps, exec, 'ros2_daemon', `将执行 ros2 daemon ${action}（影响整个 ROS2 图的发现）。`)
+        if (!approval.allowed) return deniedResult('ros2_daemon', command, approval.outcome)
+      }
+      const res = await deps.run('ros2', ['daemon', action], { timeoutMs: 20000 })
+      if (!res.ok && res.stdout.trim().length === 0) {
+        return toolError('ros2_daemon', command, res.error ?? 'COMMAND_FAILED', res.stderr.trim() || `exit ${res.exitCode ?? 'unknown'}`)
+      }
+      return okResult('ros2_daemon', command, { action, output: (res.stdout + (res.stderr ? `\n${res.stderr}` : '')).trim() })
+    },
+  })
 }
 
 /**

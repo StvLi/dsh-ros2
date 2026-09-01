@@ -4,6 +4,24 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [SemVer](https://semver.org/).
 
+## [dsh-ros2-core 0.1.2] - 2026-09-01
+
+### Added
+
+- **日常调试批量 2（11 个工具，core 37 → 48，全集 55 → 66）**：
+  - L1 只读：`ros2_param_get`（读参数）、`ros2_interface_list` / `ros2_interface_prototype` /
+    `ros2_interface_package`（接口枚举/原型/包成员）、`ros2_pkg_prefix` / `ros2_pkg_executables`
+    （安装前缀/可执行文件）、`ros2_topic_bw` / `ros2_topic_delay`（带宽/延迟测量，超时终止按成功返回）；
+  - L2 审批：`ros2_service_call`（调用服务，响应 repr 解析）、`ros2_action_send_goal`
+    （发送动作目标，返回 goal id + 状态，支持 --feedback）、`ros2_daemon`（status L1 /
+    stop·start L2，刷新过期图发现）。
+- 至此覆盖：枚举、采样、测量（hz/bw/delay）、发布、通用执行、服务调用、动作目标、
+  daemon 控制——日常 ROS2 调试调用需求基本不再需要绕 bash。
+
+### Changed
+
+- `dsh-ros2-core` 0.1.1 → **0.1.2**；core 测试 66 → **77**。
+
 ## [dsh-ros2-core 0.1.1] - 2026-09-01
 
 ### Added

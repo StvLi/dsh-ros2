@@ -250,7 +250,18 @@ describe('tool inventory', () => {
     expect(names).toContain('ros2_topic_pub')
     expect(names).toContain('ros2_run')
     expect(names).toContain('ros2_process_cleanup')
-    expect(names).toHaveLength(37)
+    expect(names).toContain('ros2_param_get')
+    expect(names).toContain('ros2_interface_list')
+    expect(names).toContain('ros2_interface_prototype')
+    expect(names).toContain('ros2_interface_package')
+    expect(names).toContain('ros2_pkg_prefix')
+    expect(names).toContain('ros2_pkg_executables')
+    expect(names).toContain('ros2_topic_bw')
+    expect(names).toContain('ros2_topic_delay')
+    expect(names).toContain('ros2_service_call')
+    expect(names).toContain('ros2_action_send_goal')
+    expect(names).toContain('ros2_daemon')
+    expect(names).toHaveLength(48)
   })
 })
 
@@ -343,5 +354,101 @@ describe('ros2_process_cleanup', () => {
     // self-safe: the pgrep pattern is bracketed ([r]os2...), so the tool's own
     // process command line never matches
     expect(script).toContain("[r]os2 topic pub'")
+  })
+})
+
+// ── everyday-debugging batch 2 (param_get / interface / pkg / bw / delay / service / action / daemon) ──
+
+describe('ros2_param_get', () => {
+  it('parses the parameter value', async () => {
+    const run = makeRun(() => ({ stdout: 'Integer value is: 5\n' }))
+    const out = await call('ros2_param_get', run, { node: '/cm', param: 'max_vel' })
+    expect(out.ok).toBe(true)
+    expect(out.data).toMatchObject({ value: '5' })
+  })
+})
+
+describe('ros2_interface_*', () => {
+  it('lists interfaces, shows prototypes and package members', async () => {
+    const run = makeRun(() => ({ stdout: 'std_msgs/msg/String\nsensor_msgs/msg/Image\n' }))
+    const list = await call('ros2_interface_list', run, {})
+    expect((list.data as { count: number }).count).toBe(2)
+    const proto = await call('ros2_interface_prototype', run, { type: 'std_msgs/msg/String' })
+    expect((proto.data as { prototype: string }).prototype).toContain('std_msgs/msg/String')
+    const pkg = await call('ros2_interface_package', run, { package: 'std_msgs' })
+    expect((pkg.data as { count: number }).count).toBe(2)
+  })
+})
+
+describe('ros2_pkg_prefix / executables', () => {
+  it('returns prefix and structured executables', async () => {
+    const run = makeRun(() => ({ stdout: '/opt/ros/jazzy\n' }))
+    const prefix = await call('ros2_pkg_prefix', run, { package: 'std_msgs' })
+    expect(prefix.data).toMatchObject({ prefix: '/opt/ros/jazzy' })
+    const run2 = makeRun(() => ({ stdout: 'demo_nodes_cpp talker\ndemo_nodes_cpp listener\n' }))
+    const exes = await call('ros2_pkg_executables', run2, {})
+    expect((exes.data as { count: number }).count).toBe(2)
+    expect((exes.data as { executables: Array<{ executable: string }> }).executables[0]).toMatchObject({ package: 'demo_nodes_cpp', executable: 'talker' })
+  })
+})
+
+describe('ros2_topic_bw / delay', () => {
+  it('parses bandwidth from timeout-terminated output', async () => {
+    const run = makeRun(() => ({ stdout: 'average bandwidth: 12.5 KiB/s\n\tmean: 12.5 min: 10.0 max: 15.0 window: 100\n' }))
+    const out = await call('ros2_topic_bw', run, { topic: '/camera' })
+    expect(out.ok).toBe(true)
+    expect(out.data).toMatchObject({ topic: '/camera', average: 12.5, min: 10, max: 15 })
+  })
+  it('parses delay from timeout-terminated output', async () => {
+    const run = makeRun(() => ({ stdout: 'average delay: 0.042\n\tmean: 0.042 min: 0.01 max: 0.08\n' }))
+    const out = await call('ros2_topic_delay', run, { topic: '/joint_states' })
+    expect(out.ok).toBe(true)
+    expect((out.data as { average: number }).average).toBe(0.042)
+  })
+})
+
+describe('ros2_service_call', () => {
+  it('fails closed without approval', async () => {
+    const run = makeRun(() => ({ stdout: '' }))
+    const out = await call('ros2_service_call', run, { service: '/clear', type: 'std_srvs/srv/Empty' })
+    expect(out.error?.code).toBe('APPROVAL_DENIED')
+  })
+  it('parses the response repr after approval', async () => {
+    const run = makeRun(() => ({ stdout: 'response:\ndsh_ros2_safety.srv.Unlock_Response(accepted=True, message=\'ok\')\n' }))
+    const approval = async () => 'allowed-once'
+    const t = tool2('ros2_service_call', run, approval)
+    const out = (await t.execute({ service: '/safety/unlock', type: 'dsh_ros2_safety/srv/Unlock', request: '{request_id: x}' }, execStub)) as ToolResult
+    expect(out.ok).toBe(true)
+    expect((out.data as { response: Record<string, unknown> }).response).toMatchObject({ accepted: true, message: 'ok' })
+  })
+})
+
+describe('ros2_action_send_goal', () => {
+  it('fails closed without approval', async () => {
+    const run = makeRun(() => ({ stdout: '' }))
+    const out = await call('ros2_action_send_goal', run, { action: '/move', type: 'x/A', goal: '{}' })
+    expect(out.error?.code).toBe('APPROVAL_DENIED')
+  })
+  it('parses goal id and status after approval', async () => {
+    const run = makeRun(() => ({ stdout: 'Goal accepted with ID: abc123\nStatus: SUCCEEDED\n' }))
+    const approval = async () => 'allowed-once'
+    const t = tool2('ros2_action_send_goal', run, approval)
+    const out = (await t.execute({ action: '/move', type: 'x/A', goal: '{}' }, execStub)) as ToolResult
+    expect(out.ok).toBe(true)
+    expect(out.data).toMatchObject({ goalId: 'abc123', status: 'SUCCEEDED' })
+  })
+})
+
+describe('ros2_daemon', () => {
+  it('status is read-only without approval', async () => {
+    const run = makeRun(() => ({ stdout: 'The daemon is running\n' }))
+    const out = await call('ros2_daemon', run, {})
+    expect(out.ok).toBe(true)
+    expect((out.data as { output: string }).output).toContain('running')
+  })
+  it('stop requires approval', async () => {
+    const run = makeRun(() => ({ stdout: '' }))
+    const out = await call('ros2_daemon', run, { action: 'stop' })
+    expect(out.error?.code).toBe('APPROVAL_DENIED')
   })
 })
