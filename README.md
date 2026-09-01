@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![ROS2](https://img.shields.io/badge/ROS2-Jazzy-orange)]()
 ![Node](https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-brightgreen)
-![Tools](https://img.shields.io/badge/tools-77-blue)
+![Tools](https://img.shields.io/badge/tools-78-blue)
 
 > **版本对应关系**：npm 上的 `dsh-ros2@0.1.0` 就是本仓库当前版本（monorepo 布局）。
 > GitHub 的 `v0.8.0 ~ v0.15.0` 标签是已废弃的旧单体布局历史，从未发布到 npm。
@@ -39,7 +39,7 @@ All tools run plain `ros2` / `colcon` / `rosdep` CLI commands on the host; L1 ne
 
 ## Features
 
-- **Zero-intrusion diagnostics**: 77 tools cover most ROS2 debugging scenarios — from "is the package installed?" to "what is on this topic right now?", one command, one answer;
+- **Zero-intrusion diagnostics**: 78 tools cover most ROS2 debugging scenarios — from "is the package installed?" to "what is on this topic right now?", one command, one answer;
 - **Whole-graph topology**: `ros2_graph` folds nodes/publishers/subscribers/services/actions into one JSON — see the system structure in seconds;
 - **Approval-gated writes**: builds, dependency installs, message scaffolding etc. go through the DSH approval service; fail-closed, denial = failure;
 - **Visualization as a service**: "see" headlessly — screenshots / multimodal description / window interaction are fully local, no remote display;
@@ -61,7 +61,7 @@ All tools run plain `ros2` / `colcon` / `rosdep` CLI commands on the host; L1 ne
 ### Install the plugins (9 npm packages, since the monorepo split)
 
 Install the domain bundles you need — or the **`dsh-ros2` aggregate** for the
-full 77 tools + 4 skills (its patch inserts all domain ids). All packages are
+full 78 tools + 4 skills (its patch inserts all domain ids). All packages are
 published to npm at **0.1.0** (see [docs/versioning.md](docs/versioning.md) for
 the GitHub ↔ npm version correspondence).
 
@@ -107,7 +107,7 @@ repeated per id) and the vision provider lives only on `dsh-ros2-vision`:
     rosSetup: source /opt/ros/jazzy/setup.bash &&
     vision:
       provider: gemini                               # mock | gemini | openai
-      apiKey: ${GEMINI_API_KEY}                      # inject via env/secret manager, never hard-code
+      apiKey: ${VLM_API_KEY}                         # ${ENV} 引用从环境变量解析，勿明文写 key
 - id: dsh-ros2-safety
   config:
     safetyStrict: warn                               # 'warn' (default) | 'reject' (fail-closed); LOCKED always rejects
@@ -219,13 +219,14 @@ Interaction recipes (model-facing): orbit the RViz2 view with `ros2_gui_interact
 
 ### L4 realtime vision (parallel VLM over ROS2, headless image topics)
 
-Perception matches the robot-control stack: the VLM runs in a **separate ROS2 process** (`vlm_node`, service `/vlm/describe` + cached topic `/vlm/description`), and images come from **`sensor_msgs/Image` topics, never X11 screenshots** — headless-ready. Requires the `dsh_ros2_vlm` ROS2 package (`vlm/`); build/run see [`docs/architecture.md`](docs/architecture.md) §4.
+Perception matches the robot-control stack: the VLM runs in a **separate ROS2 process** (`vlm_node`, service `/vlm/describe` + cached topic `/vlm/description`), and images come from **`sensor_msgs/Image` topics, never X11 screenshots** — headless-ready. Acquisition (`ros2_image_snapshot`) needs **no custom package** (plain rclpy); only `ros2_vlm_analyze`/`ros2_vision_analyze` require the `dsh_ros2_vlm` ROS2 package (`vlm/`) — build/run see [`docs/architecture.md`](docs/architecture.md) §4. When the pipeline is down, `ros2_vlm_analyze`/`ros2_vision_analyze` return an explicit `VLM_UNAVAILABLE` + degradation hint, and the snapshot JPEG can be read directly by the Agent's own multimodal model.
 
 | Tool | Purpose |
 | --- | --- |
-| `ros2_image_snapshot` | Grab the latest frame from an image topic (raw / compressed) and save as JPEG |
+| `ros2_image_snapshot` | Grab one frame from a topic (raw/compressed) and save as JPEG — plain rclpy script, **no custom ROS2 package needed**; `--v4l` ffmpeg fallback for silent topics; the JPEG is ready for the Agent's own multimodal model |
 | `ros2_vlm_analyze` | Analyze an image file or the bridge's latest frame (`useBridge`) via the parallel VLM |
 | `ros2_vision_topics` | List live image topics with their auto bridge service names |
+| `ros2_vision_doctor` | One-shot pipeline self-check: vlm workspace built / vlm_node+vision_bringup running / gateway reachable / visible image topics / apiKey plaintext warning + build-launch guidance |
 | `ros2_vision_analyze` | Analyze any topic's latest frame via its auto bridge (`ros2_vision_analyze {topic, prompt}`) |
 
 ```bash

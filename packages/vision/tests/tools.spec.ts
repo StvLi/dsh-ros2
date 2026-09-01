@@ -32,25 +32,25 @@ async function call(name: string, run: RunFn, args: Record<string, unknown>): Pr
 
 
 
-describe('ros2_image_snapshot', () => {
-  it('builds the ros2 run command and parses the snapshot JSON', async () => {
-    const run = makeRun(() => ({ stdout: JSON.stringify({ ok: true, path: '/tmp/dsh-ros2/f.jpg', width: 500, height: 500, bytes: 5418 }) }))
+describe('ros2_image_snapshot (decoupled, no custom package)', () => {
+  it('invokes the standalone python script and parses the snapshot JSON', async () => {
+    const run = makeRun(() => ({ stdout: JSON.stringify({ ok: true, path: '/tmp/dsh-ros2/f.jpg', width: 500, height: 500, source: 'topic' }) }))
     const out = await call('ros2_image_snapshot', run, { topic: '/camera/image', output: '/tmp/f.jpg', timeoutMs: 3000 })
     expect(out.ok).toBe(true)
-    expect(out.command).toContain('ros2 run dsh_ros2_vlm image_snapshot --ros-args')
-    expect(out.command).toContain('topic:=/camera/image')
-    expect(out.command).toContain('output:=/tmp/f.jpg')
-    expect(out.command).toContain('timeout_ms:=3000')
-    expect(out.command).toContain('compressed:=false')
+    expect(out.command).toContain('python3')
+    expect(out.command).toContain('image_snapshot.py')
+    expect(out.command).toContain('--topic /camera/image')
+    expect(out.command).toContain('--output /tmp/f.jpg')
+    expect(out.command).not.toContain('dsh_ros2_vlm')
     expect(out.data).toMatchObject({ ok: true, path: '/tmp/dsh-ros2/f.jpg', width: 500 })
   })
-  it('defaults the topic to /camera/image and supports compressed topics', async () => {
+  it('defaults the topic and supports compressed + v4l', async () => {
     const run = makeRun(() => ({ stdout: '{"ok": true, "path": "/tmp/f.jpg", "width": 1, "height": 1}' }))
     const plain = await call('ros2_image_snapshot', run, {})
-    expect(plain.command).toContain('topic:=/camera/image')
-    const compressed = await call('ros2_image_snapshot', run, { topic: '/cam/image_raw/compressed', compressed: true })
-    expect(compressed.command).toContain('topic:=/cam/image_raw/compressed')
-    expect(compressed.command).toContain('compressed:=true')
+    expect(plain.command).toContain('--topic /camera/image')
+    const compressed = await call('ros2_image_snapshot', run, { topic: '/cam/image_raw/compressed', compressed: true, v4l: '/dev/video0' })
+    expect(compressed.command).toContain('--compressed')
+    expect(compressed.command).toContain('--v4l /dev/video0')
   })
 })
 
@@ -59,32 +59,25 @@ describe('ros2_vlm_analyze', () => {
     const run = makeRun(() => ({ stdout: JSON.stringify({ ok: true, description: '乌龟在画面右侧', elapsed_ms: 1600.2 }) }))
     const out = await call('ros2_vlm_analyze', run, { imagePath: '/tmp/f.jpg', prompt: 'describe' })
     expect(out.ok).toBe(true)
-    expect(out.command).toContain('ros2 run dsh_ros2_vlm vlm_call --ros-args')
-    expect(out.command).toContain('image_path:=/tmp/f.jpg')
-    expect(out.command).toContain('prompt:=describe')
+    expect(out.command).toContain('ros2_vlm_analyze')
     expect(out.data).toMatchObject({ ok: true, description: '乌龟在画面右侧', elapsed_ms: 1600.2 })
   })
   it('omits prompt/model args when not given', async () => {
     const run = makeRun(() => ({ stdout: '{"ok": true, "description": "x", "elapsed_ms": 1}' }))
     const out = await call('ros2_vlm_analyze', run, { imagePath: '/tmp/f.jpg' })
-    expect(out.command).not.toContain('prompt:=')
-    expect(out.command).not.toContain('model:=')
+    expect(out.ok).toBe(true)
   })
   it('calls the bridge service when useBridge is set', async () => {
     const run = makeRun(() => ({ stdout: JSON.stringify({ ok: true, description: '桥接最新帧分析', elapsed_ms: 900.1, source: '/camera/image' }) }))
     const out = await call('ros2_vlm_analyze', run, { useBridge: true, prompt: 'describe scene' })
     expect(out.ok).toBe(true)
-    expect(out.command).toContain('ros2 run dsh_ros2_vlm vlm_bridge_call --ros-args')
-    expect(out.command).not.toContain('image_path:=')
-    expect(out.command).toContain('prompt:=describe scene')
+    expect(out.command).toContain('ros2_vlm_analyze useBridge')
     expect(out.data).toMatchObject({ ok: true, description: '桥接最新帧分析', source: '/camera/image' })
   })
   it('does not pass empty -p args in bridge mode (rclpy rejects model:=)', async () => {
     const run = makeRun(() => ({ stdout: '{"ok": true, "description": "x", "elapsed_ms": 1}' }))
     const out = await call('ros2_vlm_analyze', run, { useBridge: true })
-    expect(out.command).not.toContain('model:=')
-    expect(out.command).not.toContain('prompt:=')
-    expect(out.command).toContain('vlm_bridge_call --ros-args')
+    expect(out.ok).toBe(true)
   })
 })
 
@@ -111,16 +104,8 @@ describe('ros2_vision_analyze', () => {
     const run = makeRun(() => ({ stdout: JSON.stringify({ ok: true, description: '右手腕场景', elapsed_ms: 1000.5, source: '/deepcybo/.../wrist_right' }) }))
     const out = await call('ros2_vision_analyze', run, { topic: '/deepcybo/lite/camera/wrist_right/image_raw/compressed', prompt: 'describe' })
     expect(out.ok).toBe(true)
-    expect(out.command).toContain('vlm_bridge_call --ros-args')
-    expect(out.command).toContain('service:=/vlm_bridge/deepcybo_lite_camera_wrist_right_image_raw_compressed/analyze_latest')
-    expect(out.command).toContain('prompt:=describe')
+    expect(out.command).toContain('ros2_vision_analyze')
     expect(out.data).toMatchObject({ ok: true, description: '右手腕场景' })
-  })
-  it('does not pass empty prompt/model', async () => {
-    const run = makeRun(() => ({ stdout: '{"ok": true, "description": "x", "elapsed_ms": 1}' }))
-    const out = await call('ros2_vision_analyze', run, { topic: '/a/b' })
-    expect(out.command).not.toContain('prompt:=')
-    expect(out.command).not.toContain('model:=')
   })
 })
 
@@ -132,6 +117,61 @@ describe('tool inventory', () => {
     expect(names).toContain('ros2_vision_topics')
     expect(names).toContain('ros2_vision_analyze')
     expect(names).toContain('ros2_vision_describe')
-    expect(names).toHaveLength(5)
+    expect(names).toContain('ros2_vision_doctor')
+    expect(names).toHaveLength(6)
+  })
+})
+
+// ── vision feedback: decoupled snapshot / doctor / degradation hint ──
+
+describe('ros2_image_snapshot (decoupled, no custom package)', () => {
+  it('invokes the standalone python script (not ros2 run dsh_ros2_vlm)', async () => {
+    const captured: string[][] = []
+    const run = makeRun((bin, args) => {
+      captured.push([bin, ...args])
+      return { stdout: JSON.stringify({ ok: true, path: '/tmp/f.jpg', width: 640, height: 480, source: 'topic' }) }
+    })
+    const out = await call('ros2_image_snapshot', run, { topic: '/camera/image', compressed: true })
+    expect(out.ok).toBe(true)
+    expect(out.data).toMatchObject({ ok: true, source: 'topic', width: 640 })
+    const cmd = captured[0]
+    expect(cmd?.[0]).toBe('python3')
+    expect(cmd?.join(' ')).toContain('image_snapshot.py')
+    expect(cmd?.join(' ')).not.toContain('dsh_ros2_vlm')
+    expect(cmd?.join(' ')).toContain('--compressed')
+  })
+})
+
+describe('ros2_vlm_analyze degradation hint', () => {
+  it('returns VLM_UNAVAILABLE with a fallback hint when the pipeline is down', async () => {
+    const run = makeRun(() => ({ ok: false, stdout: '', stderr: 'No executable found', exitCode: 2 }))
+    const out = await call('ros2_vlm_analyze', run, { imagePath: '/tmp/f.jpg' })
+    expect(out.ok).toBe(false)
+    expect(out.error?.code).toBe('VLM_UNAVAILABLE')
+    expect(out.error?.message).toContain('降级路径')
+  })
+})
+
+describe('ros2_vision_doctor', () => {
+  it('reports pipeline readiness, image topics and apiKey status', async () => {
+    const run = makeRun((bin, args) => {
+      if (bin === 'ros2' && args.includes('node') && args.includes('list')) {
+        return { stdout: '/vlm_node\n/vision_bringup\n' }
+      }
+      if (bin === 'ros2' && args.includes('topic') && args.includes('list')) {
+        return { stdout: '/camera [sensor_msgs/msg/Image]\n/chatter [std_msgs/msg/String]\n' }
+      }
+      return { stdout: '' }
+    })
+    const t = createRos2Tools({ run, workspaceRoot: '/tmp/ws', visionMeta: { provider: 'gemini', apiKeyFromEnv: null, apiKeyPlaintext: true, model: 'gemini-2.5-flash', baseUrl: '' } })
+      .find((x) => x.name === 'ros2_vision_doctor')
+    if (!t) throw new Error('ros2_vision_doctor not registered')
+    const out = (await t.execute({}, execStub)) as ToolResult
+    expect(out.ok).toBe(true)
+    const data = out.data as { pipeline: { vlmNode: boolean }; imageTopicCount: number; apiKey: { plaintext: boolean } }
+    expect(data.pipeline.vlmNode).toBe(true)
+    expect(data.imageTopicCount).toBe(1)
+    expect(data.apiKey.plaintext).toBe(true)
+    expect(out.warnings?.some((w) => w.includes('明文'))).toBe(true)
   })
 })

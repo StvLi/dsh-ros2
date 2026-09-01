@@ -16,6 +16,18 @@ export const robotStateVisionSkill: SkillRegistration = {
 
 One headless pipeline: **status data → offscreen RViz render → parallel VLM → cross-checked analysis**. Images always come from topics (never X11 screenshots).
 
+## Decoupled acquisition & degradation
+
+- \`ros2_image_snapshot\` works on ANY host with ROS2 sourced (plain rclpy,
+  NO custom package needed); optional \`v4l\` grabs a camera frame via ffmpeg
+  when the topic is silent. The saved file can be consumed by the Agent's own
+  multimodal model directly (read_image).
+- \`ros2_vlm_analyze\` / \`ros2_vision_analyze\` need vlm_node; when the
+  pipeline is unavailable they return a clear \`VLM_UNAVAILABLE\` error with a
+  degradation hint: snapshot the frame and read it yourself.
+- \`ros2_vision_doctor\` (read-only) reports build/node/gateway/topic status
+  and gives one-shot build/launch guidance.
+
 ## Pipeline
 
 1. **Topology & status (L1).**

@@ -8,7 +8,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { Config, type VisionPackageConfig } from './config.js'
 import { makeRun, type ApprovalRequest, type JobsApi, type VisionProvider } from 'dsh-ros2-common'
 import { createVisionProvider } from './vision.js'
-import { createRos2Tools, type VisionToolDeps } from './tools.js'
+import { createRos2Tools, type VisionMeta, type VisionToolDeps } from './tools.js'
 import { robotStateVisionSkill } from './skill.js'
 
 export const name = 'dsh-ros2-vision'
@@ -27,9 +27,21 @@ export function apply(ctx: Context, config: VisionPackageConfig): void {
   const approval = (req: ApprovalRequest): Promise<string> => approvalService.request(req)
   const jobs = (ctx as unknown as { jobs: JobsApi }).jobs
 
+  // API key 支持 ${ENV_VAR} 引用：从环境变量解析，避免明文落在 profile 配置里。
+  const envRef = /^\$\{([A-Z0-9_]+)\}$/.exec((config.vision.apiKey ?? '').trim())
+  const apiKeyFromEnv = envRef && envRef[1] !== undefined ? envRef[1] : null
+  const resolvedApiKey = apiKeyFromEnv ? (process.env[apiKeyFromEnv] ?? '') : config.vision.apiKey
+  const visionMeta: VisionMeta = {
+    provider: config.vision.provider,
+    apiKeyFromEnv,
+    apiKeyPlaintext: resolvedApiKey.startsWith('sk-') || resolvedApiKey.startsWith('ghp_'),
+    model: config.vision.model,
+    baseUrl: config.vision.baseUrl,
+  }
+
   let vision: VisionProvider | undefined
   try {
-    vision = createVisionProvider(config.vision)
+    vision = createVisionProvider({ ...config.vision, apiKey: resolvedApiKey })
   } catch (error) {
     ctx.logger.warn(`dsh-ros2-vision: provider 未启用（${error instanceof Error ? error.message : String(error)}）`)
   }
@@ -41,6 +53,7 @@ export function apply(ctx: Context, config: VisionPackageConfig): void {
     jobs,
     workspaceRoot: config.workspaceRoot,
     vision,
+    visionMeta,
   }
   const tools = createRos2Tools(deps)
 

@@ -4,6 +4,29 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [SemVer](https://semver.org/).
 
+## [dsh-ros2-vision 0.1.1] - 2026-09-01
+
+### Added
+
+- **视觉管线反馈落实**（取图与分析解耦、密钥不落盘、自检、降级提示）：
+  - **`ros2_image_snapshot` 解耦**：改用独立脚本 `scripts/image_snapshot.py`（仅用发行版
+    rclpy + Pillow/numpy），**无需构建 dsh_ros2_vlm 包**即可从话题取帧存 JPEG；新增
+    `v4l` 参数（topic 静默时经 ffmpeg 从摄像头设备抓帧）。多模态 Agent 取图后可直接
+    用自身模型看图（read_image）。
+  - **`ros2_vlm_analyze` / `ros2_vision_analyze` 降级契约**：管线不可用时返回明确的
+    `VLM_UNAVAILABLE` + 降级提示（取帧后 Agent 直接看图），不再静默空/失败。
+  - **`ros2_vision_doctor`**（L1）：一次报告 vlm 工作区是否构建、vlm_node/vision_bringup
+    是否运行、网关是否可达、可见图像话题、apiKey 状态（env 引用 / 明文告警），并给出
+    构建与拉起指引。
+  - **API Key 不落盘**：支持 `apiKey: ${VLM_API_KEY}` 环境变量引用（apply 时解析）；
+    doctor 检测明文 `sk-` key 并告警。仓库配置示例改为 `${VLM_API_KEY}`。
+  - skill `robot-state-vision-analysis` 新增 "Decoupled acquisition & degradation"。
+
+### Changed
+
+- vision 0.1.0 → **0.1.1**；vision 工具 5 → **6**（+ros2_vision_doctor），全集 77 → **78**；
+  vision 测试 11 → **16**。
+
 ## [dsh-ros2-common 0.1.1 / dsh-ros2-core 0.1.5] - 2026-09-01
 
 ### Added
