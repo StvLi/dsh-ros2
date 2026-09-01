@@ -4,6 +4,20 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [SemVer](https://semver.org/).
 
+## [dsh-ros2-core 0.1.3] - 2026-09-01
+
+### Added
+
+- **日常调试批量 3（6 个工具，core 48 → 54，全集 66 → 72）**：
+  - L1 只读：`ros2_topic_find`（按消息类型找话题）、`ros2_action_info`（动作类型与状态）、
+    `ros2_param_dump`（转储节点参数）；
+  - L2 审批：`ros2_param_delete`（删参数）、`ros2_lifecycle`（get/list L1 / set L2，
+    管理生命周期节点状态）、`ros2_component`（list L1 / load L2，组件容器管理）。
+
+### Changed
+
+- `dsh-ros2-core` 0.1.2 → **0.1.3**；core 测试 77 → **86**。
+
 ## [dsh-ros2-core 0.1.2] - 2026-09-01
 
 ### Added

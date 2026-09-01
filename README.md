@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![ROS2](https://img.shields.io/badge/ROS2-Jazzy-orange)]()
 ![Node](https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-brightgreen)
-![Tools](https://img.shields.io/badge/tools-66-blue)
+![Tools](https://img.shields.io/badge/tools-72-blue)
 
 > **版本对应关系**：npm 上的 `dsh-ros2@0.1.0` 就是本仓库当前版本（monorepo 布局）。
 > GitHub 的 `v0.8.0 ~ v0.15.0` 标签是已废弃的旧单体布局历史，从未发布到 npm。
@@ -39,7 +39,7 @@ All tools run plain `ros2` / `colcon` / `rosdep` CLI commands on the host; L1 ne
 
 ## Features
 
-- **Zero-intrusion diagnostics**: 66 tools cover most ROS2 debugging scenarios — from "is the package installed?" to "what is on this topic right now?", one command, one answer;
+- **Zero-intrusion diagnostics**: 72 tools cover most ROS2 debugging scenarios — from "is the package installed?" to "what is on this topic right now?", one command, one answer;
 - **Whole-graph topology**: `ros2_graph` folds nodes/publishers/subscribers/services/actions into one JSON — see the system structure in seconds;
 - **Approval-gated writes**: builds, dependency installs, message scaffolding etc. go through the DSH approval service; fail-closed, denial = failure;
 - **Visualization as a service**: "see" headlessly — screenshots / multimodal description / window interaction are fully local, no remote display;
@@ -61,7 +61,7 @@ All tools run plain `ros2` / `colcon` / `rosdep` CLI commands on the host; L1 ne
 ### Install the plugins (9 npm packages, since the monorepo split)
 
 Install the domain bundles you need — or the **`dsh-ros2` aggregate** for the
-full 66 tools + 4 skills (its patch inserts all domain ids). All packages are
+full 72 tools + 4 skills (its patch inserts all domain ids). All packages are
 published to npm at **0.1.0** (see [docs/versioning.md](docs/versioning.md) for
 the GitHub ↔ npm version correspondence).
 
@@ -140,14 +140,17 @@ ros2_doctor                         # system health report
 | `ros2_node_list` | `ros2 node list` | Running nodes |
 | `ros2_node_info` | `ros2 node info <node> [-v]` | Subscribers / publishers / services / actions of one node |
 | `ros2_topic_list` | `ros2 topic list -t` | Topics with types |
+| `ros2_topic_find` | `ros2 topic find <type>` | Topics carrying a message type |
 | `ros2_topic_info` | `ros2 topic info <topic> [-v]` | Topic metadata / QoS |
 | `ros2_topic_echo` | `ros2 topic echo <topic> --once` | One message sample (JSON when possible); `--qos-reliability` / `--qos-durability` overrides reach TRANSIENT_LOCAL latched topics |
 | `ros2_topic_hz` | `ros2 topic hz <topic> [--window N]` | Measure publish frequency (average/min/max/std dev over the window); natural termination = measurement timeout |
 | `ros2_topic_bw` / `ros2_topic_delay` | `ros2 topic bw|delay <topic>` | Measure topic bandwidth / end-to-end delay; timeout-terminated |
 | `ros2_service_list` | `ros2 service list -t` | Services with types |
 | `ros2_action_list` | `ros2 action list -t` | Actions with types |
+| `ros2_action_info` | `ros2 action info <action>` | Action type & status |
 | `ros2_param_list` | `ros2 param list <node>` | Parameters of a node |
 | `ros2_param_get` | `ros2 param get <node> <param>` | Read one parameter value |
+| `ros2_param_dump` | `ros2 param dump <node>` | Dump all parameters of a node |
 | `ros2_interface_show` | `ros2 interface show <type>` | Full field definition of a message/service/action |
 | `ros2_interface_list` / `ros2_interface_prototype` / `ros2_interface_package` | `ros2 interface list|prototype|package ...` | All interface types / default-value prototype / types in a package |
 | `ros2_graph` | `ros2 node list` + per-node `node info` | Folded JSON topology graph |
@@ -181,6 +184,9 @@ Every L2 tool performs a **write operation** and asks the user first via the DSH
 | `ros2_service_call` | `ros2 service call <svc> <type> "<yaml>"` | Call a service (approval-gated); response parsed from the repr |
 | `ros2_action_send_goal` | `ros2 action send_goal <action> <type> "<yaml>" [--feedback]` | Send an action goal (approval-gated); returns goal id + status |
 | `ros2_daemon` | `ros2 daemon status|stop|start` | Daemon status (L1) / stop-start (L2 approval) — re-discover a stale graph |
+| `ros2_param_delete` | `ros2 param delete <node> <param>` | Delete a node parameter (approval-gated) |
+| `ros2_lifecycle` | `ros2 lifecycle get|list|set <node> [state]` | Lifecycle state get/list (L1) or set (L2 approval) |
+| `ros2_component` | `ros2 component list` / `load <container> <pkg> <type>` | Component containers list (L1) / load (L2 approval) |
 | `ros2_launch` | `ros2 launch <pkg> <launch_file> [args]` | Launch a launch file as a **background job** (approval-gated; returns jobId, stop via DSH job controls) |
 | `ros2_zero_pose_semantics` | publish-zero → offscreen render → VLM → confirm | Calibrate zero-pose semantics interactively (generic): `analyze` renders the all-zero pose and asks the VLM its posture across three aspects (arm: lateral_raise/hanging, elbow: forward/upward, palm/camera-mount: up/forward/down); `confirm` records the user-approved combo (or a `customText` free-text description) to `~/.dsh-ros2/zero-pose.yaml` for skills |
 | `robot_register` | collects URDF/TF/cameras/MoveIt/zero-pose → writes `~/.dsh-ros2/robots/<name>.yaml` | Register a robot body profile on first contact (approval-gated) for instant later reuse |
@@ -427,7 +433,7 @@ dsh-ros2/                      # pnpm monorepo (workspace root, private)
 ├── tsconfig.base.json
 ├── packages/
 │   ├── common/                # dsh-ros2-common (not a bundle): runner / parse / toolkit + scripts/robot_profile.py (zero-copy)
-│   ├── core/                  # dsh-ros2-core (48 tools): L1 diagnostics + L2 management + L3 GUI + ros2-diagnostics skill + gui.ts + pty_session.py
+│   ├── core/                  # dsh-ros2-core (54 tools): L1 diagnostics + L2 management + L3 GUI + ros2-diagnostics skill + gui.ts + pty_session.py
 │   ├── profile/               # dsh-ros2-profile (4 tools): robot_register/load/topology + zero-pose calibration + registration/retrieval skills
 │   ├── moveit/                # dsh-ros2-moveit (4 tools): discover/status/motion_validate/moveit_move + moveit_*.py + motion_validator.py
 │   ├── safety/                # dsh-ros2-safety (5 tools): robot_safety_* + safety/ ROS2 pkg + safetyStrict config

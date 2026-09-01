@@ -1045,6 +1045,18 @@ export function createRos2Tools(deps: ToolDeps) {
       },
     }),
     ros2Tool(deps, {
+      name: 'ros2_topic_find',
+      description: 'Find topics by message type (`ros2 topic find <type>`), e.g. sensor_msgs/msg/Image.',
+      parameters: {
+        type: { type: 'string', required: true, description: 'Message type, e.g. sensor_msgs/msg/Image.' },
+      },
+      buildArgs: (params) => ['topic', 'find', String(params.type)],
+      parse: (res) => {
+        const topics = parseLines(res.stdout)
+        return { type: '', topics, count: topics.length }
+      },
+    }),
+    ros2Tool(deps, {
       name: 'ros2_topic_info',
       description: 'Show topic metadata: type, publisher/subscriber counts and QoS (`ros2 topic info <topic> [-v]`).',
       parameters: {
@@ -1092,6 +1104,15 @@ export function createRos2Tools(deps: ToolDeps) {
         const actions = parseTopicList(res.stdout)
         return { actions, count: actions.length }
       },
+    }),
+    ros2Tool(deps, {
+      name: 'ros2_action_info',
+      description: 'Show the type and status of an action (`ros2 action info <action>`).',
+      parameters: {
+        action: { type: 'string', required: true, description: 'Action name, e.g. /move.' },
+      },
+      buildArgs: (params) => ['action', 'info', String(params.action)],
+      parse: (res) => ({ output: res.stdout.trim() }),
     }),
     ros2Tool(deps, {
       name: 'ros2_pkg_prefix',
@@ -1142,6 +1163,15 @@ export function createRos2Tools(deps: ToolDeps) {
         const m = /^\w+ value is:\s*(.+)$/im.exec(res.stdout)
         return { ...(m && m[1] !== undefined ? { value: m[1].trim() } : { value: res.stdout.trim() }) }
       },
+    }),
+    ros2Tool(deps, {
+      name: 'ros2_param_dump',
+      description: 'Dump all parameters of a node (`ros2 param dump <node>`) as key/value lines.',
+      parameters: {
+        node: { type: 'string', required: true, description: 'Node name, e.g. /controller_manager.' },
+      },
+      buildArgs: (params) => ['param', 'dump', String(params.node)],
+      parse: (res) => ({ parameters: res.stdout.trim(), node: '' }),
     }),
     ros2Tool(deps, {
       name: 'ros2_interface_show',
@@ -1278,7 +1308,118 @@ export function createRos2Tools(deps: ToolDeps) {
     tools.push(makeServiceCallTool(coreDeps))
     tools.push(makeActionSendGoalTool(coreDeps))
     tools.push(makeDaemonTool(coreDeps))
+    // 0.1.3: everyday-debugging batch 3 (param delete / lifecycle / components).
+    tools.push(makeParamDeleteTool(coreDeps))
+    tools.push(makeLifecycleTool(coreDeps))
+    tools.push(makeComponentTool(coreDeps))
   return tools
+}
+
+/**
+ * L2: delete a parameter (`ros2 param delete`). Approval-gated — mutates a
+ * node's parameters.
+ */
+function makeParamDeleteTool(deps: ToolDeps) {
+  return defineTool({
+    name: 'ros2_param_delete',
+    description: 'Delete a parameter of a node (`ros2 param delete <node> <param>`). Approval-gated (mutates the node).',
+    parameters: {
+      node: { type: 'string', required: true, description: 'Node name.' },
+      param: { type: 'string', required: true, description: 'Parameter name.' },
+    },
+    output: { schema: resultSchema, render: renderResult },
+    async execute(args, exec) {
+      const params = args as Record<string, unknown>
+      const node = String(params.node ?? '')
+      const param = String(params.param ?? '')
+      if (!node || !param) return toolError('ros2_param_delete', 'ros2_param_delete', 'MISSING_PARAM', 'node 与 param 必填')
+      const command = `ros2 param delete ${node} ${param}`
+      const approval = await requestApproval(deps, exec, 'ros2_param_delete', `将删除节点 ${node} 的参数 ${param}。`)
+      if (!approval.allowed) return deniedResult('ros2_param_delete', command, approval.outcome)
+      const res = await deps.run('ros2', ['param', 'delete', node, param], { timeoutMs: 10000 })
+      if (!res.ok && res.stdout.trim().length === 0) {
+        return toolError('ros2_param_delete', command, res.error ?? 'COMMAND_FAILED', res.stderr.trim() || `exit ${res.exitCode ?? 'unknown'}`)
+      }
+      return okResult('ros2_param_delete', command, { node, param, output: res.stdout.trim() })
+    },
+  })
+}
+
+/**
+ * L2: manage node lifecycle (`ros2 lifecycle get|list|set`). get/list are
+ * read-only; set changes state (approval-gated).
+ */
+function makeLifecycleTool(deps: ToolDeps) {
+  return defineTool({
+    name: 'ros2_lifecycle',
+    description:
+      'Manage a lifecycle node (`ros2 lifecycle get|list|set <node> [state]`). get (current state) and list (available transitions) are read-only; set <state> changes the node state (approval-gated).',
+    parameters: {
+      node: { type: 'string', required: true, description: 'Lifecycle node name, e.g. /controller_manager.' },
+      action: { type: 'string', enum: ['get', 'list', 'set'], default: 'get', description: 'get (L1) | list (L1) | set (L2).' },
+      state: { type: 'string', default: '', description: 'set: target state, e.g. configure | activate.' },
+    },
+    output: { schema: resultSchema, render: renderResult },
+    async execute(args, exec) {
+      const params = args as Record<string, unknown>
+      const node = String(params.node ?? '')
+      const action = String(params.action ?? 'get')
+      if (!node) return toolError('ros2_lifecycle', 'ros2_lifecycle', 'MISSING_PARAM', 'node 必填')
+      const state = strOrUndefined(params.state) ?? ''
+      if (action === 'set' && !state) return toolError('ros2_lifecycle', 'ros2_lifecycle', 'MISSING_PARAM', 'set 需要 state')
+      const command = `ros2 lifecycle ${action} ${node}${state ? ` ${state}` : ''}`
+      if (action === 'set') {
+        const approval = await requestApproval(deps, exec, 'ros2_lifecycle', `将把生命周期节点 ${node} 切换到 ${state} 状态。`)
+        if (!approval.allowed) return deniedResult('ros2_lifecycle', command, approval.outcome)
+      }
+      const lcArgs = ['lifecycle', action, node, ...(state ? [state] : [])]
+      const res = await deps.run('ros2', lcArgs, { timeoutMs: 10000 })
+      if (!res.ok && res.stdout.trim().length === 0) {
+        return toolError('ros2_lifecycle', command, res.error ?? 'COMMAND_FAILED', res.stderr.trim() || `exit ${res.exitCode ?? 'unknown'}`)
+      }
+      return okResult('ros2_lifecycle', command, { node, action, ...(state ? { state } : {}), output: res.stdout.trim() })
+    },
+  })
+}
+
+/**
+ * L2: inspect/manage component containers (`ros2 component list|load`).
+ * list is read-only; load creates a component (approval-gated).
+ */
+function makeComponentTool(deps: ToolDeps) {
+  return defineTool({
+    name: 'ros2_component',
+    description:
+      'Inspect/manage component containers (`ros2 component list` / `ros2 component load <container> <pkg> <type>`). list is read-only; load loads a component into a container (approval-gated).',
+    parameters: {
+      action: { type: 'string', enum: ['list', 'load'], default: 'list', description: 'list (L1) | load (L2).' },
+      container: { type: 'string', default: '', description: 'load: container node name, e.g. /component_container.' },
+      package: { type: 'string', default: '', description: 'load: package name, e.g. composition.' },
+      componentType: { type: 'string', default: '', description: 'load: component class, e.g. composition::Talker.' },
+    },
+    output: { schema: resultSchema, render: renderResult },
+    async execute(args, exec) {
+      const params = args as Record<string, unknown>
+      const action = String(params.action ?? 'list')
+      const container = strOrUndefined(params.container) ?? ''
+      const pkg = strOrUndefined(params.package) ?? ''
+      const type = strOrUndefined(params.componentType) ?? ''
+      const command = `ros2 component ${action}${container ? ` ${container}` : ''}`
+      if (action === 'load') {
+        if (!container || !pkg || !type) {
+          return toolError('ros2_component', 'ros2_component', 'MISSING_PARAM', 'load 需要 container/package/componentType')
+        }
+        const approval = await requestApproval(deps, exec, 'ros2_component', `将向容器 ${container} 加载组件 ${pkg}::${type}。`)
+        if (!approval.allowed) return deniedResult('ros2_component', command, approval.outcome)
+      }
+      const cArgs = action === 'load' ? ['component', 'load', container, pkg, type] : ['component', 'list']
+      const res = await deps.run('ros2', cArgs, { timeoutMs: 15000 })
+      if (!res.ok && res.stdout.trim().length === 0) {
+        return toolError('ros2_component', command, res.error ?? 'COMMAND_FAILED', res.stderr.trim() || `exit ${res.exitCode ?? 'unknown'}`)
+      }
+      return okResult('ros2_component', command, { action, output: res.stdout.trim() })
+    },
+  })
 }
 
 /** Parse a `ros2 service call` response repr like Response(x=1, y='a'). */

@@ -1,6 +1,6 @@
 {
   "name": "dsh-ros2-core",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "dsh-ros2 core: ROS2 diagnostics (L1), management (L2) and GUI (L3) tools (33) + the ros2-diagnostics skill. Cordis bundle.",
   "type": "module",
   "main": "./lib/index.js",

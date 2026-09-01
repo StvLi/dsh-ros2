@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![ROS2](https://img.shields.io/badge/ROS2-Jazzy-orange)]()
 ![Node](https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-brightgreen)
-![Tools](https://img.shields.io/badge/tools-66-blue)
+![Tools](https://img.shields.io/badge/tools-72-blue)
 
 > **版本对应关系**：npm 上的 `dsh-ros2@0.1.0` 就是本仓库当前版本（monorepo 布局）。
 > GitHub 的 `v0.8.0 ~ v0.15.0` 标签是已废弃的旧单体布局历史，从未发布到 npm。
@@ -39,7 +39,7 @@
 
 ## 特性一览
 
-- **零侵入诊断**：66 个工具覆盖 ROS2 调试的绝大多数场景，从"包装了没有"到"这一帧话题里是什么"，一条命令一个结果；
+- **零侵入诊断**：72 个工具覆盖 ROS2 调试的绝大多数场景，从"包装了没有"到"这一帧话题里是什么"，一条命令一个结果；
 - **全图拓扑**：`ros2_graph` 将节点/发布/订阅/服务/动作折叠为一份 JSON，几秒看清系统结构；
 - **审批门控的写操作**：构建、装依赖、生成消息骨架等写操作通过 DSH 审批服务，fail-closed，拒绝即失败；
 - **可视化即服务**：无头也能"看"——截图/多模态描述/窗口交互全部本地化，不依赖远程显示；
@@ -153,14 +153,17 @@ ros2_doctor                         # 系统健康报告
 | `ros2_node_list` | `ros2 node list` | 运行中的节点 |
 | `ros2_node_info` | `ros2 node info <node> [-v]` | 单节点订阅/发布/服务/动作 |
 | `ros2_topic_list` | `ros2 topic list -t` | 话题及类型 |
+| `ros2_topic_find` | `ros2 topic find <type>` | 携带某消息类型的话题 |
 | `ros2_topic_info` | `ros2 topic info <topic> [-v]` | 话题元数据 / QoS |
 | `ros2_topic_echo` | `ros2 topic echo <topic> --once` | 单帧消息（尽量 JSON）；`--qos-reliability` / `--qos-durability` 透传，可读 TRANSIENT_LOCAL 锁存话题 |
 | `ros2_topic_hz` | `ros2 topic hz <topic> [--window N]` | 测量话题发布频率（窗口内均值/最小/最大/标准差）；自然终止 = 测量超时 |
 | `ros2_topic_bw` / `ros2_topic_delay` | `ros2 topic bw|delay <topic>` | 测量话题带宽 / 端到端延迟；超时终止 |
 | `ros2_service_list` | `ros2 service list -t` | 服务及类型 |
 | `ros2_action_list` | `ros2 action list -t` | 动作及类型 |
+| `ros2_action_info` | `ros2 action info <action>` | 动作类型与状态 |
 | `ros2_param_list` | `ros2 param list <node>` | 节点参数 |
 | `ros2_param_get` | `ros2 param get <node> <param>` | 读取单个参数值 |
+| `ros2_param_dump` | `ros2 param dump <node>` | 转储节点全部参数 |
 | `ros2_interface_show` | `ros2 interface show <type>` | 消息/服务/动作完整字段定义 |
 | `ros2_interface_list` / `ros2_interface_prototype` / `ros2_interface_package` | `ros2 interface list|prototype|package ...` | 全部接口类型 / 默认值原型 / 包内类型 |
 | `ros2_graph` | `ros2 node list` + 逐节点 `node info` | 折叠式 JSON 拓扑图 |
@@ -194,6 +197,9 @@ ros2_doctor                         # 系统健康报告
 | `ros2_service_call` | `ros2 service call <svc> <type> "<yaml>"` | 调用服务（审批门控）；响应从 repr 解析 |
 | `ros2_action_send_goal` | `ros2 action send_goal <action> <type> "<yaml>" [--feedback]` | 发送动作目标（审批门控）；返回 goal id + 状态 |
 | `ros2_daemon` | `ros2 daemon status|stop|start` | daemon 状态（L1）/ 停止-启动（L2 审批）——刷新过期图发现 |
+| `ros2_param_delete` | `ros2 param delete <node> <param>` | 删除节点参数（审批门控） |
+| `ros2_lifecycle` | `ros2 lifecycle get|list|set <node> [state]` | 生命周期状态 get/list（L1）或 set（L2 审批） |
+| `ros2_component` | `ros2 component list` / `load <container> <pkg> <type>` | 组件容器 list（L1）/ load（L2 审批） |
 | `ros2_launch` | `ros2 launch <pkg> <launch_file> [args]` | 以后台任务启动 launch 文件（审批门控；返回 jobId，用 DSH job 控制停止） |
 | `ros2_zero_pose_semantics` | 发零位→离屏渲染→VLM→确认 | 交互式校准零位语义（通用）：`analyze` 渲染全零姿态并让 VLM 从三维度描述（臂：侧平举/下垂；肘：向前/向上；手掌/相机支架：上/前/下）；`confirm` 记录使用者确认的组合（或 `customText` 自定义文字）到 `~/.dsh-ros2/zero-pose.yaml` 供 skill 使用 |
 | `robot_register` | 采集 URDF/TF/相机/MoveIt/零位语义 → 写入 `~/.dsh-ros2/robots/<name>.yaml` | 首次接触时注册机器人本体档案（审批门控），便于后续即时复用 |
@@ -413,7 +419,7 @@ dsh-ros2/                      # pnpm monorepo（工作区根，private）
 ├── tsconfig.base.json
 ├── packages/
 │   ├── common/                # dsh-ros2-common（非 bundle）：runner / parse / toolkit + scripts/robot_profile.py（零复制）
-│   ├── core/                  # dsh-ros2-core（48 工具）：L1 诊断 + L2 管理 + L3 GUI + ros2-diagnostics skill + gui.ts + pty_session.py
+│   ├── core/                  # dsh-ros2-core（54 工具）：L1 诊断 + L2 管理 + L3 GUI + ros2-diagnostics skill + gui.ts + pty_session.py
 │   ├── profile/               # dsh-ros2-profile（4 工具）：robot_register/load/topology + 零位校准 + registration/retrieval skills
 │   ├── moveit/                # dsh-ros2-moveit（4 工具）：discover/status/motion_validate/moveit_move + moveit_*.py + motion_validator.py
 │   ├── safety/                # dsh-ros2-safety（5 工具）：robot_safety_* + safety/ ROS2 包 + safetyStrict 配置

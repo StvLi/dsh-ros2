@@ -261,7 +261,13 @@ describe('tool inventory', () => {
     expect(names).toContain('ros2_service_call')
     expect(names).toContain('ros2_action_send_goal')
     expect(names).toContain('ros2_daemon')
-    expect(names).toHaveLength(48)
+    expect(names).toContain('ros2_topic_find')
+    expect(names).toContain('ros2_action_info')
+    expect(names).toContain('ros2_param_dump')
+    expect(names).toContain('ros2_param_delete')
+    expect(names).toContain('ros2_lifecycle')
+    expect(names).toContain('ros2_component')
+    expect(names).toHaveLength(54)
   })
 })
 
@@ -449,6 +455,77 @@ describe('ros2_daemon', () => {
   it('stop requires approval', async () => {
     const run = makeRun(() => ({ stdout: '' }))
     const out = await call('ros2_daemon', run, { action: 'stop' })
+    expect(out.error?.code).toBe('APPROVAL_DENIED')
+  })
+})
+
+// ── everyday-debugging batch 3 (topic_find / action_info / param_dump / delete / lifecycle / component) ──
+
+describe('ros2_topic_find', () => {
+  it('finds topics by message type', async () => {
+    const run = makeRun(() => ({ stdout: '/camera/left\n/camera/right\n' }))
+    const out = await call('ros2_topic_find', run, { type: 'sensor_msgs/msg/Image' })
+    expect(out.ok).toBe(true)
+    expect((out.data as { count: number }).count).toBe(2)
+  })
+})
+
+describe('ros2_action_info', () => {
+  it('returns the raw info output', async () => {
+    const run = makeRun(() => ({ stdout: 'Action clients: 1\nAction servers: 1\n' }))
+    const out = await call('ros2_action_info', run, { action: '/move' })
+    expect(out.ok).toBe(true)
+    expect((out.data as { output: string }).output).toContain('Action servers')
+  })
+})
+
+describe('ros2_param_dump', () => {
+  it('dumps parameters raw', async () => {
+    const run = makeRun(() => ({ stdout: 'max_vel:\n  type: integer\n  value: 5\n' }))
+    const out = await call('ros2_param_dump', run, { node: '/cm' })
+    expect(out.ok).toBe(true)
+    expect((out.data as { parameters: string }).parameters).toContain('max_vel')
+  })
+})
+
+describe('ros2_param_delete', () => {
+  it('fails closed without approval', async () => {
+    const run = makeRun(() => ({ stdout: '' }))
+    const out = await call('ros2_param_delete', run, { node: '/cm', param: 'x' })
+    expect(out.error?.code).toBe('APPROVAL_DENIED')
+  })
+  it('deletes after approval', async () => {
+    const run = makeRun(() => ({ stdout: 'Parameter deleted\n' }))
+    const approval = async () => 'allowed-once'
+    const t = tool2('ros2_param_delete', run, approval)
+    const out = (await t.execute({ node: '/cm', param: 'x' }, execStub)) as ToolResult
+    expect(out.ok).toBe(true)
+    expect(out.data).toMatchObject({ node: '/cm', param: 'x' })
+  })
+})
+
+describe('ros2_lifecycle', () => {
+  it('get is read-only without approval', async () => {
+    const run = makeRun(() => ({ stdout: 'state: inactive\n' }))
+    const out = await call('ros2_lifecycle', run, { node: '/cm' })
+    expect(out.ok).toBe(true)
+  })
+  it('set requires approval', async () => {
+    const run = makeRun(() => ({ stdout: '' }))
+    const out = await call('ros2_lifecycle', run, { node: '/cm', action: 'set', state: 'activate' })
+    expect(out.error?.code).toBe('APPROVAL_DENIED')
+  })
+})
+
+describe('ros2_component', () => {
+  it('list is read-only without approval', async () => {
+    const run = makeRun(() => ({ stdout: 'Container name: /container\n' }))
+    const out = await call('ros2_component', run, {})
+    expect(out.ok).toBe(true)
+  })
+  it('load requires approval', async () => {
+    const run = makeRun(() => ({ stdout: '' }))
+    const out = await call('ros2_component', run, { action: 'load', container: '/c', package: 'composition', componentType: 'composition::Talker' })
     expect(out.error?.code).toBe('APPROVAL_DENIED')
   })
 })
