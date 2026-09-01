@@ -104,20 +104,26 @@ npm install dsh-ros2-state dsh-ros2-sidecar --registry=https://registry.npmmirro
 > `dsh-ros2-vision`（视觉流水线）· `dsh-ros2-state`（状态客户端）·
 > `dsh-ros2-sidecar`（数据面守护进程）。
 
-### 最小配置
+### 最小配置（per-bundle，整体对象替换）
+
+拆分后每个 bundle 携带各自的**运行 seam 配置**（同样的键按 id 重复），vision
+provider 只存在于 `dsh-ros2-vision`：
 
 ```yaml
-# DSH profile 的插件配置片段
-- insert:
-    - id: dsh-ros2
-      name: dsh-ros2
-      config:
-        rosSetup: source /opt/ros/jazzy/setup.bash &&   # 准备 ROS2 环境
-        workspaceRoot: /home/you/ros2_ws                 # colcon/rosdep 的默认工作目录
-        vision:
-          provider: gemini                               # mock | gemini | openai
-          apiKey: ${GEMINI_API_KEY}                      # 经环境变量/密钥管理注入，勿写死
-        safetyStrict: warn                               # 安全监视器失联时运动工具的安全门策略：'warn'（默认）| 'reject'（fail-closed）；LOCKED 一律拒绝
+# DSH profile 补丁片段（按 id 定向配置覆盖）
+- id: dsh-ros2-core                 # 亦可用：-profile / -moveit / -safety
+  config:
+    rosSetup: source /opt/ros/jazzy/setup.bash &&   # 准备 ROS2 环境
+    workspaceRoot: /home/you/ros2_ws                 # colcon/rosdep 的默认工作目录
+- id: dsh-ros2-vision
+  config:
+    rosSetup: source /opt/ros/jazzy/setup.bash &&
+    vision:
+      provider: gemini                               # mock | gemini | openai
+      apiKey: ${GEMINI_API_KEY}                      # 经环境变量/密钥管理注入，勿写死
+- id: dsh-ros2-safety
+  config:
+    safetyStrict: warn                               # 'warn'（默认）| 'reject'（fail-closed）；LOCKED 一律拒绝
 ```
 
 ### 三分钟体验
@@ -182,7 +188,9 @@ ros2_doctor                         # 系统健康报告
 | `robot_register` | 采集 URDF/TF/相机/MoveIt/零位语义 → 写入 `~/.dsh-ros2/robots/<name>.yaml` | 首次接触时注册机器人本体档案（审批门控），便于后续即时复用 |
 | `robot_load` | 读取 `~/.dsh-ros2/robots/<name>.yaml` | 加载已注册的机器人档案为结构化 JSON（快速路径——无需重新发现）；name 为空列出全部 |
 | `robot_topology` | 聚合快照 + 渐进式重要节点学习（严格 schema） | 机器人通信拓扑的取舍：`snapshot`（审批）记录节点/话题/服务清单（轻量不冗杂）；`learn`（审批）记录单个重要节点的角色/功能 + pub/sub/srv/act；`show`（只读）读回 |
-| `moveit_move` | 统一：`/move_action` + `/execute_trajectory` | **一个工具五种本质模式**（审批门控）：`joint_abs` 关节角绝对、`joint_rel` 关节角相对增量、`pose_abs` 末端位姿绝对、`pose_rel` 末端位姿相对增量（frame ee/world）、`trajectory` 轨迹执行。通用：仅标准 moveit_msgs + SRDF；`planOnly` + `trajectoryOut` 分离规划/执行 |
+| `moveit_move` | 统一：`/move_action` + `/execute_trajectory` | **一个工具五种本质模式**（审批门控）：`joint_abs`、`joint_rel`、`pose_abs`、`pose_rel`（frame ee/world）、`trajectory`。通用：仅标准 moveit_msgs + SRDF。**单一路径：规划 → 确定性校验（motion_validator，`robot` 档案提供完整限位）→ 人工审批（展示校验摘要）→ 执行 → 验证**；执行前查 `/safety/state`（LOCKED 恒拒；监视器失联按 `safetyStrict`）。`planOnly` + `trajectoryOut` 分离规划/执行 |
+| `robot_safety_start` | `ros2 run dsh_ros2_safety safety_monitor --profile <yaml>` | 以后台任务启动通用安全监视器（审批门控）；本体相关值全部来自档案 `safety` 段 |
+| `robot_safety_lock` / `robot_safety_unlock` | `ros2 service call /safety/set_lock|unlock ...` | **人工门**显式锁死 / 解锁（调用前 L2 审批）；锁存直至人工解锁（恢复：解锁 → 回 home → 恢复） |
 | `moveit_status` | 探测 move_group 接口 + 采样 `/joint_states` | 运行时状态：在线探测 + 当前关节状态 + SRDF 规划帧（只读） |
 
 ### L3 可视化
@@ -391,23 +399,20 @@ snapshot` 固化聚合层；`robot_topology learn` 在使用中逐个追加重�
 ## 项目结构
 
 ```
-dsh-ros2/
-├── src/                  # DSH 插件本体（TypeScript）
-│   ├── index.ts          # 插件入口：注册 51 个工具 + 4 个 skill
-│   ├── tools.ts          # 工具定义（L1/L2/L3 参数与命令映射）
-│   ├── vision.ts         # L4 视觉工具（snapshot / analyze / topics）
-│   ├── gui.ts            # L3 GUI 生命周期与交互
-│   ├── skill.ts          # ros2-diagnostics + robot-state-vision-analysis
-│   ├── runner.ts         # 命令执行器（超时/日志/审批/后台任务 seam）
-│   └── config.ts         # 配置读取与校验
-├── vlm/                  # ROS2 包 dsh_ros2_vlm（Python）：vlm_node / vision_bringup / vlm_bridge_node / image_snapshot / vlm_call / vlm_bridge_call
-├── offscreen/            # ROS2 包 dsh_ros2_rviz_offscreen（C++）：rviz_offscreen_node（OGRE 离屏渲染 → /rviz/scene）
-├── safety/               # ROS2 包 dsh_ros2_safety（Python）：safety_monitor 节点 + safety_core（纯逻辑，--selftest）+ safety_vlm_arbitrate + SafetyState/Event msg + Unlock/SetLock srv
-├── docs/                 # 架构（architecture.md）· 兼容基线（compatibility.md）· 安全（safety.md / safety-handover.md / safety-todo.md / safety-gpt-review.md）· 实测（test-robot-state-vision.md / test-gpu-passthrough.md）· **versioning.md** · 截图
-├── tests/                # vitest（115 例，CLI 输出 mock）
-├── .github/workflows/    # CI：Node 22/24 → typecheck/test/build/pack 校验
-├── PUBLISH.md            # 开源发布清单（GitHub + npm + DSH 社区目录）
-└── CHANGELOG.md          # 版本变更记录（Keep a Changelog）
+dsh-ros2/                      # pnpm monorepo（工作区根，private）
+├── pnpm-workspace.yaml        # packages/*
+├── tsconfig.base.json
+├── packages/
+│   ├── common/                # dsh-ros2-common（非 bundle）：runner / parse / toolkit + scripts/robot_profile.py（零复制）
+│   ├── core/                  # dsh-ros2-core（33 工具）：L1 诊断 + L2 管理 + L3 GUI + ros2-diagnostics skill + gui.ts + pty_session.py
+│   ├── profile/               # dsh-ros2-profile（4 工具）：robot_register/load/topology + 零位校准 + registration/retrieval skills
+│   ├── moveit/                # dsh-ros2-moveit（4 工具）：discover/status/motion_validate/moveit_move + moveit_*.py + motion_validator.py
+│   ├── safety/                # dsh-ros2-safety（5 工具）：robot_safety_* + safety/ ROS2 包 + safetyStrict 配置
+│   ├── vision/                # dsh-ros2-vision（5 工具）：视觉工具 + vlm/ + offscreen/ ROS2 包 + vision provider 服务 + state-vision skill
+│   └── dsh-ros2/              # 聚合 bundle（apply 为空，向后兼容）
+├── docs/                      # architecture.md · safety.md / safety-handover.md / safety-todo.md / safety-gpt-review.md · test-*.md · plugin-split-plan.md · versioning.md
+├── .github/workflows/         # CI：Node 22/24 → 工作区 typecheck/test/build + 每包 tarball 校验
+└── CHANGELOG.md               # 版本变更记录（Keep a Changelog）
 ```
 
 ---
@@ -469,8 +474,13 @@ CI（`.github/workflows/ci.yml`）：push 到 `main` / PR 时在 Node 22 与 24 
 | --- | --- |
 | [`docs/architecture.md`](docs/architecture.md) | 设计概览、四层能力、L4 视觉与离屏渲染架构、性能演进、安全模型 |
 | [`docs/compatibility.md`](docs/compatibility.md) | 兼容基线 |
+| [`docs/safety.md`](docs/safety.md) | 安全边界：六层（agent 权限 / 人工审批 / 运动校验 / 执行监视 / 事后验证 / 物理机器人安全）、fail-closed 与降级策略、"DSH 非功能安全系统"声明 |
+| [`docs/safety-handover.md`](docs/safety-handover.md) | 本体适配交接：通用框架/接口 vs 本体数据源/算法、profile `safety` schema、接口定义 |
+| [`docs/safety-todo.md`](docs/safety-todo.md) | GPT 评审结论与批次：0.14.1 已完成（确定性校验）、0.15+（GUI 白名单 / 审计 / C++ 实时节点…） |
 | [`docs/test-robot-state-vision.md`](docs/test-robot-state-vision.md) | 真机端到端实测：流水线、实时性、mesh/TF 绑定修复与验证、四路联合分析（含图） |
+| [`docs/test-gpu-passthrough.md`](docs/test-gpu-passthrough.md) | GPU 直通验证：硬件、排查、结果、使用方式 |
 | [`CHANGELOG.md`](CHANGELOG.md) | 版本变更记录（Keep a Changelog） |
+| [`docs/versioning.md`](docs/versioning.md) | GitHub tag ↔ npm 包版本对应关系（monorepo 重基线；旧单体 tag v0.8–v0.15 从未上 npm） |
 
 ---
 
