@@ -1115,6 +1115,36 @@ export function createRos2Tools(deps: ToolDeps) {
       parse: (res) => ({ output: res.stdout.trim() }),
     }),
     ros2Tool(deps, {
+      name: 'ros2_service_type',
+      description: 'Show the type of a service (`ros2 service type <service>`).',
+      parameters: {
+        service: { type: 'string', required: true, description: 'Service name, e.g. /clear.' },
+      },
+      buildArgs: (params) => ['service', 'type', String(params.service)],
+      parse: (res) => ({ type: res.stdout.trim() }),
+    }),
+    ros2Tool(deps, {
+      name: 'ros2_service_find',
+      description: 'Find services by type (`ros2 service find <type>`), e.g. std_srvs/srv/Empty.',
+      parameters: {
+        type: { type: 'string', required: true, description: 'Service type.' },
+      },
+      buildArgs: (params) => ['service', 'find', String(params.type)],
+      parse: (res) => {
+        const services = parseLines(res.stdout)
+        return { services, count: services.length }
+      },
+    }),
+    ros2Tool(deps, {
+      name: 'ros2_action_type',
+      description: 'Show the type of an action (`ros2 action type <action>`).',
+      parameters: {
+        action: { type: 'string', required: true, description: 'Action name, e.g. /move.' },
+      },
+      buildArgs: (params) => ['action', 'type', String(params.action)],
+      parse: (res) => ({ type: res.stdout.trim() }),
+    }),
+    ros2Tool(deps, {
       name: 'ros2_pkg_prefix',
       description: 'Show the install prefix of a package (`ros2 pkg prefix <pkg>`).',
       parameters: {

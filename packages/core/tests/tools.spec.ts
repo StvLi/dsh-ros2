@@ -267,7 +267,10 @@ describe('tool inventory', () => {
     expect(names).toContain('ros2_param_delete')
     expect(names).toContain('ros2_lifecycle')
     expect(names).toContain('ros2_component')
-    expect(names).toHaveLength(54)
+    expect(names).toContain('ros2_service_type')
+    expect(names).toContain('ros2_service_find')
+    expect(names).toContain('ros2_action_type')
+    expect(names).toHaveLength(57)
   })
 })
 
@@ -527,5 +530,25 @@ describe('ros2_component', () => {
     const run = makeRun(() => ({ stdout: '' }))
     const out = await call('ros2_component', run, { action: 'load', container: '/c', package: 'composition', componentType: 'composition::Talker' })
     expect(out.error?.code).toBe('APPROVAL_DENIED')
+  })
+})
+
+// ── final ros2 subcommand coverage (service type/find, action type) ──
+
+describe('ros2_service_type / find / action_type', () => {
+  it('returns the service type', async () => {
+    const run = makeRun(() => ({ stdout: 'std_srvs/srv/Empty\n' }))
+    const out = await call('ros2_service_type', run, { service: '/clear' })
+    expect(out.data).toMatchObject({ type: 'std_srvs/srv/Empty' })
+  })
+  it('finds services by type', async () => {
+    const run = makeRun(() => ({ stdout: '/clear\n/reset\n' }))
+    const out = await call('ros2_service_find', run, { type: 'std_srvs/srv/Empty' })
+    expect((out.data as { count: number }).count).toBe(2)
+  })
+  it('returns the action type', async () => {
+    const run = makeRun(() => ({ stdout: 'nav2_msgs/action/NavigateToPose\n' }))
+    const out = await call('ros2_action_type', run, { action: '/navigate' })
+    expect(out.data).toMatchObject({ type: 'nav2_msgs/action/NavigateToPose' })
   })
 })

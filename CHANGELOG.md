@@ -4,6 +4,21 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [SemVer](https://semver.org/).
 
+## [dsh-ros2-core 0.1.4] - 2026-09-01
+
+### Added
+
+- **补齐 ros2 CLI 子命令最后几个只读工具（3 个，core 54 → 57，全集 72 → 75）**：
+  `ros2_service_type`（服务类型）、`ros2_service_find`（按类型找服务）、`ros2_action_type`（动作类型）。
+- **覆盖度**：至此 ros2 CLI 全部日常子命令均有工具——枚举（pkg/colcon/rosdep/node/topic/
+  service/action/param/interface/tf/graph）、采样与测量（echo+QoS/hz/bw/delay）、
+  操作（pub/run/service_call/action_send_goal/param set·delete/lifecycle/component/
+  daemon/bag/launch/install）、清理（process_cleanup）。日常调试不再需要绕 bash。
+
+### Changed
+
+- `dsh-ros2-core` 0.1.3 → **0.1.4**；core 测试 86 → **89**。
+
 ## [dsh-ros2-core 0.1.3] - 2026-09-01
 
 ### Added
