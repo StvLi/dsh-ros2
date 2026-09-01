@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![ROS2](https://img.shields.io/badge/ROS2-Jazzy-orange)]()
 ![Node](https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-brightgreen)
-![Tools](https://img.shields.io/badge/tools-51-blue)
+![Tools](https://img.shields.io/badge/tools-55-blue)
 
 > **版本对应关系**：npm 上的 `dsh-ros2@0.1.0` 就是本仓库当前版本（monorepo 布局）。
 > GitHub 的 `v0.8.0 ~ v0.15.0` 标签是已废弃的旧单体布局历史，从未发布到 npm。
@@ -39,7 +39,7 @@
 
 ## 特性一览
 
-- **零侵入诊断**：51 个工具覆盖 ROS2 调试的绝大多数场景，从"包装了没有"到"这一帧话题里是什么"，一条命令一个结果；
+- **零侵入诊断**：55 个工具覆盖 ROS2 调试的绝大多数场景，从"包装了没有"到"这一帧话题里是什么"，一条命令一个结果；
 - **全图拓扑**：`ros2_graph` 将节点/发布/订阅/服务/动作折叠为一份 JSON，几秒看清系统结构；
 - **审批门控的写操作**：构建、装依赖、生成消息骨架等写操作通过 DSH 审批服务，fail-closed，拒绝即失败；
 - **可视化即服务**：无头也能"看"——截图/多模态描述/窗口交互全部本地化，不依赖远程显示；
@@ -153,7 +153,8 @@ ros2_doctor                         # 系统健康报告
 | `ros2_node_info` | `ros2 node info <node> [-v]` | 单节点订阅/发布/服务/动作 |
 | `ros2_topic_list` | `ros2 topic list -t` | 话题及类型 |
 | `ros2_topic_info` | `ros2 topic info <topic> [-v]` | 话题元数据 / QoS |
-| `ros2_topic_echo` | `ros2 topic echo <topic> --once` | 单帧消息（尽量 JSON） |
+| `ros2_topic_echo` | `ros2 topic echo <topic> --once` | 单帧消息（尽量 JSON）；`--qos-reliability` / `--qos-durability` 透传，可读 TRANSIENT_LOCAL 锁存话题 |
+| `ros2_topic_hz` | `ros2 topic hz <topic> [--window N]` | 测量话题发布频率（窗口内均值/最小/最大/标准差）；自然终止 = 测量超时 |
 | `ros2_service_list` | `ros2 service list -t` | 服务及类型 |
 | `ros2_action_list` | `ros2 action list -t` | 动作及类型 |
 | `ros2_param_list` | `ros2 param list <node>` | 节点参数 |
@@ -183,6 +184,9 @@ ros2_doctor                         # 系统健康报告
 | `ros2_job_status` | `ctx.jobs.get` | 按 id 查任务状态（只读） |
 | `ros2_install` | 鱼香ROS一键安装（交互式 PTY 会话） | ROS2 未安装时：`check` 探测（已装/已装未 source/未装）；`start`（审批）拉起安装器；`send`/`status`/`stop` 驱动与观察交互菜单 |
 | `ros2_bag_play` | `ros2 bag play <path> [--topics ...] [--rate X] [--loop] [--start-offset S]` | 回放 rosbag 到其话题（审批门控；会发布到图）；前台运行 `timeoutMs` |
+| `ros2_topic_pub` | `ros2 topic pub <topic> <type> "<yaml>" [-r Hz] [-n N|--once|-t 秒]` | 发布消息（审批门控；会写入图）。限时/限量发布 + QoS 透传（--qos-reliability / --qos-durability） |
+| `ros2_run` | `ros2 run <pkg> <executable> [args]` | 运行任意已安装 ROS2 可执行文件（审批门控）：前台（限时）或后台任务 |
+| `ros2_process_cleanup` | `pgrep -f '[p]attern'` + `kill` | 清理匹配模式的残留 ROS2 进程（自安全）；审批门控 |
 | `ros2_launch` | `ros2 launch <pkg> <launch_file> [args]` | 以后台任务启动 launch 文件（审批门控；返回 jobId，用 DSH job 控制停止） |
 | `ros2_zero_pose_semantics` | 发零位→离屏渲染→VLM→确认 | 交互式校准零位语义（通用）：`analyze` 渲染全零姿态并让 VLM 从三维度描述（臂：侧平举/下垂；肘：向前/向上；手掌/相机支架：上/前/下）；`confirm` 记录使用者确认的组合（或 `customText` 自定义文字）到 `~/.dsh-ros2/zero-pose.yaml` 供 skill 使用 |
 | `robot_register` | 采集 URDF/TF/相机/MoveIt/零位语义 → 写入 `~/.dsh-ros2/robots/<name>.yaml` | 首次接触时注册机器人本体档案（审批门控），便于后续即时复用 |
@@ -402,7 +406,7 @@ dsh-ros2/                      # pnpm monorepo（工作区根，private）
 ├── tsconfig.base.json
 ├── packages/
 │   ├── common/                # dsh-ros2-common（非 bundle）：runner / parse / toolkit + scripts/robot_profile.py（零复制）
-│   ├── core/                  # dsh-ros2-core（33 工具）：L1 诊断 + L2 管理 + L3 GUI + ros2-diagnostics skill + gui.ts + pty_session.py
+│   ├── core/                  # dsh-ros2-core（37 工具）：L1 诊断 + L2 管理 + L3 GUI + ros2-diagnostics skill + gui.ts + pty_session.py
 │   ├── profile/               # dsh-ros2-profile（4 工具）：robot_register/load/topology + 零位校准 + registration/retrieval skills
 │   ├── moveit/                # dsh-ros2-moveit（4 工具）：discover/status/motion_validate/moveit_move + moveit_*.py + motion_validator.py
 │   ├── safety/                # dsh-ros2-safety（5 工具）：robot_safety_* + safety/ ROS2 包 + safetyStrict 配置

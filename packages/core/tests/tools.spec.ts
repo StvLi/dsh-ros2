@@ -30,6 +30,12 @@ async function call(name: string, run: RunFn, args: Record<string, unknown>): Pr
   return (await tool(name, run).execute(args, execStub)) as ToolResult
 }
 
+function tool2(name: string, run: RunFn, approval: () => Promise<string>) {
+  const found = createRos2Tools({ run, approval }).find((t) => t.name === name)
+  if (!found) throw new Error(`tool ${name} not found`)
+  return found
+}
+
 
 
 describe('ros2_pkg_list', () => {
@@ -205,7 +211,7 @@ describe('ros2_install interactive flow (mock installer, no network)', () => {
 })
 
 describe('tool inventory', () => {
-  it('exposes the core tool set (33)', async () => {
+  it('exposes the core tool set (37)', async () => {
     const names = createRos2Tools({ run: makeRun(() => ({ stdout: '' })) }).map((t) => t.name)
     expect(names).toContain('ros2_pkg_list')
     expect(names).toContain('ros2_colcon_list')
@@ -240,6 +246,102 @@ describe('tool inventory', () => {
     expect(names).toContain('ros2_screenshot')
     expect(names).toContain('ros2_gui_observe')
     expect(names).toContain('ros2_gui_interact')
-    expect(names).toHaveLength(33)
+    expect(names).toContain('ros2_topic_hz')
+    expect(names).toContain('ros2_topic_pub')
+    expect(names).toContain('ros2_run')
+    expect(names).toContain('ros2_process_cleanup')
+    expect(names).toHaveLength(37)
+  })
+})
+
+// ── run/measure/publish/cleanup tools (the previously-missing gap) ──
+
+describe('ros2_topic_hz', () => {
+  it('measures frequency from the timeout-terminated output', async () => {
+    const run = makeRun(() => ({ stdout: 'average rate: 30.0\n\tmin: 29.5 max: 30.5 std dev: 0.3 window: 300\nmessages: 900\n' }))
+    const out = await call('ros2_topic_hz', run, { topic: '/chatter', timeoutMs: 3000 })
+    expect(out.ok).toBe(true)
+    expect(out.data).toMatchObject({ topic: '/chatter', rate: 30, min: 29.5, max: 30.5, stddev: 0.3, window: 300, messages: 900 })
+  })
+
+})
+
+describe('ros2_topic_pub', () => {
+  it('fails closed without approval', async () => {
+    const run = makeRun(() => ({ stdout: '' }))
+    const out = await call('ros2_topic_pub', run, { topic: '/chatter', type: 'std_msgs/msg/String', message: '{data: hello}' })
+    expect(out.error?.code).toBe('APPROVAL_DENIED')
+  })
+
+  it('publishes with rate and QoS durability after approval', async () => {
+    const captured: string[][] = []
+    const run = makeRun((bin, args) => {
+      captured.push(args)
+      return { stdout: 'publishing #1: hello\npublishing #2: hello\n' }
+    })
+    const approval = async () => 'allowed-once'
+    const t = tool2('ros2_topic_pub', run, approval)
+    const out = (await t.execute({ topic: '/chatter', type: 'std_msgs/msg/String', message: '{data: hello}', rate: 2, qosDurability: 'transient_local' }, execStub)) as ToolResult
+    expect(out.ok).toBe(true)
+    expect(out.data).toMatchObject({ published: 2, rate: 2, mode: 'duration' })
+    const pubArgs = captured.find((a) => a[0] === 'topic' && a[1] === 'pub')
+    expect(pubArgs).toBeDefined()
+    expect(pubArgs).toContain('--qos-durability')
+    expect(pubArgs).toContain('transient_local')
+  })
+})
+
+describe('ros2_run', () => {
+  it('fails closed without approval', async () => {
+    const run = makeRun(() => ({ stdout: '' }))
+    const out = await call('ros2_run', run, { package: 'demo_nodes_cpp', executable: 'talker' })
+    expect(out.error?.code).toBe('APPROVAL_DENIED')
+  })
+
+  it('runs foreground and returns output', async () => {
+    const run = makeRun(() => ({ stdout: '[INFO] talker started\n' }))
+    const approval = async () => 'allowed-once'
+    const t = tool2('ros2_run', run, approval)
+    const out = (await t.execute({ package: 'demo_nodes_cpp', executable: 'talker' }, execStub)) as ToolResult
+    expect(out.ok).toBe(true)
+    expect(out.data).toMatchObject({ ok: true, package: 'demo_nodes_cpp', executable: 'talker' })
+    expect((out.data as { output: string }).output).toContain('talker started')
+  })
+
+  it('starts a background job with background=true', async () => {
+    const started: string[] = []
+    const jobs = { start(spec: { label: string }) { started.push(spec.label); return 'job-r1' }, list: () => [], get: () => undefined }
+    const run = makeRun(() => ({ stdout: '' }))
+    const approval = async () => 'allowed-once'
+    const t = createRos2Tools({ run, approval, jobs }).find((x) => x.name === 'ros2_run')
+    if (!t) throw new Error('ros2_run not registered')
+    const out = (await t.execute({ package: 'demo_nodes_cpp', executable: 'talker', background: true }, execStub)) as ToolResult
+    expect(out.ok).toBe(true)
+    expect(out.data).toMatchObject({ jobId: 'job-r1', status: 'started' })
+    expect(started).toContain('demo_nodes_cpp/talker')
+  })
+})
+
+describe('ros2_process_cleanup', () => {
+  it('fails closed without approval', async () => {
+    const run = makeRun(() => ({ stdout: '' }))
+    const out = await call('ros2_process_cleanup', run, { pattern: 'ros2 topic pub' })
+    expect(out.error?.code).toBe('APPROVAL_DENIED')
+  })
+
+  it('kills matching pids after approval (self-safe pattern)', async () => {
+    let script = ''
+    const run = makeRun((bin, args) => {
+      if (bin === 'bash') script = args.join(' ')
+      return { stdout: 'killed: 1234 5678' }
+    })
+    const approval = async () => 'allowed-once'
+    const t = tool2('ros2_process_cleanup', run, approval)
+    const out = (await t.execute({ pattern: 'ros2 topic pub' }, execStub)) as ToolResult
+    expect(out.ok).toBe(true)
+    expect(out.data).toMatchObject({ result: 'killed: 1234 5678' })
+    // self-safe: the pgrep pattern is bracketed ([r]os2...), so the tool's own
+    // process command line never matches
+    expect(script).toContain("[r]os2 topic pub'")
   })
 })

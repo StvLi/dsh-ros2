@@ -4,6 +4,22 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [SemVer](https://semver.org/).
 
+## [dsh-ros2-core 0.1.1] - 2026-09-01
+
+### Added
+
+- **补齐"运行/测量/发布"能力缺口**（此前只能绕到 bash 的四项）：
+  - **`ros2_topic_hz`**（L1）：测量话题发布频率（`ros2 topic hz`，窗口均值/最小/最大/标准差/消息数；自然终止 = 测量超时，按成功结果返回）；
+  - **`ros2_topic_pub`**（L2 审批）：发布消息（`ros2 topic pub <topic> <type> "<yaml>"`），支持 `-r` 频率、`-n` 限量 / `--once` / `-t` 限时，以及 `--qos-reliability` / `--qos-durability` 透传（可写 TRANSIENT_LOCAL 锁存话题）；
+  - **`ros2_run`**（L2 审批）：运行任意已安装 ROS2 可执行文件（`ros2 run <pkg> <exec> [args]`）——前台（限时）或后台任务（jobId，DSH job 控制停止）；
+  - **`ros2_process_cleanup`**（L2 审批）：按模式清理残留 ROS2 进程（`pgrep -f '[p]attern'` 自安全技巧，绝不杀掉工具自身进程）；
+  - **`ros2_topic_echo` QoS 透传**：新增 `--qos-reliability` / `--qos-durability` 参数——读 TRANSIENT_LOCAL 锁存话题（如 `/safety_status`）不再需要绕到 bash。
+- 工具数：core 33 → **37**；全集 51 → **55**。
+
+### Changed
+
+- `dsh-ros2-core` 版本 0.1.0 → **0.1.1**。
+
 ## [monorepo split] - 2026-08-26
 
 ### Changed

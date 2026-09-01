@@ -1056,15 +1056,19 @@ export function createRos2Tools(deps: ToolDeps) {
     }),
     ros2Tool(deps, {
       name: 'ros2_topic_echo',
-      description: 'Sample one message from a topic (`ros2 topic echo <topic> --once`). Returns parsed JSON when possible.',
+      description: 'Sample one message from a topic (`ros2 topic echo <topic> --once`). Returns parsed JSON when possible. QoS overrides (--qos-reliability / --qos-durability) let you read TRANSIENT_LOCAL latched topics that volatile subscribers would miss.',
       parameters: {
         topic: { type: 'string', required: true, description: 'Topic name, e.g. /joint_states.' },
         field: { type: 'string', default: '', description: 'Optional YAML field path to print, e.g. position.' },
         timeoutMs: { type: 'number', default: 8000, description: 'How long to wait for one message (ms).' },
+        qosReliability: { type: 'string', default: '', description: 'QoS reliability override: reliable | best_effort (empty = ros2 default).' },
+        qosDurability: { type: 'string', default: '', description: 'QoS durability override: transient_local | volatile (empty = ros2 default). Use transient_local to read latched topics.' },
       },
       buildArgs: (params) => [
         'topic', 'echo', String(params.topic),
         ...(strOrUndefined(params.field) ? ['--field', strOrUndefined(params.field)!] : []),
+        ...(strOrUndefined(params.qosReliability) ? ['--qos-reliability', strOrUndefined(params.qosReliability)!] : []),
+        ...(strOrUndefined(params.qosDurability) ? ['--qos-durability', strOrUndefined(params.qosDurability)!] : []),
         '--once',
       ],
       runOpts: (params) => ({ timeoutMs: numOrUndefined(params.timeoutMs) ?? 8000 }),
@@ -1194,5 +1198,209 @@ export function createRos2Tools(deps: ToolDeps) {
     tools.push(makeScreenshotTool(coreDeps))
     tools.push(makeGuiObserveTool(coreDeps))
     tools.push(makeGuiInteractTool(coreDeps))
+    // Measurement / publishing / generic-execution / process-cleanup tools
+    // (the "run/measure/publish" gap — previously only reachable via bash).
+    tools.push(makeTopicHzTool(coreDeps))
+    tools.push(makeTopicPubTool(coreDeps))
+    tools.push(makeRunTool(coreDeps))
+    tools.push(makeProcessCleanupTool(coreDeps))
   return tools
+}
+
+/**
+ * L1: measure a topic's publish frequency (`ros2 topic hz`). The natural
+ * termination is the measurement timeout — reported as a successful result.
+ */
+function makeTopicHzTool(deps: ToolDeps) {
+  return defineTool({
+    name: 'ros2_topic_hz',
+    description:
+      'Measure the publish frequency of a topic (`ros2 topic hz <topic>`). Runs for `timeoutMs` (default 8s) and returns the measured rate (average/min/max/std dev/messages over the window) — the natural termination is the timeout, reported as a successful measurement. Read-only, no approval.',
+    parameters: {
+      topic: { type: 'string', required: true, description: 'Topic name, e.g. /joint_states.' },
+      window: { type: 'number', default: 0, description: 'Sliding window size (0 = no window).' },
+      timeoutMs: { type: 'number', default: 8000, description: 'Measurement duration in ms (default 8000).' },
+    },
+    output: { schema: resultSchema, render: renderResult },
+    async execute(args) {
+      const params = args as Record<string, unknown>
+      const topic = String(params.topic ?? '')
+      if (!topic) return toolError('ros2_topic_hz', 'ros2_topic_hz', 'MISSING_PARAM', 'topic 必填')
+      const hzArgs = ['topic', 'hz', topic]
+      const window = numOrUndefined(params.window) ?? 0
+      if (window > 0) hzArgs.push('--window', String(window))
+      const timeoutMs = Math.max(1000, numOrUndefined(params.timeoutMs) ?? 8000)
+      const command = `ros2 topic hz ${topic}`
+      const res = await deps.run('ros2', hzArgs, { timeoutMs: timeoutMs + 2000 })
+      const stdout = res.stdout
+      const out: Record<string, unknown> = { topic, raw: stdout.trim().slice(-800) }
+      const grab = (re: RegExp, key: string) => {
+        const m = re.exec(stdout)
+        if (m && m[1] !== undefined) out[key] = Number(m[1])
+      }
+      grab(/average rate:\s*([\d.]+)/, 'rate')
+      grab(/min:\s*([\d.]+)/, 'min')
+      grab(/max:\s*([\d.]+)/, 'max')
+      grab(/std dev:\s*([\d.]+)/, 'stddev')
+      grab(/window:\s*(\d+)/, 'window')
+      grab(/messages:\s*(\d+)/, 'messages')
+      const result = okResult('ros2_topic_hz', command, out as JsonValue)
+      if (out.rate === undefined) result.warnings = ['未采集到消息（可能无发布者或话题不存在）']
+      return result
+    },
+  })
+}
+
+/**
+ * L2: publish messages to a topic (`ros2 topic pub`). Approval-gated —
+ * publishing mutates the graph. Bounded via --once / -n count / -t duration;
+ * QoS overrides let you reach TRANSIENT_LOCAL (latched) topics.
+ */
+function makeTopicPubTool(deps: ToolDeps) {
+  return defineTool({
+    name: 'ros2_topic_pub',
+    description:
+      'Publish messages to a topic (`ros2 topic pub <topic> <type> "<yaml>"`). Approval-gated (publishes to the graph). Bounded: --once, or -n count, or -t duration; rate via -r. QoS overrides (--qos-reliability / --qos-durability) reach TRANSIENT_LOCAL latched topics.',
+    parameters: {
+      topic: { type: 'string', required: true, description: 'Topic name, e.g. /chatter.' },
+      type: { type: 'string', required: true, description: 'Message type, e.g. std_msgs/msg/String.' },
+      message: { type: 'string', required: true, description: 'Message as YAML, e.g. {data: hello}.' },
+      rate: { type: 'number', default: 1, description: 'Publish rate in Hz (default 1).' },
+      count: { type: 'number', default: 0, description: 'Publish N messages then exit (0 = run until timeout).' },
+      timeoutMs: { type: 'number', default: 5000, description: 'Bounded duration (-t) in ms when count=0 (default 5000).' },
+      once: { type: 'boolean', default: false, description: 'Publish one message then exit (--once).' },
+      qosReliability: { type: 'string', default: '', description: 'QoS reliability override: reliable | best_effort.' },
+      qosDurability: { type: 'string', default: '', description: 'QoS durability override: transient_local | volatile.' },
+    },
+    output: { schema: resultSchema, render: renderResult },
+    async execute(args, exec) {
+      const params = args as Record<string, unknown>
+      const topic = String(params.topic ?? '')
+      const type = String(params.type ?? '')
+      const message = String(params.message ?? '')
+      if (!topic || !type || !message) return toolError('ros2_topic_pub', 'ros2_topic_pub', 'MISSING_PARAM', 'topic/type/message 必填')
+      const rate = Math.max(0.1, numOrUndefined(params.rate) ?? 1)
+      const count = Math.max(0, Math.floor(numOrUndefined(params.count) ?? 0))
+      const once = params.once === true
+      const timeoutMs = Math.max(1000, numOrUndefined(params.timeoutMs) ?? 5000)
+      const pubArgs = ['topic', 'pub', topic, type, message, '-r', String(rate)]
+      if (once) pubArgs.push('--once')
+      else if (count > 0) pubArgs.push('-n', String(count))
+      else pubArgs.push('-t', String(Math.max(1, Math.floor(timeoutMs / 1000))))
+      const qRel = strOrUndefined(params.qosReliability)
+      if (qRel) pubArgs.push('--qos-reliability', qRel)
+      const qDur = strOrUndefined(params.qosDurability)
+      if (qDur) pubArgs.push('--qos-durability', qDur)
+      const command = `ros2 topic pub ${topic} ${type} ...`
+      const approval = await requestApproval(deps, exec, 'ros2_topic_pub',
+        `将向话题 ${topic} 发布 ${type} 消息（rate=${rate}Hz，${once ? '一次' : count > 0 ? `${count} 条` : `约 ${Math.floor(timeoutMs / 1000)}s`}${qDur ? `，durability=${qDur}` : ''}）。`)
+      if (!approval.allowed) return deniedResult('ros2_topic_pub', command, approval.outcome)
+      const res = await deps.run('ros2', pubArgs, { timeoutMs: timeoutMs + 5000 })
+      const published = (res.stdout.match(/publishing #/g) ?? []).length
+      const data: Record<string, unknown> = {
+        topic, type, published, rate,
+        mode: once ? 'once' : count > 0 ? 'count' : 'duration',
+        stdout: res.stdout.trim().slice(-500),
+      }
+      if (count > 0) data.count = count
+      if (!res.ok && published === 0) {
+        return toolError('ros2_topic_pub', command, res.error ?? 'COMMAND_FAILED', res.stderr.trim() || res.stdout.trim())
+      }
+      return okResult('ros2_topic_pub', command, data as JsonValue)
+    },
+  })
+}
+
+/**
+ * L2: run any installed ROS2 executable (`ros2 run`). Approval-gated.
+ * Foreground (default, bounded by timeoutMs) or background job for
+ * long-running nodes.
+ */
+function makeRunTool(deps: ToolDeps) {
+  return defineTool({
+    name: 'ros2_run',
+    description:
+      'Run any installed ROS2 executable (`ros2 run <package> <executable> [args]`). Approval-gated. Foreground (default, stops at timeoutMs) or a background job (background=true, returns jobId, stop with DSH job controls) for long-running nodes.',
+    parameters: {
+      package: { type: 'string', required: true, description: 'Package name, e.g. demo_nodes_cpp.' },
+      executable: { type: 'string', required: true, description: 'Executable name, e.g. talker.' },
+      args: { type: 'string', default: '', description: 'Space-separated extra arguments.' },
+      background: { type: 'boolean', default: false, description: 'Run as a background job (long-running).' },
+      timeoutMs: { type: 'number', default: 15000, description: 'Foreground timeout in ms.' },
+    },
+    output: { schema: resultSchema, render: renderResult },
+    async execute(args, exec) {
+      const params = args as Record<string, unknown>
+      const pkg = strOrUndefined(params.package) ?? ''
+      const exe = strOrUndefined(params.executable) ?? ''
+      if (!pkg || !exe) return toolError('ros2_run', 'ros2_run', 'MISSING_PARAM', 'package 与 executable 必填')
+      const extra = strOrUndefined(params.args)?.split(/\s+/).filter(Boolean) ?? []
+      const runArgs = ['run', pkg, exe, ...extra]
+      const command = `ros2 ${runArgs.join(' ')}`
+      const approval = await requestApproval(deps, exec, 'ros2_run',
+        `将执行 ROS2 可执行文件：${command}${params.background === true ? '（后台任务，用 DSH job 控制停止）' : '（前台，超时后停止）'}。`)
+      if (!approval.allowed) return deniedResult('ros2_run', command, approval.outcome)
+      if (params.background === true) {
+        if (!deps.jobs) return toolError('ros2_run', command, 'JOBS_UNAVAILABLE', '后台任务服务不可用（需要 DSH jobs 支持）')
+        let jobId: string
+        try {
+          jobId = deps.jobs.start({
+            owner: exec.agent,
+            kind: 'ros2-run',
+            label: `${pkg}/${exe}`,
+            outputLimitBytes: 16 * 1024 * 1024,
+            run: () => spawnJob('ros2', runArgs, { outputLimitBytes: 16 * 1024 * 1024 }),
+          })
+        } catch (error) {
+          return toolError('ros2_run', command, 'JOB_START_FAILED', error instanceof Error ? error.message : String(error))
+        }
+        return okResult('ros2_run', command, { jobId, kind: 'ros2-run', label: `${pkg}/${exe}`, status: 'started', note: '查询用 ros2_job_status，停止用 DSH job 控制' })
+      }
+      const timeoutMs = Math.max(2000, numOrUndefined(params.timeoutMs) ?? 15000)
+      const res = await deps.run('ros2', runArgs, { timeoutMs })
+      if (!res.ok && res.stdout.trim().length === 0) {
+        return toolError('ros2_run', command, res.error ?? 'COMMAND_FAILED', res.stderr.trim() || `exit ${res.exitCode ?? 'unknown'}`)
+      }
+      return okResult('ros2_run', command, {
+        ok: true,
+        package: pkg,
+        executable: exe,
+        output: (res.stdout + (res.stderr ? `\n${res.stderr}` : '')).trim().slice(-2000),
+      })
+    },
+  })
+}
+
+/**
+ * L2: kill leftover ROS2 processes matching a pattern. Uses pgrep by PID
+ * with the "[p]attern" trick so the tool never kills its own process.
+ */
+function makeProcessCleanupTool(deps: ToolDeps) {
+  return defineTool({
+    name: 'ros2_process_cleanup',
+    description:
+      'Kill leftover ROS2 processes matching a pattern (pgrep + kill by PID; self-safe via the [p]attern trick — the tool never kills its own process). Approval-gated (kills processes).',
+    parameters: {
+      pattern: { type: 'string', required: true, description: 'Process pattern (regex against the full command line), e.g. "ros2 topic pub".' },
+      signal: { type: 'string', default: 'TERM', description: 'Signal to send (default TERM).' },
+    },
+    output: { schema: resultSchema, render: renderResult },
+    async execute(args, exec) {
+      const params = args as Record<string, unknown>
+      const pattern = strOrUndefined(params.pattern) ?? ''
+      const signal = strOrUndefined(params.signal) ?? 'TERM'
+      if (!pattern) return toolError('ros2_process_cleanup', 'ros2_process_cleanup', 'MISSING_PARAM', 'pattern 必填')
+      const command = `ros2_process_cleanup pattern=${pattern} signal=${signal}`
+      const approval = await requestApproval(deps, exec, 'ros2_process_cleanup',
+        `将终止匹配 "${pattern}" 的进程（信号 ${signal}）。`)
+      if (!approval.allowed) return deniedResult('ros2_process_cleanup', command, approval.outcome)
+      // [p]attern trick: pgrep -f '[p]attern' matches "pattern" in targets but
+      // its own command line contains "[p]attern" — never self-matches.
+      const bracket = `[${pattern[0] ?? ''}]${pattern.slice(1)}`.replace(/'/g, `'\\''`)
+      const script = `pids=$(pgrep -af '${bracket}' | awk '{print $1}'); if [ -n "$pids" ]; then kill -${signal} $pids 2>/dev/null; echo "killed: $pids"; else echo "no match"; fi`
+      const res = await deps.run('bash', ['-lc', script], { timeoutMs: 15000 })
+      if (!res.ok) return toolError('ros2_process_cleanup', command, res.error ?? 'COMMAND_FAILED', res.stderr.trim())
+      return okResult('ros2_process_cleanup', command, { pattern, signal, result: res.stdout.trim() })
+    },
+  })
 }
