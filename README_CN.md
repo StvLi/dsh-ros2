@@ -147,6 +147,7 @@ ros2_doctor                         # 系统健康报告
 | Tool | 底层命令 | 用途 |
 | --- | --- | --- |
 | `ros2_pkg_list` | `ros2 pkg list` | 已安装包（可选子串过滤） |
+| `ros2_pkg_prefix` / `ros2_pkg_executables` | `ros2 pkg prefix <pkg>` / `ros2 pkg executables [pkg]` | 包的安装前缀 / 可执行文件（结构化） |
 | `ros2_colcon_list` | `colcon list` | 工作区内的包 |
 | `ros2_rosdep_check` | `rosdep check --from-paths src --ignore-src` | 依赖健康（缺依赖 = finding 而非 error） |
 | `ros2_node_list` | `ros2 node list` | 运行中的节点 |
@@ -155,10 +156,13 @@ ros2_doctor                         # 系统健康报告
 | `ros2_topic_info` | `ros2 topic info <topic> [-v]` | 话题元数据 / QoS |
 | `ros2_topic_echo` | `ros2 topic echo <topic> --once` | 单帧消息（尽量 JSON）；`--qos-reliability` / `--qos-durability` 透传，可读 TRANSIENT_LOCAL 锁存话题 |
 | `ros2_topic_hz` | `ros2 topic hz <topic> [--window N]` | 测量话题发布频率（窗口内均值/最小/最大/标准差）；自然终止 = 测量超时 |
+| `ros2_topic_bw` / `ros2_topic_delay` | `ros2 topic bw|delay <topic>` | 测量话题带宽 / 端到端延迟；超时终止 |
 | `ros2_service_list` | `ros2 service list -t` | 服务及类型 |
 | `ros2_action_list` | `ros2 action list -t` | 动作及类型 |
 | `ros2_param_list` | `ros2 param list <node>` | 节点参数 |
+| `ros2_param_get` | `ros2 param get <node> <param>` | 读取单个参数值 |
 | `ros2_interface_show` | `ros2 interface show <type>` | 消息/服务/动作完整字段定义 |
+| `ros2_interface_list` / `ros2_interface_prototype` / `ros2_interface_package` | `ros2 interface list|prototype|package ...` | 全部接口类型 / 默认值原型 / 包内类型 |
 | `ros2_graph` | `ros2 node list` + 逐节点 `node info` | 折叠式 JSON 拓扑图 |
 | `ros2_tf_list` | `ros2 topic echo /tf --once` | 当前 TF 树边 |
 | `ros2_tf_echo` | `ros2 topic echo /tf --once` | 两帧间变换 |
@@ -187,6 +191,9 @@ ros2_doctor                         # 系统健康报告
 | `ros2_topic_pub` | `ros2 topic pub <topic> <type> "<yaml>" [-r Hz] [-n N|--once|-t 秒]` | 发布消息（审批门控；会写入图）。限时/限量发布 + QoS 透传（--qos-reliability / --qos-durability） |
 | `ros2_run` | `ros2 run <pkg> <executable> [args]` | 运行任意已安装 ROS2 可执行文件（审批门控）：前台（限时）或后台任务 |
 | `ros2_process_cleanup` | `pgrep -f '[p]attern'` + `kill` | 清理匹配模式的残留 ROS2 进程（自安全）；审批门控 |
+| `ros2_service_call` | `ros2 service call <svc> <type> "<yaml>"` | 调用服务（审批门控）；响应从 repr 解析 |
+| `ros2_action_send_goal` | `ros2 action send_goal <action> <type> "<yaml>" [--feedback]` | 发送动作目标（审批门控）；返回 goal id + 状态 |
+| `ros2_daemon` | `ros2 daemon status|stop|start` | daemon 状态（L1）/ 停止-启动（L2 审批）——刷新过期图发现 |
 | `ros2_launch` | `ros2 launch <pkg> <launch_file> [args]` | 以后台任务启动 launch 文件（审批门控；返回 jobId，用 DSH job 控制停止） |
 | `ros2_zero_pose_semantics` | 发零位→离屏渲染→VLM→确认 | 交互式校准零位语义（通用）：`analyze` 渲染全零姿态并让 VLM 从三维度描述（臂：侧平举/下垂；肘：向前/向上；手掌/相机支架：上/前/下）；`confirm` 记录使用者确认的组合（或 `customText` 自定义文字）到 `~/.dsh-ros2/zero-pose.yaml` 供 skill 使用 |
 | `robot_register` | 采集 URDF/TF/相机/MoveIt/零位语义 → 写入 `~/.dsh-ros2/robots/<name>.yaml` | 首次接触时注册机器人本体档案（审批门控），便于后续即时复用 |
