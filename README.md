@@ -443,7 +443,7 @@ dsh-ros2/                      # pnpm monorepo (workspace root, private)
 │   ├── profile/               # dsh-ros2-profile (4 tools): robot_register/load/topology + zero-pose calibration + registration/retrieval skills
 │   ├── moveit/                # dsh-ros2-moveit (4 tools): discover/status/motion_validate/moveit_move + moveit_*.py + motion_validator.py
 │   ├── safety/                # dsh-ros2-safety (5 tools): robot_safety_* + safety/ ROS2 pkg + safetyStrict config
-│   ├── vision/                # dsh-ros2-vision (5 tools): vision tools + vlm/ + offscreen/ ROS2 pkgs + vision provider service + state-vision skill
+│   ├── vision/                # dsh-ros2-vision (7 tools): vision tools + vlm/ + offscreen/ ROS2 pkgs + vision provider service + state-vision skill
 │   └── dsh-ros2/              # aggregate bundle (empty apply, backward compat)
 ├── docs/                      # architecture.md · safety.md / safety-handover.md / safety-todo.md / safety-gpt-review.md · test-*.md · plugin-split-plan.md
 ├── .github/workflows/         # CI: Node 22/24 → workspace typecheck/test/build + per-package tarball validation
@@ -455,7 +455,7 @@ dsh-ros2/                      # pnpm monorepo (workspace root, private)
 ## Plugin split (9 packages)
 
 Since v0.15.0 the plugin is a **pnpm monorepo** of 9 npm packages (per
-[`docs/plugin-split-plan.md`](docs/plugin-split-plan.md), ISP-tightened): 75 tools +
+[`docs/plugin-split-plan.md`](docs/plugin-split-plan.md), ISP-tightened): 79 tools +
 4 skills preserved with **unchanged names and behavior**. Install the domain
 bundles you need (or the `dsh-ros2` aggregate for the full set):
 
@@ -487,7 +487,7 @@ bundles you need (or the `dsh-ros2` aggregate for the full set):
 ```bash
 pnpm install
 pnpm run typecheck   # tsc --noEmit
-pnpm run test        # vitest (166 cases; plus 10 sidecar Python scenarios)
+pnpm run test        # vitest (182 cases; plus 10 sidecar Python scenarios)
 pnpm run build       # tsc -> lib/ + lib/types/
 ```
 

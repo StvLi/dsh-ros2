@@ -110,7 +110,7 @@ describe('ros2_vision_analyze', () => {
 })
 
 describe('tool inventory', () => {
-  it('exposes the vision tool set (5)', async () => {
+  it('exposes the vision tool set (7)', async () => {
     const names = createRos2Tools({ run: makeRun(() => ({ stdout: '' })) }).map((t) => t.name)
     expect(names).toContain('ros2_image_snapshot')
     expect(names).toContain('ros2_vlm_analyze')
