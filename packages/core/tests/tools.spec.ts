@@ -1,6 +1,23 @@
 import { describe, expect, it } from 'vitest'
+import { execFileSync } from 'node:child_process'
 import { createRos2Tools } from '../src/tools.js'
 import { type RunFn, type ToolResult, type RosResult } from 'dsh-ros2-common'
+
+// The ros2_install interactive flow drives a real pseudo-terminal through
+// scripts/pty_session.py (python3 + pty). Some headless/container environments
+// mount devpts with ptmxmode=000, which blocks *new* pty allocation for
+// non-root and makes pty.openpty() raise "out of pty devices". In that case the
+// tool cannot run at all, so skip the PTY test rather than fail the suite;
+// CI (ubuntu) can allocate ptys and still exercises the full flow.
+function canAllocatePty(): boolean {
+  try {
+    execFileSync('python3', ['-c', 'import pty; pty.openpty()'], { stdio: 'ignore', timeout: 5000 })
+    return true
+  } catch {
+    return false
+  }
+}
+const ptyUsable = canAllocatePty()
 
 function makeRun(handler: (bin: string, args: string[]) => Partial<RosResult>): RunFn {
   return async (bin, args) => {
@@ -171,7 +188,7 @@ describe('ros2_install', () => {
 })
 
 describe('ros2_install interactive flow (mock installer, no network)', () => {
-  it('start -> send -> status -> stop drives the installer menus via PTY', async () => {
+  it.skipIf(!ptyUsable)('start -> send -> status -> stop drives the installer menus via PTY', async () => {
     const run = makeRun((bin, args) => {
       if (bin === 'bash') return { ok: true, stdout: '', exitCode: 0 } // no /opt/ros (fresh machine)
       return { ok: false, stdout: '', exitCode: 127 } // ros2 missing
@@ -211,7 +228,7 @@ describe('ros2_install interactive flow (mock installer, no network)', () => {
 })
 
 describe('tool inventory', () => {
-  it('exposes the core tool set (37)', async () => {
+  it('exposes the core tool set (59)', async () => {
     const names = createRos2Tools({ run: makeRun(() => ({ stdout: '' })) }).map((t) => t.name)
     expect(names).toContain('ros2_pkg_list')
     expect(names).toContain('ros2_colcon_list')
