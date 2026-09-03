@@ -429,7 +429,7 @@ dsh-ros2/                      # pnpm monorepo（工作区根，private）
 │   ├── profile/               # dsh-ros2-profile（4 工具）：robot_register/load/topology + 零位校准 + registration/retrieval skills
 │   ├── moveit/                # dsh-ros2-moveit（4 工具）：discover/status/motion_validate/moveit_move + moveit_*.py + motion_validator.py
 │   ├── safety/                # dsh-ros2-safety（5 工具）：robot_safety_* + safety/ ROS2 包 + safetyStrict 配置
-│   ├── vision/                # dsh-ros2-vision（5 工具）：视觉工具 + vlm/ + offscreen/ ROS2 包 + vision provider 服务 + state-vision skill
+│   ├── vision/                # dsh-ros2-vision（7 工具）：视觉工具 + vlm/ + offscreen/ ROS2 包 + vision provider 服务 + state-vision skill
 │   └── dsh-ros2/              # 聚合 bundle（apply 为空，向后兼容）
 ├── docs/                      # architecture.md · safety.md / safety-handover.md / safety-todo.md / safety-gpt-review.md · test-*.md · plugin-split-plan.md · versioning.md
 ├── .github/workflows/         # CI：Node 22/24 → 工作区 typecheck/test/build + 每包 tarball 校验
@@ -441,7 +441,7 @@ dsh-ros2/                      # pnpm monorepo（工作区根，private）
 ## 插件拆分（9 个包）
 
 自 v0.15.0 起插件为 **pnpm monorepo**，含 9 个 npm 包（见
-[`docs/plugin-split-plan.md`](docs/plugin-split-plan.md)，ISP 收紧版）：75 工具 +
+[`docs/plugin-split-plan.md`](docs/plugin-split-plan.md)，ISP 收紧版）：79 工具 +
 4 skills 全部保留、**名称与行为不变**。按需安装域包（或安装 `dsh-ros2` 聚合包获得全集）：
 
 - `dsh-ros2-common` 为纯库（非 cordis bundle）——共享 runner/解析/toolkit 与
@@ -470,7 +470,7 @@ dsh-ros2/                      # pnpm monorepo（工作区根，private）
 ```bash
 pnpm install
 pnpm run typecheck   # tsc --noEmit
-pnpm run test        # vitest（166 例；另有 10 个 sidecar Python 场景）
+pnpm run test        # vitest（182 例；另有 10 个 sidecar Python 场景）
 pnpm run build       # tsc -> lib/ + lib/types/
 ```
 

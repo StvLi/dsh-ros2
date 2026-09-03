@@ -4,6 +4,20 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- `ros2_install` PTY 交互测试：在无法分配 pty 的无头/容器环境（devpts 以
+  `ptmxmode=000` 挂载，非 root 无法 `pty.openpty()`，报 "out of pty devices"）
+  改为 **skip**（`it.skipIf` 探测，CI/有 pty 环境仍完整运行），不再让整个
+  测试套件在该类环境红掉。
+- 对齐工具数量元数据到实际注册集：`dsh-ros2-core` 描述 tools **(33)→(59)**、
+  `dsh-ros2-vision` **(5)→(7)**、`dsh-ros2` 聚合包 "75 tools"→"79 tools"；同步
+  两个 inventory 测试标题（core (37)→(59)、vision (5)→(7)）与 README 包树。
+- 修正工作区 vitest 用例计数：README/README_CN "166 例"→**182 例**（CI 环境下
+  含 PTY 测试全量通过；本机无 pty 时那 1 例 skip）。
+
 ## [dsh-ros2-vision 0.1.3] - 2026-09-02
 
 ### Fixed
