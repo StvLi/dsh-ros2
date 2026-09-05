@@ -20,6 +20,12 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 
 ### Fixed
 
+- `ros2_install {action: "start"}`：把下载命令里的**安装源 URL/路径**（用户传入的
+  `installer`）与 `bootDir`/`boot` 改为 `shq()` 单引号转义（提取为可单测的
+  `buildRos2InstallDownloadCommand()`）。此前 `curl -fsSL ${installer}` 直接把
+  用户输入原样拼进 `bash -lc` 字符串，`installer` 含 `;`/`&`/`$(...)` 等元字符可
+  **逃逸注入**，含空格的本地路径也会使下载失败。新增 1 例回归测试（断言下载命令
+  把 `installer` 作为单个 `shq()` shell 词输出）。
 - `ros2_workspace {action: "use", path}`：把 `source <path>` 前缀中的工作区
   **路径做单引号 shell 转义**（`shq()`），不再把用户路径原样插进 `bash -lc`
   字符串。既修复**注入面**（路径含 `;`/`&`/`$(...)` 等元字符可逃逸），也修复

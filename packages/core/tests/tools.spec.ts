@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { createRos2Tools } from '../src/tools.js'
+import { buildRos2InstallDownloadCommand, createRos2Tools } from '../src/tools.js'
 import { type RunFn, type ToolResult, type RosResult } from 'dsh-ros2-common'
 
 // The ros2_install interactive flow drives a real pseudo-terminal through
@@ -184,6 +184,16 @@ describe('ros2_install', () => {
     const out = await call('ros2_install', run, { action: 'start' })
     expect(out.ok).toBe(true)
     expect(out.data).toMatchObject({ started: false, reason: 'already-installed' })
+  })
+
+  it('buildRos2InstallDownloadCommand shq()-quotes the installer (no shell injection)', () => {
+    const bootDir = '/tmp/dsh-ros2'
+    const boot = '/tmp/dsh-ros2/fishros-install'
+    // A URL with shell metacharacters must be wrapped as a single shq() shell
+    // word so it cannot break out of `curl -fsSL <installer>`.
+    const cmd = buildRos2InstallDownloadCommand('http://x/a;touch /tmp/dsh-ros2-pwned', bootDir, boot)
+    expect(cmd).toContain(`curl -fsSL 'http://x/a;touch /tmp/dsh-ros2-pwned'`)
+    expect(cmd).not.toContain(`curl -fsSL http://x/a;touch`)
   })
 })
 
