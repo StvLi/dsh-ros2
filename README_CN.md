@@ -470,7 +470,7 @@ dsh-ros2/                      # pnpm monorepo（工作区根，private）
 ```bash
 pnpm install
 pnpm run typecheck   # tsc --noEmit
-pnpm run test        # vitest（182 例；另有 10 个 sidecar Python 场景）
+pnpm run test        # vitest（184 例；另有 10 个 sidecar Python 场景）
 pnpm run build       # tsc -> lib/ + lib/types/
 ```
 
