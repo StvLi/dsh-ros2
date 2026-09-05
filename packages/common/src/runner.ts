@@ -48,8 +48,14 @@ function execFileP(bin: string, args: string[], options: ExecFileOptions): Promi
   })
 }
 
-/** POSIX single-quote escape for embedding one argument into a shell string. */
-function shq(value: string): string {
+/**
+ * POSIX single-quote escape for embedding one argument into a shell string.
+ * Wraps the value in single quotes and escapes embedded single quotes; the
+ * result is a single, safe shell word (no metacharacter can break out).
+ * Exported so callers that build a `source <path> && ` prefix from user
+ * input (e.g. the `ros2_workspace use <path>` tool) can quote the path.
+ */
+export function shq(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`
 }
 
@@ -71,10 +77,16 @@ export function getSessionRosSetup(): string | null {
   return sessionRosSetup
 }
 
-/** Extract the first `source <path>` from a shell prefix, if any. */
+/**
+ * Extract the source path from a shell prefix `source <path> && `, where
+ * <path> may be bare, single-quoted (shq), or double-quoted. Returns the
+ * unquoted path so callers can `existsSync` it. Bare paths are matched up to
+ * the first whitespace / shell control token (legacy behaviour); quoted
+ * paths are de-quoted so a path containing spaces round-trips correctly.
+ */
 function extractSourcePath(prefix: string): string | undefined {
-  const m = /\bsource\s+([^\s&;|]+)/.exec(prefix)
-  return m ? m[1] : undefined
+  const m = /\bsource\s+(?:'([^']*)'|"([^"]*)"|([^\s&;|]+))/.exec(prefix)
+  return m ? (m[1] ?? m[2] ?? m[3]) : undefined
 }
 
 /** First existing candidate for `/opt/ros/<distro>/setup.bash`. */

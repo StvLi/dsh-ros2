@@ -78,4 +78,25 @@ describe('resolveSetup fallback chain + session override', () => {
       setSessionRosSetup(null)
     }
   })
+
+  it('de-quotes a shq()-quoted source path (even with spaces) back to the unquoted path', async () => {
+    // ros2_workspace `use` now stores `source '<path>' && ` via shq(); resolveSetup
+    // must return the RAW path so the existence check runs against the real file
+    // and the prefix round-trips unchanged instead of falsely auto-falling-back.
+    const { resolveSetup } = await import('../src/runner.js')
+    const dir = `/tmp/dsh runner ${process.pid}`
+    const { mkdirSync, writeFileSync, rmSync } = require('node:fs')
+    mkdirSync(`${dir}/install`, { recursive: true })
+    writeFileSync(`${dir}/install/setup.bash`, 'true\n')
+    const src = `${dir}/install/setup.bash`
+    const quoted = `source '${src}' && `
+    try {
+      const setup = resolveSetup({ rosSetup: quoted })
+      expect(setup.explicit).toBe(true)
+      expect(setup.sourcePath).toBe(src)
+      expect(setup.prefix).toBe(quoted)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
 })

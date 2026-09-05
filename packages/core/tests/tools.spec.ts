@@ -620,4 +620,21 @@ describe('ros2_workspace', () => {
       rmSync(dir, { recursive: true, force: true })
     }
   })
+  it('use stores the source path as a single-quoted shell word (injection/path-with-space hardening)', async () => {
+    const { mkdirSync, writeFileSync, rmSync } = await import('node:fs')
+    const dir = `/tmp/dsh ws tool test ${process.pid}`
+    mkdirSync(`${dir}/install`, { recursive: true })
+    writeFileSync(`${dir}/install/setup.bash`, 'true\n')
+    try {
+      const run = makeRun(() => ({ stdout: '' }))
+      const out = await call('ros2_workspace', run, { action: 'use', path: dir })
+      expect(out.ok).toBe(true)
+      // The prefix must be a quoted path (`source '<path>' && `), never a raw
+      // interpolation of the user path into a `bash -lc` string.
+      const prefix = (out.data as { sessionRosSetup: string }).sessionRosSetup
+      expect(prefix).toBe(`source '${dir}/install/setup.bash' && `)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
 })

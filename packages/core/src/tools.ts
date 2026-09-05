@@ -44,6 +44,7 @@ import {
   setSessionRosSetup,
   getSessionRosSetup,
   resolveSetup,
+  shq,
 } from 'dsh-ros2-common'
 import { spawnJob } from 'dsh-ros2-common'
 
@@ -1426,7 +1427,10 @@ function makeWorkspaceTool(deps: CoreToolDeps) {
           return toolError('ros2_workspace', 'ros2_workspace', 'SETUP_NOT_FOUND',
             `未找到 ${setup}。请确认该工作区已 colcon build；或检查路径下是否有 install/setup.bash。当前会话覆盖：${getSessionRosSetup() ?? '（无）'}。`)
         }
-        setSessionRosSetup(`source ${setup} && `)
+        // Quote the source path so a path containing spaces or shell
+        // metacharacters is one safe shell word — never raw-interpolated into
+        // `bash -lc` (injection + path-with-space correctness hardening).
+        setSessionRosSetup(`source ${shq(setup)} && `)
         return okResult('ros2_workspace', 'ros2_workspace', {
           action: 'use', path: p, setup,
           sessionRosSetup: getSessionRosSetup(),
