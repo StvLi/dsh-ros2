@@ -467,6 +467,9 @@ dsh-ros2/                      # pnpm monorepo（工作区根，private）
 
 ## 开发
 
+安装需 **pnpm 11.x**（仓库固定 `packageManager: pnpm@11.22.0`；CI 通过 `pnpm/action-setup@v4` 安装匹配版本）。
+Node 需 `^22.19 || >=24`。
+
 ```bash
 pnpm install
 pnpm run typecheck   # tsc --noEmit

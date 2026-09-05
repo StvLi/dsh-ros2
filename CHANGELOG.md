@@ -6,6 +6,18 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- `packages/vision/scripts/requirements.txt`：为离屏低模脚本
+  `simplify_visual_meshes.py` 显式声明运行依赖 **`open3d`**（此前仅在脚本 docstring
+  提到 `pip install open3d`，安全扫描建议补齐声明；随 `scripts/` 一并发布）。
+
+### Changed
+
+- README / README_CN 开发章节：显式说明安装需 **pnpm 11.x**（仓库固定
+  `packageManager: pnpm@11.22.0`，CI 用 `pnpm/action-setup@v4` 安装匹配版本）与
+  Node `^22.19 || >=24`。
+
 ### Fixed
 
 - `ros2_workspace {action: "use", path}`：把 `source <path>` 前缀中的工作区
