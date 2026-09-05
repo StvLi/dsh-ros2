@@ -1,0 +1,4 @@
+# Runtime dependency for the offscreen-mesh decimation helper
+# (simplify_visual_meshes.py). Install with:
+#   python3 -m pip install -r requirements.txt
+open3d>=0.18
