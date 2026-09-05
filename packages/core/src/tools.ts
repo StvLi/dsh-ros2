@@ -571,6 +571,23 @@ function makeJobStatusTool(deps: CoreToolDeps) {
   })
 }
 
+/**
+ * Build the `bash -lc` bootstrap-download command for `ros2_install {action:start}`.
+ *
+ * Every user/path-derived value (`installer`, `bootDir`, `boot`, and the local
+ * `src` for `file://`/absolute paths) is wrapped as a single `shq()` shell word
+ * so a shell metacharacter in the installer (e.g. `;`/`&`/`$(...)`) or a blank
+ * path can NOT break out of the command string — it stays a literal curl/cp
+ * argument. Exported for direct unit testing of the quoting.
+ */
+export function buildRos2InstallDownloadCommand(installer: string, bootDir: string, boot: string): string {
+  if (installer.startsWith('file://') || installer.startsWith('/')) {
+    const src = installer.startsWith('file://') ? installer.slice('file://'.length) : installer
+    return `mkdir -p ${shq(bootDir)} && cp ${shq(src)} ${shq(boot)} && chmod +x ${shq(boot)}`
+  }
+  return `mkdir -p ${shq(bootDir)} && (curl -fsSL ${shq(installer)} -o ${shq(boot)} || wget -q ${shq(installer)} -O ${shq(boot)}) && test -s ${shq(boot)} && chmod +x ${shq(boot)}`
+}
+
 function makeRos2InstallTool(deps: CoreToolDeps) {
   return defineTool({
     name: 'ros2_install',
@@ -640,12 +657,7 @@ function makeRos2InstallTool(deps: CoreToolDeps) {
         const bootDir = path.join(process.env.TMPDIR ?? '/tmp', 'dsh-ros2')
         const boot = path.join(bootDir, 'fishros-install')
         let dl: { ok: boolean; stderr: string }
-        if (installer.startsWith('file://') || installer.startsWith('/')) {
-          const src = installer.startsWith('file://') ? installer.slice('file://'.length) : installer
-          dl = await execFileP('bash', ['-lc', `mkdir -p "${bootDir}" && cp "${src}" "${boot}" && chmod +x "${boot}"`])
-        } else {
-          dl = await execFileP('bash', ['-lc', `mkdir -p "${bootDir}" && (curl -fsSL ${installer} -o "${boot}" || wget -q ${installer} -O "${boot}") && test -s "${boot}" && chmod +x "${boot}"`])
-        }
+        dl = await execFileP('bash', ['-lc', buildRos2InstallDownloadCommand(installer, bootDir, boot)])
         if (!dl.ok || dl.stderr.includes('not found')) {
           return toolError('ros2_install', command, 'DOWNLOAD_FAILED', `无法获取一键安装脚本（${installer}；需要 curl/wget，本地路径需存在）`)
         }
