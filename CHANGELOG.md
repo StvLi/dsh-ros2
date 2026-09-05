@@ -8,6 +8,12 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 
 ### Fixed
 
+- `ros2_workspace {action: "use", path}`：把 `source <path>` 前缀中的工作区
+  **路径做单引号 shell 转义**（`shq()`），不再把用户路径原样插进 `bash -lc`
+  字符串。既修复**注入面**（路径含 `;`/`&`/`$(...)` 等元字符可逃逸），也修复
+  **含空格路径**（如 `my workspace` 之前 source 会失败）。同步让
+  `extractSourcePath()` 能反解析单/双引号包裹的路径（de-quote），使存在性检查
+  与 `show` 展示仍对真实路径生效。新增 2 例回归测试（common +1、core +1）。
 - `ros2_install` PTY 交互测试：在无法分配 pty 的无头/容器环境（devpts 以
   `ptmxmode=000` 挂载，非 root 无法 `pty.openpty()`，报 "out of pty devices"）
   改为 **skip**（`it.skipIf` 探测，CI/有 pty 环境仍完整运行），不再让整个

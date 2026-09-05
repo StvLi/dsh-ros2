@@ -487,7 +487,7 @@ bundles you need (or the `dsh-ros2` aggregate for the full set):
 ```bash
 pnpm install
 pnpm run typecheck   # tsc --noEmit
-pnpm run test        # vitest (182 cases; plus 10 sidecar Python scenarios)
+pnpm run test        # vitest (184 cases; plus 10 sidecar Python scenarios)
 pnpm run build       # tsc -> lib/ + lib/types/
 ```
 
