@@ -491,7 +491,7 @@ pnpm via `pnpm/action-setup@v4`). Node `^22.19 || >=24` is required.
 ```bash
 pnpm install
 pnpm run typecheck   # tsc --noEmit
-pnpm run test        # vitest (184 cases; plus 10 sidecar Python scenarios)
+pnpm run test        # vitest (185 cases; plus 10 sidecar Python scenarios)
 pnpm run build       # tsc -> lib/ + lib/types/
 ```
 
