@@ -40,7 +40,7 @@ import {
   tail,
   jsonOf,
 } from 'dsh-ros2-common'
-import { spawnJob } from 'dsh-ros2-common'
+import { spawnJob, buildSafetyMonitorCommand } from 'dsh-ros2-common'
 
 /** Path to a helper script shipped with THIS package (scripts/). */
 function scriptPath(name: string): string {
@@ -156,7 +156,7 @@ function makeRobotRegisterTool(deps: ToolDeps) {
                 kind: 'safety-monitor',
                 label: `safety_monitor/${name}`,
                 outputLimitBytes: 8 * 1024 * 1024,
-                run: () => spawnJob('bash', ['-lc', `ros2 run dsh_ros2_safety safety_monitor --profile '${profilePath}'`],
+                run: () => spawnJob('bash', ['-lc', buildSafetyMonitorCommand(profilePath)],
                   { outputLimitBytes: 8 * 1024 * 1024 }),
               })
             } catch {
