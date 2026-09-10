@@ -21,7 +21,7 @@
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "vitest run && python3 scripts/zero_pose_semantics.py --selftest",
     "build": "tsc -p tsconfig.build.json"
   },
   "engines": {
@@ -60,6 +60,6 @@
     "@deepseek-ai/dsh-skill": "0.1.0-rc.6",
     "@types/node": "^24.0.0",
     "typescript": "^5.6.0",
-    "vitest": "^3.0.0"
+    "vitest": "^4.1.11"
   }
 }

@@ -59,6 +59,18 @@ export function shq(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`
 }
 
+/**
+ * Build the `safety_monitor` launch command for a robot profile.
+ * Shared by `robot_register` (auto-start) and `robot_safety_start`, so both
+ * quote the profile path identically. `profilePath` derives from user/agent
+ * input (explicit `--profile`, or the path written by `robot_register`), so it
+ * is emitted as ONE `shq()` shell word: neither a shell metacharacter nor an
+ * embedded single quote can break out of the `bash -lc` string.
+ */
+export function buildSafetyMonitorCommand(profilePath: string): string {
+  return `ros2 run dsh_ros2_safety safety_monitor --profile ${shq(profilePath)}`
+}
+
 // ── session-scoped workspace override + ros setup fallback chain ──────────
 // "装好即用、用错自纠、切环境不重启": a mutable per-session override (set by the
 // ros2_workspace tool) beats the configured rosSetup; an empty/missing setup

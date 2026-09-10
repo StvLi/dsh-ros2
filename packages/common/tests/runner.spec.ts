@@ -100,3 +100,21 @@ describe('resolveSetup fallback chain + session override', () => {
     }
   })
 })
+
+describe('buildSafetyMonitorCommand', () => {
+  it('emits the profile path as a single shq() shell word', async () => {
+    const { buildSafetyMonitorCommand } = await import('../src/runner.js')
+    expect(buildSafetyMonitorCommand('/tmp/testbot.yaml'))
+      .toBe("ros2 run dsh_ros2_safety safety_monitor --profile '/tmp/testbot.yaml'")
+  })
+
+  it('neutralises shell metacharacters and embedded quotes in the profile path', async () => {
+    const { buildSafetyMonitorCommand } = await import('../src/runner.js')
+    const hostile = "/tmp/a'; touch /tmp/pwned; echo '"
+    const cmd = buildSafetyMonitorCommand(hostile)
+    // The whole hostile value stays inside ONE single-quoted word; the embedded
+    // quote is escaped as '\'' so `;` / `touch` can never become shell syntax.
+    expect(cmd).toBe(`ros2 run dsh_ros2_safety safety_monitor --profile '/tmp/a'\\''; touch /tmp/pwned; echo '\\'''`)
+    expect(cmd).not.toContain("--profile '/tmp/a'; touch")
+  })
+})

@@ -53,6 +53,19 @@ def ros2(*args, timeout=30):
         return False, "", ""
 
 
+def build_rsp_args(urdf_xml: str) -> list[str]:
+    """argv for robot_state_publisher carrying the URDF description.
+
+    Pure (no side effects) so the injection contract is testable: the URDF XML
+    is ONE argv element and `bash`/`-lc` never appear. URDF content is
+    user/agent-controlled, so it must never be interpolated into a shell string.
+    """
+    return ["ros2", "run", "robot_state_publisher", "robot_state_publisher",
+            "--ros-args",
+            "-p", f"robot_description:={urdf_xml}",
+            "-r", "/robot_description:=/robot_description_abs"]
+
+
 def ensure_rsp(urdf: str):
     """Ensure a robot_state_publisher is publishing the description + TF
     (TF is what places the meshes; the zero-pose joint states feed it)."""
@@ -63,12 +76,11 @@ def ensure_rsp(urdf: str):
         return False, "no live /robot_description_abs publisher and no --urdf given"
     # spawn robot_state_publisher with the URDF, remap description to the
     # topic the renderer reads; it subscribes /joint_states for the TF.
-    cmd = (
-        f"ros2 run robot_state_publisher robot_state_publisher --ros-args "
-        f"-p robot_description:='{open(urdf).read()}' "
-        f"-r /robot_description:=/robot_description_abs"
-    )
-    proc = subprocess.Popen(["bash", "-lc", cmd],
+    try:
+        urdf_xml = open(urdf).read()
+    except Exception as e:  # noqa: BLE001
+        return False, f"cannot read URDF '{urdf}': {e}"
+    proc = subprocess.Popen(build_rsp_args(urdf_xml),
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     time.sleep(2.0)
     return True, f"spawned robot_state_publisher for {urdf} (pid {proc.pid})"
@@ -91,18 +103,17 @@ def load_joint_names(urdf: str) -> list[str]:
         return []
 
 
-def publish_zero_joints(duration: float, joint_names: list[str]):
-    """Publish all-zero joint_states for `duration` seconds so the renderer
-    shows the zero pose (RSP maps missing joints to URDF defaults anyway;
-    publishing explicit zeros is the clearest)."""
-    names_json = json.dumps(joint_names)
-    script = f"""
-import rclpy, threading, json
+def build_zero_pose_joints_script(duration: float) -> str:
+    """Source of the joint publisher child. Joint names are NOT part of it:
+    they arrive as one argv element (JSON) and are parsed at runtime, so a
+    name containing `'''` or newlines cannot break out of the generated code."""
+    return f"""
+import rclpy, threading, json, sys
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
 rclpy.init(); n = Node('zero_pose_joints')
 p = n.create_publisher(JointState, '/joint_states', 10)
-names = json.loads('''{names_json}''')
+names = json.loads(sys.argv[1])
 def tick():
     m = JointState(); m.header.stamp = n.get_clock().now().to_msg()
     m.name = names; m.position = [0.0] * len(names)
@@ -111,10 +122,16 @@ tick()
 threading.Timer({duration}, rclpy.shutdown).start()
 rclpy.spin(n)
 """
+
+
+def publish_zero_joints(duration: float, joint_names: list[str]):
+    """Publish all-zero joint_states for `duration` seconds so the renderer
+    shows the zero pose (RSP maps missing joints to URDF defaults anyway;
+    publishing explicit zeros is the clearest)."""
     path = "/tmp/zero_pose_joints.py"
     with open(path, "w") as f:
-        f.write(script)
-    proc = subprocess.Popen(["python3", path],
+        f.write(build_zero_pose_joints_script(duration))
+    proc = subprocess.Popen(["python3", path, json.dumps(joint_names)],
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return proc
 
@@ -179,16 +196,63 @@ def write_config(spec: dict, out: str) -> str:
     ]
     if spec.get("custom"):
         lines.append("  custom: true")
-        lines.append(f"  description: \"{spec['description']}\"")
+        lines.append(f"  description: {json.dumps(str(spec['description']), ensure_ascii=False)}")
     else:
         lines.append("  custom: false")
         lines.append(f"  arm: {spec['arm']}    # {ARMS[spec['arm']]}")
         lines.append(f"  elbow: {spec['elbow']}  # {ELBOWS[spec['elbow']]}")
         lines.append(f"  palm: {spec['palm']}    # {PALMS[spec['palm']]}")
-        lines.append(f"  description: \"{spec['description']}\"")
+        # JSON string is a valid double-quoted YAML scalar: quotes / newlines /
+        # backslashes in a free-text description cannot inject extra YAML keys.
+        lines.append(f"  description: {json.dumps(str(spec['description']), ensure_ascii=False)}")
     with open(out, "w") as f:
         f.write("\n".join(lines) + "\n")
     return out
+
+
+def selftest() -> int:
+    """Pure-Python regression checks (no ROS): run in CI via the profile package
+    `test` script. Guards the injection hardening applied in the 2026-09-11
+    maintenance round (shell-free robot_state_publisher launch, argv-passed
+    joint names, JSON-quoted YAML description)."""
+    import tempfile
+    failures: list[str] = []
+
+    def check(name: str, cond: bool, detail: str = "") -> None:
+        print(f"  {'PASS' if cond else 'FAIL'}  {name}" + ("" if cond else f"  {detail}"))
+        if not cond:
+            failures.append(name)
+
+    # 1) URDF XML stays ONE argv element; no shell wrapper is ever built.
+    hostile_xml = '</robot><x>"; touch /tmp/zps_pwned; echo "</x>'
+    args = build_rsp_args(hostile_xml)
+    check("build_rsp_args never uses a shell", "bash" not in args and "-lc" not in args, repr(args))
+    check("build_rsp_args keeps the URDF as one element",
+          f"robot_description:={hostile_xml}" in args, repr(args))
+
+    # 2) generated joint publisher carries no joint names in its source.
+    script = build_zero_pose_joints_script(8.0)
+    check("joint script reads names from argv", "sys.argv[1]" in script)
+    check("joint script embeds no names", "'''" not in script)
+
+    # 3) a hostile free-text description cannot inject YAML keys.
+    with tempfile.TemporaryDirectory() as d:
+        out = os.path.join(d, "zero-pose.yaml")
+        hostile = 'x"\n  injected: true\n#'
+        write_config({"custom": True, "description": hostile, "method": "selftest"}, out)
+        raw = open(out).read()
+        desc_lines = [ln for ln in raw.splitlines() if ln.startswith("  description: ")]
+        parsed = json.loads(desc_lines[0][len("  description: "):]) if len(desc_lines) == 1 else None
+        injected = [ln for ln in raw.splitlines() if ln.strip().startswith("injected:")]
+        check("write_config keeps the description on one escaped line",
+              len(desc_lines) == 1 and parsed == hostile, raw)
+        check("write_config cannot inject a YAML key", not injected, raw)
+
+    if failures:
+        print(f"SELFTEST FAILED: {len(failures)} check(s): {', '.join(failures)}")
+        return 1
+    print("SELFTEST OK (zero_pose_semantics)")
+    return 0
 
 
 def main():
@@ -255,4 +319,6 @@ def main():
 
 
 if __name__ == "__main__":
+    if "--selftest" in sys.argv[1:]:
+        sys.exit(selftest())
     sys.exit(main())
