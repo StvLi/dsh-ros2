@@ -17,9 +17,35 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 - README / README_CN 开发章节：显式说明安装需 **pnpm 11.x**（仓库固定
   `packageManager: pnpm@11.22.0`，CI 用 `pnpm/action-setup@v4` 安装匹配版本）与
   Node `^22.19 || >=24`。
+- **依赖**：工作区 8 个包的 devDependency `vitest` 由 `^3.0.0` 升到 **`^4.1.11`**，
+  清除 `pnpm audit` 报出的 2 条 moderate（`GHSA-82fw-gwwq-j7x9`，vitest /
+  `@vitest/mocker` 的路径穿越 / 任意文件读取）。该包仅用于测试、不随产物发布；
+  升级后 typecheck/test/build 全绿，`pnpm audit` 恢复 "No known vulnerabilities"。
+- **CI（`.github/workflows/ci.yml`）**：显式声明最小权限
+  `permissions: contents: read`，并给 check job 加 `timeout-minutes: 30`。
+- README / README_CN 开发章节：工作区 vitest 用例 185 → **187 例**，并注明
+  profile 包 `test` 现同时运行 6 个 zero-pose Python 自检。
 
 ### Fixed
 
+- `ros2_zero_pose_semantics` 的 Python 助手 `zero_pose_semantics.py`（安全扫描发现，
+  三处注入面）：
+  - `ensure_rsp()` 把 **URDF 文件内容**单引号插值进 `bash -lc` 字符串——URDF 含
+    单引号即可逃逸执行 shell。改为**纯 argv 列表**启动
+    `robot_state_publisher`（新增可单测的 `build_rsp_args()`），URDF XML 作为
+    单个 argv 元素，彻底不经 shell。
+  - `publish_zero_joints()` 把 URDF 里的**关节名**格式化进生成的 Python 源码
+    （`'''…'''`），含 `'''` 的名字可逃逸。改为把关节名以 **单个 argv 元素（JSON）**
+    传入，子脚本用 `sys.argv[1]` 解析，源码不再包含任何名字。
+  - `write_config()` 把自由文本 description 用裸双引号写入 YAML，含 `"`/换行可
+    **注入额外 YAML 键**。改用 `json.dumps()`（JSON 字符串即合法 YAML 双引号标量）。
+  - 新增 `--selftest`（6 项检查，无需 ROS / PyYAML），并接入 `dsh-ros2-profile`
+    的 `test` 脚本（对齐 sidecar selftest 模式），CI 每次运行都会回归验证。
+- `robot_register`（自动拉起）与 `robot_safety_start`：启动 `safety_monitor` 的命令
+  改为经 `shq()` 转义 profile 路径（提取共享纯函数
+  `buildSafetyMonitorCommand()` 到 `dsh-ros2-common`）。此前手动单引号包裹
+  （`--profile '${profilePath}'`）在路径含内嵌单引号时可逃逸进 `bash -lc`，含空格
+  路径也不稳。新增 2 例回归测试（common）。
 - `ros2_install {action: "start"}`：把下载命令里的**安装源 URL/路径**（用户传入的
   `installer`）与 `bootDir`/`boot` 改为 `shq()` 单引号转义（提取为可单测的
   `buildRos2InstallDownloadCommand()`）。此前 `curl -fsSL ${installer}` 直接把
