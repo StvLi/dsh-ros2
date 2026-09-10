@@ -21,7 +21,7 @@
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "vitest run && python3 scripts/zero_pose_semantics.py --selftest",
     "build": "tsc -p tsconfig.build.json"
   },
   "engines": {
