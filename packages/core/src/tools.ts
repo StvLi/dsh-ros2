@@ -1957,6 +1957,15 @@ function makeRunTool(deps: ToolDeps) {
  * L2: kill leftover ROS2 processes matching a pattern. Uses pgrep by PID
  * with the "[p]attern" trick so the tool never kills its own process.
  */
+/**
+ * kill(1) signal spec accepted by `ros2_process_cleanup`: a signal name
+ * (`TERM` / `SIGKILL` / …) or a 1–2 digit number. The value is interpolated
+ * into a `bash -lc` script, so anything else (shell metacharacters, `;`,
+ * `$(...)`) is rejected before the approval prompt; the accepted value is
+ * still `shq()`-quoted at the call site (defense in depth).
+ */
+const KILL_SIGNAL_RE = /^(?:SIG)?[A-Za-z][A-Za-z0-9]{0,7}$|^\d{1,2}$/
+
 function makeProcessCleanupTool(deps: ToolDeps) {
   return defineTool({
     name: 'ros2_process_cleanup',
@@ -1971,15 +1980,19 @@ function makeProcessCleanupTool(deps: ToolDeps) {
       const params = args as Record<string, unknown>
       const pattern = strOrUndefined(params.pattern) ?? ''
       const signal = strOrUndefined(params.signal) ?? 'TERM'
-      if (!pattern) return toolError('ros2_process_cleanup', 'ros2_process_cleanup', 'MISSING_PARAM', 'pattern 必填')
       const command = `ros2_process_cleanup pattern=${pattern} signal=${signal}`
+      if (!pattern) return toolError('ros2_process_cleanup', command, 'MISSING_PARAM', 'pattern 必填')
+      if (!KILL_SIGNAL_RE.test(signal)) {
+        return toolError('ros2_process_cleanup', command, 'INVALID_PARAM',
+          `signal 必须是信号名（TERM/KILL/SIGTERM…）或 1–2 位数字，收到 ${JSON.stringify(signal)}`)
+      }
       const approval = await requestApproval(deps, exec, 'ros2_process_cleanup',
         `将终止匹配 "${pattern}" 的进程（信号 ${signal}）。`)
       if (!approval.allowed) return deniedResult('ros2_process_cleanup', command, approval.outcome)
       // [p]attern trick: pgrep -f '[p]attern' matches "pattern" in targets but
       // its own command line contains "[p]attern" — never self-matches.
       const bracket = `[${pattern[0] ?? ''}]${pattern.slice(1)}`.replace(/'/g, `'\\''`)
-      const script = `pids=$(pgrep -af '${bracket}' | awk '{print $1}'); if [ -n "$pids" ]; then kill -${signal} $pids 2>/dev/null; echo "killed: $pids"; else echo "no match"; fi`
+      const script = `pids=$(pgrep -af '${bracket}' | awk '{print $1}'); if [ -n "$pids" ]; then kill -s ${shq(signal)} $pids 2>/dev/null; echo "killed: $pids"; else echo "no match"; fi`
       const res = await deps.run('bash', ['-lc', script], { timeoutMs: 15000 })
       if (!res.ok) return toolError('ros2_process_cleanup', command, res.error ?? 'COMMAND_FAILED', res.stderr.trim())
       return okResult('ros2_process_cleanup', command, { pattern, signal, result: res.stdout.trim() })

@@ -393,6 +393,37 @@ describe('ros2_process_cleanup', () => {
     // process command line never matches
     expect(script).toContain("[r]os2 topic pub'")
   })
+
+  it('rejects a shell-metacharacter signal before approval or execution', async () => {
+    const calls: string[][] = []
+    let approvals = 0
+    const run = makeRun((bin, args) => {
+      calls.push([bin, ...args])
+      return { stdout: 'killed: 1' }
+    })
+    const approval = async () => { approvals += 1; return 'allowed-once' }
+    const t = tool2('ros2_process_cleanup', run, approval)
+    for (const signal of ['TERM; echo pwned', 'TERM && id', '$(id)', '`id`', 'TE RM', '']) {
+      const out = (await t.execute({ pattern: 'ros2 topic pub', signal }, execStub)) as ToolResult
+      expect(out.ok, signal).toBe(false)
+      expect(out.error?.code, signal).toBe('INVALID_PARAM')
+    }
+    expect(approvals).toBe(0)
+    expect(calls).toHaveLength(0)
+  })
+
+  it('quotes the accepted signal into the script', async () => {
+    let script = ''
+    const run = makeRun((bin, args) => {
+      if (bin === 'bash') script = args.join(' ')
+      return { stdout: 'no match' }
+    })
+    const approval = async () => 'allowed-once'
+    const t = tool2('ros2_process_cleanup', run, approval)
+    const out = (await t.execute({ pattern: 'ros2 topic pub', signal: 'SIGKILL' }, execStub)) as ToolResult
+    expect(out.ok).toBe(true)
+    expect(script).toContain("kill -s 'SIGKILL'")
+  })
 })
 
 // ── everyday-debugging batch 2 (param_get / interface / pkg / bw / delay / service / action / daemon) ──
