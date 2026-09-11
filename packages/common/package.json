@@ -20,7 +20,7 @@
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "vitest run && python3 scripts/robot_profile.py --selftest",
     "build": "tsc -p tsconfig.build.json"
   },
   "engines": {

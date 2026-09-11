@@ -24,6 +24,7 @@ import argparse
 import glob
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -31,6 +32,22 @@ import xml.etree.ElementTree as ET
 
 DEFAULT_DIR = os.path.expanduser("~/.dsh-ros2/robots")
 ZERO_POSE = os.path.expanduser("~/.dsh-ros2/zero-pose.yaml")
+
+# A profile name becomes the YAML file name, so it must be one safe path
+# component: no separator, no `.`/`..`, no control characters. Mirrors
+# PROFILE_NAME_RE in dsh-ros2-common (packages/common/src/names.ts).
+_PROFILE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+
+
+def safe_name(name) -> bool:
+    """Whether `name` may be used as a profile file name (no path escape)."""
+    return bool(isinstance(name, str) and _PROFILE_NAME_RE.match(name)
+                and ".." not in name)
+
+
+def unsafe_name_error(name) -> dict:
+    return {"ok": False,
+            "error": f"非法档案名 {name!r}：只允许字母/数字/._-，且不得含路径分隔符或 .."}
 
 
 def ros2(*args, timeout=20):
@@ -229,6 +246,8 @@ def validate_safety(cfg) -> list:
 
 def read_profile_yaml(name: str):
     """Read a profile file and return (raw dict, path) or raise."""
+    if not safe_name(name):
+        raise ValueError(unsafe_name_error(name)["error"])
     path = os.path.join(DEFAULT_DIR, f"{name}.yaml")
     if not os.path.exists(path):
         raise FileNotFoundError(f"未找到机器人档案 {name}")
@@ -348,6 +367,8 @@ TOPO_SCHEMA_NODE = ["name", "role", "description", "pub", "sub", "srv", "act", "
 
 
 def _profile_path(name):
+    if not safe_name(name):
+        raise ValueError(unsafe_name_error(name)["error"])
     return os.path.join(DEFAULT_DIR, f"{name}.yaml")
 
 
@@ -623,6 +644,8 @@ def topo_search(name: str, query: str = "", field: str = "all", topic: str = "")
 
 
 def register(name: str, urdf: str, srdf: str, description: str) -> dict:
+    if not safe_name(name):
+        return unsafe_name_error(name)
     profile_dir = os.path.dirname(os.path.join(DEFAULT_DIR, name + ".yaml"))
     os.makedirs(profile_dir, exist_ok=True)
 
@@ -671,6 +694,8 @@ def register(name: str, urdf: str, srdf: str, description: str) -> dict:
 
 
 def load(name: str):
+    if not safe_name(name):
+        return unsafe_name_error(name)
     path = os.path.join(DEFAULT_DIR, f"{name}.yaml")
     if not os.path.exists(path):
         return {"ok": False, "error": f"未找到机器人档案 {name}（可用 robot_profile.py list 查看，或先 register）"}
@@ -695,8 +720,62 @@ def list_profiles():
     return {"ok": True, "robots": names, "dir": DEFAULT_DIR}
 
 
+def selftest() -> int:
+    """Offline regression checks for the profile-name → path safety boundary
+    (no ROS2, no PyYAML, no network). Exits 0 when every check passes."""
+    ok = True
+
+    def check(label, cond):
+        nonlocal ok
+        print(("PASS  " if cond else "FAIL  ") + label)
+        ok = ok and bool(cond)
+
+    check("safe_name accepts a plain name", safe_name("lite"))
+    check("safe_name accepts . _ - inside", safe_name("lite-v2.1_a"))
+    check("safe_name rejects a slash", not safe_name("a/b"))
+    check("safe_name rejects a parent segment", not safe_name("../a"))
+    check("safe_name rejects a nested escape", not safe_name("../../etc/cron.d/x"))
+    check("safe_name rejects a backslash", not safe_name("a\\b"))
+    check("safe_name rejects empty", not safe_name(""))
+    check("safe_name rejects a leading dot", not safe_name(".hidden"))
+    check("safe_name rejects an absolute path", not safe_name("/tmp/x"))
+    check("safe_name rejects a NUL byte", not safe_name("a\x00b"))
+    check("safe_name rejects a non-string", not safe_name(None))
+
+    base = os.path.realpath(DEFAULT_DIR)
+    # every accepted name must keep the resolved file inside the profiles dir
+    inside = all(
+        os.path.realpath(os.path.join(DEFAULT_DIR, n + ".yaml")).startswith(base + os.sep)
+        for n in ("lite", "lite-v2.1_a", "R2D2"))
+    check("accepted names resolve inside the profiles dir", inside)
+    # the old (vulnerable) construction is exactly what these names must block
+    escaped = os.path.realpath(os.path.join(DEFAULT_DIR, "../../tmp/evil.yaml"))
+    check("the traversal rename would have escaped (guard is load-bearing)",
+          not escaped.startswith(base + os.sep))
+
+    check("register() rejects an unsafe name before touching the fs",
+          register("../../tmp/evil", "/nonexistent.urdf", "", "") == unsafe_name_error("../../tmp/evil"))
+    check("load() rejects an unsafe name", load("../../tmp/evil")["ok"] is False)
+    check("read_profile_yaml() rejects an unsafe name",
+          _raises(lambda: read_profile_yaml("../evil")))
+    check("_profile_path() rejects an unsafe name",
+          _raises(lambda: _profile_path("a/b")))
+    print("SELFTEST " + ("OK" if ok else "FAILED") + " (robot_profile)")
+    return 0 if ok else 1
+
+
+def _raises(fn) -> bool:
+    try:
+        fn()
+    except Exception:  # noqa: BLE001
+        return True
+    return False
+
+
 def main():
     global DEFAULT_DIR
+    if "--selftest" in sys.argv:
+        return selftest()
     ap = argparse.ArgumentParser()
     ap.add_argument("action", choices=["register", "load", "list", "topology", "safety"])
     ap.add_argument("--name", default="")
@@ -719,6 +798,12 @@ def main():
     ap.add_argument("--dir", default=DEFAULT_DIR)
     args = ap.parse_args()
     DEFAULT_DIR = args.dir
+
+    # A profile name is a file name: reject path escapes before any action runs
+    # (the per-function guards remain as defense in depth).
+    if args.name and not safe_name(args.name):
+        print(json.dumps(unsafe_name_error(args.name), ensure_ascii=False))
+        return 1
 
     if args.action == "safety":
         if not args.name:
