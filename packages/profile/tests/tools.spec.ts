@@ -92,6 +92,35 @@ describe('robot_register / robot_load', () => {
     expect(listed.ok).toBe(true)
     expect((listed.data as { robots: string[] }).robots).toContain('lite')
   })
+
+  it('rejects profile names that could escape the profiles directory', async () => {
+    const calls: string[][] = []
+    let approvals = 0
+    const run = makeRun((bin, args) => {
+      calls.push([bin, ...args])
+      return { stdout: '{"ok":true}' }
+    })
+    const approval = async () => { approvals += 1; return 'allowed-once' }
+    const tools = createRos2Tools({ run, approval })
+    const register = tools.find((x) => x.name === 'robot_register')
+    const load = tools.find((x) => x.name === 'robot_load')
+    const topology = tools.find((x) => x.name === 'robot_topology')
+    if (!register || !load || !topology) throw new Error('profile tools not registered')
+
+    const evil = '../../Desktop/embody_agent_ws/PWNED'
+    for (const name of [evil, 'a/b', '..', '.', '/tmp/x', 'a\x00b']) {
+      const out = (await register.execute({ name }, execStub)) as ToolResult
+      expect(out.ok, name).toBe(false)
+      expect(out.error?.code, name).toBe('INVALID_NAME')
+    }
+    const loaded = (await load.execute({ name: evil }, execStub)) as ToolResult
+    expect(loaded.error?.code).toBe('INVALID_NAME')
+    const topo = (await topology.execute({ robot: evil, action: 'show' }, execStub)) as ToolResult
+    expect(topo.error?.code).toBe('INVALID_NAME')
+    // no helper was ever spawned and no approval was ever requested
+    expect(calls).toHaveLength(0)
+    expect(approvals).toBe(0)
+  })
 })
 
 describe('robot_topology', () => {

@@ -40,7 +40,7 @@ import {
   tail,
   jsonOf,
 } from 'dsh-ros2-common'
-import { spawnJob, buildSafetyMonitorCommand } from 'dsh-ros2-common'
+import { spawnJob, buildSafetyMonitorCommand, isSafeProfileName } from 'dsh-ros2-common'
 
 /** Path to a helper script shipped with THIS package (scripts/). */
 function scriptPath(name: string): string {
@@ -123,6 +123,12 @@ function makeRobotRegisterTool(deps: ToolDeps) {
       const params = args as Record<string, unknown>
       const name = strOrUndefined(params.name) ?? ''
       if (!name) return toolError('robot_register', 'robot_register', 'MISSING_PARAM', 'name 必填')
+      // The profile name becomes the YAML file name: reject path escapes here
+      // so no approval prompt is even raised for an unsafe name.
+      if (!isSafeProfileName(name)) {
+        return toolError('robot_register', `robot_register name=${name}`, 'INVALID_NAME',
+          `机器人档案名只能包含字母/数字/._-（不得含路径分隔符或 ..），收到 ${JSON.stringify(name)}`)
+      }
       const command = `robot_register name=${name}`
       const approval = await requestApproval(deps, exec, 'robot_register',
         `将采集机器人「${name}」本体信息（URDF/关节/相机/MoveIt/零位语义）并写入档案（~/.dsh-ros2/robots/${name}.yaml）${params.startSafety === false ? '' : '，随后自动拉起 safety_monitor'}。`)
@@ -189,6 +195,10 @@ function makeRobotLoadTool(deps: ToolDeps) {
     async execute(args) {
       const params = args as Record<string, unknown>
       const name = strOrUndefined(params.name) ?? ''
+      if (name && !isSafeProfileName(name)) {
+        return toolError('robot_load', `robot_load name=${name}`, 'INVALID_NAME',
+          `机器人档案名只能包含字母/数字/._-（不得含路径分隔符或 ..），收到 ${JSON.stringify(name)}`)
+      }
       const action = name ? 'load' : 'list'
       const helperArgs = [commonScriptPath('robot_profile.py'), action]
       if (name) helperArgs.push('--name', name)
@@ -234,6 +244,10 @@ function makeRobotTopologyTool(deps: ToolDeps) {
       const robot = strOrUndefined(params.robot) ?? ''
       const action = String(params.action ?? 'show')
       if (!robot) return toolError('robot_topology', 'robot_topology', 'MISSING_PARAM', 'robot 必填（已注册的档案名）')
+      if (!isSafeProfileName(robot)) {
+        return toolError('robot_topology', `robot_topology robot=${robot} action=${action}`, 'INVALID_NAME',
+          `机器人档案名只能包含字母/数字/._-（不得含路径分隔符或 ..），收到 ${JSON.stringify(robot)}`)
+      }
       const command = `robot_topology robot=${robot} action=${action}`
       if (action === 'show' || action === 'diagnose' || action === 'search') {
         const helperArgs = [commonScriptPath('robot_profile.py'), 'topology', '--name', robot, '--topology-action', action]

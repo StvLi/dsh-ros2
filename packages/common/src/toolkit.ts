@@ -12,6 +12,7 @@ import path from 'node:path'
 import { defineTool, type ParameterSchemaSpec } from '@deepseek-ai/dsh-tools'
 import { runCommand, type JobHooks, type RunOptions, type RosResult } from './runner.js'
 import { type JsonValue, parseJsonOrRaw } from './parse.js'
+import { isSafeProfileName } from './names.js'
 
 /** Execution seam injected by the plugin entry (real runner in prod, fake in tests). */
 export type RunFn = (bin: string, args: string[], opts?: RunOptions) => Promise<RosResult>
@@ -277,6 +278,9 @@ export async function readSafetyState(deps: ToolDeps): Promise<{ running: boolea
 /** Locate a robot profile path (explicit path, or via robot_profile load). */
 export async function resolveProfilePath(deps: ToolDeps, robot: string, profile: string): Promise<string> {
   if (profile) return profile
+  // Fail closed on a name that could escape the profiles directory: the helper
+  // would reject it anyway, but never spawn a lookup for an unsafe name.
+  if (!isSafeProfileName(robot)) return ''
   const res = await deps.run('python3', [commonScriptPath('robot_profile.py'), 'load', '--name', robot], { timeoutMs: 30000 })
   if (res.ok && res.stdout.trim()) {
     const data = parseJsonOrRaw(res.stdout) as { profile_path?: string; ok?: boolean }
@@ -294,6 +298,7 @@ export interface ProfileSafetyView {
 
 /** Load a registered robot profile (structured JSON, fast path). */
 export async function loadRobotProfile(deps: ToolDeps, robot: string): Promise<{ robot: ProfileSafetyView; profile_path?: string } | null> {
+  if (!isSafeProfileName(robot)) return null
   const res = await deps.run('python3', [commonScriptPath('robot_profile.py'), 'load', '--name', robot], { timeoutMs: 30000 })
   if (!res.ok || !res.stdout.trim()) return null
   const data = parseJsonOrRaw(res.stdout) as { ok?: boolean; robot?: ProfileSafetyView; profile_path?: string }
