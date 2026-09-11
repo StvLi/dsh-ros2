@@ -198,10 +198,11 @@ class SafetyMonitorNode(Node):
                 self._publish_state()
         for topic in self.watchdog_topics:
             try:
-                out = subprocess.run(["bash", "-lc",
-                                      "timeout {} ros2 topic echo {} --once >/dev/null 2>&1".format(
-                                          max(1, self.node_scan_sec - 1), topic)],
-                                     timeout=max(10, self.node_scan_sec))
+                out = subprocess.run(
+                    ["timeout", str(max(1, self.node_scan_sec - 1)),
+                     "ros2", "topic", "echo", topic, "--once"],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    timeout=max(10, self.node_scan_sec))
                 if out.returncode == 0:
                     self.core.on_watchdog_activity(topic, now)
             except Exception:  # noqa: BLE001
