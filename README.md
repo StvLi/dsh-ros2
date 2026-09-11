@@ -486,12 +486,12 @@ bundles you need (or the `dsh-ros2` aggregate for the full set):
 
 ```bash
 Install with **pnpm 11.x** (the repo pins `packageManager: pnpm@11.22.0`; CI installs the matching
-pnpm via `pnpm/action-setup@v4`). Node `^22.19 || >=24` is required.
+pnpm via `pnpm/action-setup@v6`). Node `^22.19 || >=24` is required.
 
 ```bash
 pnpm install
 pnpm run typecheck   # tsc --noEmit
-pnpm run test        # vitest (187 cases; plus 10 sidecar + 6 zero-pose Python checks)
+pnpm run test        # vitest (195 cases; plus 10 sidecar + 6 zero-pose + 17 profile-name Python checks)
 pnpm run build       # tsc -> lib/ + lib/types/
 ```
 

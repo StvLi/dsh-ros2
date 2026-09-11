@@ -15,7 +15,7 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 ### Changed
 
 - README / README_CN 开发章节：显式说明安装需 **pnpm 11.x**（仓库固定
-  `packageManager: pnpm@11.22.0`，CI 用 `pnpm/action-setup@v4` 安装匹配版本）与
+  `packageManager: pnpm@11.22.0`，CI 用 `pnpm/action-setup@v6` 安装匹配版本）与
   Node `^22.19 || >=24`。
 - **依赖**：工作区 8 个包的 devDependency `vitest` 由 `^3.0.0` 升到 **`^4.1.11`**，
   清除 `pnpm audit` 报出的 2 条 moderate（`GHSA-82fw-gwwq-j7x9`，vitest /
@@ -23,10 +23,35 @@ All notable changes to **dsh-ros2** are documented here. Format follows
   升级后 typecheck/test/build 全绿，`pnpm audit` 恢复 "No known vulnerabilities"。
 - **CI（`.github/workflows/ci.yml`）**：显式声明最小权限
   `permissions: contents: read`，并给 check job 加 `timeout-minutes: 30`。
+- **CI（`.github/workflows/ci.yml`）**：Actions 升到 node24 主版本——
+  `actions/checkout` v4 → **v7**、`actions/setup-node` v4 → **v7**、
+  `pnpm/action-setup` v4 → **v6**（消除 runner 的 “Node.js 20 is deprecated” 告警；
+  仍固定 pnpm `11.22.0` 与 Node 22/24 矩阵）。新增供应链闸门
+  `pnpm audit --prod --audit-level high`（仅运行态依赖阻断 high/critical）。
 - README / README_CN 开发章节：工作区 vitest 用例 185 → **187 例**，并注明
   profile 包 `test` 现同时运行 6 个 zero-pose Python 自检。
+- README / README_CN 开发章节：工作区 vitest 用例 187 → **195 例**，并注明
+  common 包 `test` 现同时运行 `robot_profile.py --selftest`（17 项档案名/路径边界检查）。
 
 ### Fixed
+
+- `ros2_process_cleanup` 的 `signal` 参数（安全扫描发现）：该值此前**未加引号**直接
+  插进 `bash -lc` 清理脚本（`kill -${signal} $pids`），传入 `"TERM; echo pwned"` 之类
+  的值即可在批准后、存在匹配进程时**执行任意 shell 命令**。现只接受合法信号名
+  （`TERM`/`SIGKILL`…）或 1–2 位数字，其余在**批准之前**即以 `INVALID_PARAM` 拒绝，
+  且通过校验的值在拼接处再做 `shq()` 引用（纵深防御）。新增 2 例回归测试（core）。
+- 机器人档案名**路径越界**（安全扫描发现）：档案名被直接当作文件名拼接
+  （`~/.dsh-ros2/robots/<name>.yaml`），`robot_register` / `robot_load` /
+  `robot_topology` 传入 `../..` 之类的名字即可在档案目录**之外读写 `.yaml`**（已复现
+  写入工作区）。修复分三层：
+  - `robot_profile.py` 新增 `safe_name()`（单个安全路径分量）并在 `main()`、
+    `register()`、`load()`、`read_profile_yaml()`、`_profile_path()` 统一强制；新增
+    离线 `--selftest`（17 项检查，无需 ROS2/PyYAML）并接入 `dsh-ros2-common` 的
+    `test` 脚本，CI 每次回归。
+  - `dsh-ros2-common` 新增共享判定 `isSafeProfileName()`；`resolveProfilePath()` /
+    `loadRobotProfile()` 对不安全的档案名**直接失败关闭**，不再产生子进程。
+  - profile 工具 `robot_register` / `robot_load` / `robot_topology` 在**批准提示与
+    子进程之前**返回 `INVALID_NAME`。新增 5+1 例回归测试（common + profile）。
 
 - `ros2_zero_pose_semantics` 的 Python 助手 `zero_pose_semantics.py`（安全扫描发现，
   三处注入面）：
