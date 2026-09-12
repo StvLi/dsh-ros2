@@ -109,6 +109,9 @@ describe('dsh-ros2 toolchain guidance (owned by core)', () => {
     const text = prompt.textOf(GUIDANCE_SECTION)
     expect(text).toContain('ROS2 work: use the dsh-ros2 toolchain')
     expect(text).toContain('ros2_topic_list')
+    // The one-call snapshot is the recommended first move, not just one family
+    // among many — that is where the round-trip saving comes from.
+    expect(text).toContain('Start with `ros2_topology`')
 
     // Disabling the plugin must take the section with it.
     await fork.dispose()
