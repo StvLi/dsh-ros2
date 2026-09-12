@@ -699,7 +699,8 @@ pnpm audit --registry=https://registry.npmjs.org   # No known vulnerabilities fo
 | 项 | 值 |
 | --- | --- |
 | 开始 `origin/main` | `2d349af`（PR #18 已合并；工作树干净，本地 `main` 与 `origin/main` 0/0） |
-| 新开分支 | `feat/journey-skills`（`feat/...`，6 个提交） |
+| 新开分支 | `feat/journey-skills`（已推送，PR **#20**，6 个提交） |
+| 结束 `origin/main` | `1933acf`（PR #20 合并 commit；CI run `34716276970`，`check (22)` 51s / `check (24)` 46s 均 **pass**；远端分支已删除） |
 | 本地 Node / pnpm | Node `v24.16.0` / pnpm `11.22.0`（= root `packageManager`） |
 | 包数量 | 9 个（common/core/dsh-ros2/dsh-ros2-state/moveit/profile/safety/sidecar/vision） |
 | 工具 / 技能 | **83 工具**（core 61 / vision 7 / safety 5 / moveit 4 / profile 4 / state 2） · **9 技能**（本轮 4 → 9） |
@@ -760,6 +761,9 @@ pnpm audit --registry=https://registry.npmjs.org   # No known vulnerabilities fo
 （`s \`srdf\` for a direct path), returns …`）。两个后果：(1) 技能内容以半句话开头；(2) 残句**无条件**介绍 `moveit_discover` / `moveit_move` ——
 技能内容是**静态字符串**（不同于按已注册工具重建的系统提示），因此**只装 core 的安装会被引导去移动它根本没有挂载的机器人**，
 恰好违反本仓库"仅宣传已挂载能力族"的原则。修复后运动引导改由 `dsh-ros2-moveit` 的载体承担。
+
+**PR 与合并**：PR **#20** `feat: journey skills + composition invariant (RFC #19 slices 1 & 3)`（base `main`）；
+PR CI（run `34716276970`，Node 22/24 矩阵）**全绿**后按仓库惯例以 **merge commit** 合并为 `1933acf`，远端分支已删除，本地 `main` 已 `reset --hard origin/main` 同步。
 
 ### 13.4 本地验收（全绿）
 
