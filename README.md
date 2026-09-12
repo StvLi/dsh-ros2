@@ -39,14 +39,14 @@ All tools run plain `ros2` / `colcon` / `rosdep` CLI commands on the host; L1 ne
 
 ## Features
 
-- **Zero-intrusion diagnostics**: 79 tools cover most ROS2 debugging scenarios — from "is the package installed?" to "what is on this topic right now?", one command, one answer;
+- **Zero-intrusion diagnostics**: 83 tools cover most ROS2 debugging scenarios — from "is the package installed?" to "what is on this topic right now?", one command, one answer;
 - **Whole-graph topology**: `ros2_graph` folds nodes/publishers/subscribers/services/actions into one JSON — see the system structure in seconds;
 - **Approval-gated writes**: builds, dependency installs, message scaffolding etc. go through the DSH approval service; fail-closed, denial = failure;
 - **Visualization as a service**: "see" headlessly — screenshots / multimodal description / window interaction are fully local, no remote display;
 - **Parallel realtime vision**: the VLM runs in a separate ROS2 process (`vlm_node`, service `/vlm/describe`); images come from topics (`sensor_msgs/Image` / `CompressedImage`); `vision_bringup` auto-creates one bridge per image topic, headless-ready;
 - **RViz2 offscreen rendering (motion render ~22 Hz on llvmpipe; 30 Hz full rate with GPU)**: the real rviz render kernel (`rviz_common` + OGRE) renders any `.rviz` scene on a virtual display and publishes it as an image topic — no screenshots, no X11 window-stacking dependency. **Performance optimizations**: open3d low-poly meshes (`scripts/simplify_visual_meshes.py`) + direct OGRE pixel read (no PNG round-trip) + double-render elimination → motion rendering 1.9 → ~22 Hz on llvmpipe (11×), and **30 Hz full rate with NVIDIA GPU passthrough** (v0.9.3), memory −2.5×;
 - **Real-time safety framework** (`safety_monitor` node + `robot_safety_*` tools, see [Safety framework](#safety-framework)): layered defense — tool-layer safety gate (pre-execution `/safety/state` check) → reactive monitors (motion tracking/stall with hysteresis, joint-feedback loss, watchdog, optional torque) → event-driven VLM semantic arbitration → human arbitration. Latched `NORMAL`/`LOCKED` state machine (lock persists until a human unlocks; non-fatal events never lock); every threshold/topic/lock-action is registered per robot in the profile `safety` section; the geometric pre-check (joint limits / velocity / FK self-collision) is a reserved layer;
-- **Bundled skills (4)**: `ros2-diagnostics` (which tool to use when, narrow-down methodology), `robot-state-vision-analysis` (status → offscreen render → VLM → cross-check), `robot-registration` (first-contact body profile + topology baseline) and `robot-retrieval` (instant profile load and bring-up).
+- **Bundled skills (9)**: one carrier per recurring journey — `ros2-diagnostics` (which tool when, narrow-down methodology), `ros2-bringup-recovery` (environment → launch → verify), `ros2-liveness-triage` (rates and payload in one or two calls), `ros2-tf-integrity` (edges, lookups, missing broadcaster), `robot-registration` / `robot-retrieval` (body profile and instant reuse), `robot-state-vision-analysis` (status → render → VLM → cross-check), `robot-motion-control` (the one plan → validate → approve → execute → verify path) and `robot-safety-procedure` (latch, LOCKED, boundaries).
 
 ---
 
@@ -61,7 +61,7 @@ All tools run plain `ros2` / `colcon` / `rosdep` CLI commands on the host; L1 ne
 ### Install the plugins (9 npm packages, since the monorepo split)
 
 Install the domain bundles you need — or the **`dsh-ros2` aggregate** for the
-full 79 tools + 4 skills (its patch inserts all domain ids). All packages are
+full 83 tools + 9 skills (its patch inserts all domain ids). All packages are
 published to npm at **0.1.0** (see [docs/versioning.md](docs/versioning.md) for
 the GitHub ↔ npm version correspondence).
 
@@ -419,9 +419,14 @@ knowledge base improves with every session and every diagnosis gets faster.
 | Skill | Content |
 | --- | --- |
 | `ros2-diagnostics` | Which tool to use when, narrow-down methodology, debugging "topic has no data" / message-mismatch / TF problems |
+| `ros2-bringup-recovery` | Journey "it won't come up": `ros2_env_check` → `ros2_workspace use` (in-session, no restart) → launch → job tracking → doctor verification |
+| `ros2-liveness-triage` | Journey "is it alive / why stale": `ros2_topology {rates}` → `ros2_topic_sample` → read publisher count / rate / QoS, with the timeout semantics that cause false alarms |
+| `ros2-tf-integrity` | Journey "is the TF tree right": frames beside the graph, `/tf` + latched `/tf_static` edges, inverse-edge lookups, localizing a missing edge to its broadcaster |
 | `robot-state-vision-analysis` | Full pipeline: status → offscreen render → VLM → cross-check (includes Jazzy `Description Source/Topic`, URDF↔TF frame-name matching, `file://` meshes, view distance, `FM frames` signal, calibrated zero-pose semantics) |
 | `robot-registration` | First-contact flow: ask name/URDF → collect body info + zero-pose calibration → `robot_register` → topology baseline snapshot |
 | `robot-retrieval` | Instant profile load (`robot_load`) and bring-up of renders / diagnostics / motion; read & progressively learn the comms topology (`robot_topology`) |
+| `robot-motion-control` | Journey "can it move / how": `moveit_status` → group discovery → `planOnly` → `motion_validate` → the single approval- and `/safety/state`-gated execution path → pass/fail verification |
+| `robot-safety-procedure` | Journey "is it safe": `robot_safety_state` first, LOCKED as a stop signal, VLM arbitration (`uncertain` ≠ `safe`), the six layers and their explicit boundaries |
 
 ---
 
@@ -454,10 +459,10 @@ dsh-ros2/                      # pnpm monorepo (workspace root, private)
 ├── tsconfig.base.json
 ├── packages/
 │   ├── common/                # dsh-ros2-common (not a bundle): runner / parse / toolkit + scripts/robot_profile.py (zero-copy)
-│   ├── core/                  # dsh-ros2-core (59 tools): L1 diagnostics + L2 management + L3 GUI + ros2-diagnostics skill + gui.ts + pty_session.py
+│   ├── core/                  # dsh-ros2-core (61 tools): L1 diagnostics + L2 management + L3 GUI + diagnostics/bring-up/liveness/TF skills + gui.ts + pty_session.py
 │   ├── profile/               # dsh-ros2-profile (4 tools): robot_register/load/topology + zero-pose calibration + registration/retrieval skills
-│   ├── moveit/                # dsh-ros2-moveit (4 tools): discover/status/motion_validate/moveit_move + moveit_*.py + motion_validator.py
-│   ├── safety/                # dsh-ros2-safety (5 tools): robot_safety_* + safety/ ROS2 pkg + safetyStrict config
+│   ├── moveit/                # dsh-ros2-moveit (4 tools): discover/status/motion_validate/moveit_move + moveit_*.py + motion_validator.py + robot-motion-control skill
+│   ├── safety/                # dsh-ros2-safety (5 tools): robot_safety_* + safety/ ROS2 pkg + safetyStrict config + robot-safety-procedure skill
 │   ├── vision/                # dsh-ros2-vision (7 tools): vision tools + vlm/ + offscreen/ ROS2 pkgs + vision provider service + state-vision skill
 │   └── dsh-ros2/              # aggregate bundle (empty apply, backward compat)
 ├── docs/                      # architecture.md · safety.md / safety-handover.md / safety-todo.md / safety-gpt-review.md · test-*.md · plugin-split-plan.md
@@ -470,8 +475,9 @@ dsh-ros2/                      # pnpm monorepo (workspace root, private)
 ## Plugin split (9 packages)
 
 Since v0.15.0 the plugin is a **pnpm monorepo** of 9 npm packages (per
-[`docs/plugin-split-plan.md`](docs/plugin-split-plan.md), ISP-tightened): 79 tools +
-4 skills preserved with **unchanged names and behavior**. Install the domain
+[`docs/plugin-split-plan.md`](docs/plugin-split-plan.md), ISP-tightened): 83 tools +
+9 skills (the four original skills preserved with **unchanged names and behavior**).
+Install the domain
 bundles you need (or the `dsh-ros2` aggregate for the full set):
 
 - `dsh-ros2-common` is a plain library (not a cordis bundle) — shared runner,

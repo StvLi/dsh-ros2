@@ -1,7 +1,7 @@
 /**
  * dsh-ros2 — aggregate cordis bundle (backward compatibility).
  * Depends on core/profile/moveit/safety/vision/common; this bundle itself
- * registers nothing — the 79 tools + 4 skills come from the domain bundles.
+ * registers nothing — the 83 tools + 9 skills come from the domain bundles.
  *
  * The system-prompt guidance that points the model at this toolchain is owned
  * by `dsh-ros2-core` (mounted here through `cordis.patch.yml`), so it is also
