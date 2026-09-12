@@ -80,7 +80,10 @@ const INTRO: readonly string[] = [
   '',
   'The dsh-ros2 plugin is loaded, so ROS2 work on this host should go through its tools',
   'rather than ad-hoc `ros2` CLI calls, hand-rolled `rclpy` scripts, or raw publishers.',
-  'Its families are:',
+  'Start with `ros2_topology`: one call returns every node with its publishers,',
+  'subscribers and services, topics with message types and pub/sub counts, services and',
+  'action servers — add `tf: true` for TF frames and `rates: true` to see what is alive.',
+  'Reach for the narrower families below only for follow-up questions:',
 ]
 
 const OUTRO: readonly string[] = [
