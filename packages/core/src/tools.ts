@@ -211,7 +211,7 @@ function windowToJson(window: { id: string; x: number; y: number; width: number;
 function makeGraphTool(deps: CoreToolDeps) {
   return defineTool({
   name: 'ros2_graph',
-  description: 'Aggregate communication topology: enumerate nodes and fold each node\'s publishers/subscribers/services/actions into a JSON graph. Prefer this over repeated ros2_node_info calls.',
+  description: 'Aggregate communication topology: enumerate nodes and fold each node\'s publishers/subscribers/services/actions into a JSON graph. `ros2_topology` supersedes this (same shape plus topics/services/actions/TF in one call for the whole system) — reach for that first.',
   parameters: {
     maxNodes: { type: 'number', default: 8, description: 'Upper bound of nodes to sample (node info is slow).' },
   },
@@ -1054,7 +1054,7 @@ export function createRos2Tools(deps: ToolDeps) {
     }),
     ros2Tool(deps, {
       name: 'ros2_node_list',
-      description: 'List running ROS2 nodes (`ros2 node list`).',
+      description: 'List running ROS2 node names (`ros2 node list`). For more than names, use `ros2_topology` — one call returns every node with its pub/sub/services.',
       buildArgs: () => ['node', 'list'],
       parse: (res) => {
         const nodes = parseLines(res.stdout)
@@ -1063,7 +1063,7 @@ export function createRos2Tools(deps: ToolDeps) {
     }),
     ros2Tool(deps, {
       name: 'ros2_node_info',
-      description: 'Inspect one node: subscribers, publishers, services and actions (`ros2 node info <node>`).',
+      description: 'Inspect ONE node in detail: subscribers, publishers, services and actions (`ros2 node info <node>`). For several nodes, prefer `ros2_topology` with node: "a,b" — one call instead of one per node.',
       parameters: {
         node: { type: 'string', required: true, description: 'Node name, e.g. /controller_manager.' },
         verbose: { type: 'boolean', default: false, description: 'Include full interface types (-v).' },
@@ -1073,7 +1073,7 @@ export function createRos2Tools(deps: ToolDeps) {
     }),
     ros2Tool(deps, {
       name: 'ros2_topic_list',
-      description: 'List ROS2 topics with types (`ros2 topic list -t`).',
+      description: 'List ROS2 topics with types (`ros2 topic list -t`). `ros2_topology` also carries pub/sub counts and live rates for every topic in one call.',
       buildArgs: () => ['topic', 'list', '-t'],
       parse: (res) => {
         const topics = parseTopicList(res.stdout)
@@ -1335,17 +1335,23 @@ export function createRos2Tools(deps: ToolDeps) {
     ros2Tool(deps, {
       name: 'ros2_topology',
       description:
-        'Whole-system topology snapshot in ONE call: nodes with their publishers/subscribers/services, topics with message types and pub/sub counts, services, action servers, plus optional TF frames and node parameters. Prefer this over several narrower calls when the question is "what does this system look like".',
+        'Whole-system topology snapshot in ONE call: nodes with their publishers/subscribers/services, topics with message types and pub/sub counts, services, action servers, plus optional TF frames, live publish rates and node parameters. Prefer this over several narrower calls when the question is "what does this system look like" or "what is alive".',
       bin: 'python3',
       parameters: {
-        tf: { type: 'boolean', description: 'Include TF frames (samples /tf and /tf_static; adds a few seconds).' },
+        tf: { type: 'boolean', description: 'Include TF frames (samples /tf and /tf_static).' },
+        rates: { type: 'boolean', description: 'Include publish rates for live topics (shares the TF listen window).' },
         params: { type: 'boolean', description: 'Include node parameters (opt-in: costs a service round-trip per node).' },
-        tfTimeout: { type: 'number', description: 'Seconds to listen for TF (default 4).' },
+        tfTimeout: { type: 'number', description: 'Seconds to listen for TF and rates (default 4).' },
+        node: { type: 'string', description: 'Comma-separated node names to report instead of every node.' },
       },
       buildArgs: (params) => {
         const args = [topologyHelperPath()]
-        if (params.tf) args.push('--tf', '--tf-timeout', String(params.tfTimeout ?? TF_LISTEN_SECONDS))
+        const window = String(params.tfTimeout ?? TF_LISTEN_SECONDS)
+        if (params.tf) args.push('--tf', '--tf-timeout', window)
+        if (params.rates) args.push('--rates', '--rates-window', window)
         if (params.params) args.push('--params')
+        const node = typeof params.node === 'string' ? params.node.trim() : ''
+        if (node) args.push('--node', node)
         return args
       },
       runOpts: () => ({ timeoutMs: 60000 }),

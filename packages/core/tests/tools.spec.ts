@@ -221,17 +221,29 @@ describe('ros2_topology', () => {
     expect(out.data).toMatchObject({ ok: true, counts: { nodes: 1, topics: 1, actions: 1 } })
   })
 
-  it('only asks the helper for TF and parameters when requested', async () => {
+  it('only asks the helper for the optional dimensions when requested', async () => {
     const seen: string[][] = []
     const run = makeRun((_bin, args) => {
       seen.push(args)
       return { stdout: snapshot }
     })
     await call('ros2_topology', run, {})
-    await call('ros2_topology', run, { tf: true, tfTimeout: 2, params: true })
+    await call('ros2_topology', run, { tf: true, rates: true, tfTimeout: 2, params: true })
     expect(seen[0]).not.toContain('--tf')
+    expect(seen[0]).not.toContain('--rates')
     expect(seen[0]).not.toContain('--params')
-    expect(seen[1]).toEqual(expect.arrayContaining(['--tf', '--tf-timeout', '2', '--params']))
+    expect(seen[1]).toEqual(expect.arrayContaining(['--tf', '--rates', '--params']))
+    expect(seen[1]).toEqual(expect.arrayContaining(['--tf-timeout', '2', '--rates-window', '2']))
+  })
+
+  it('passes a node filter through, so several nodes cost one call', async () => {
+    const seen: string[][] = []
+    const run = makeRun((_bin, args) => {
+      seen.push(args)
+      return { stdout: snapshot }
+    })
+    await call('ros2_topology', run, { node: '/talker,/listener' })
+    expect(seen[0]).toEqual(expect.arrayContaining(['--node', '/talker,/listener']))
   })
 })
 
