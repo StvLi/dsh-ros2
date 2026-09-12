@@ -4,17 +4,21 @@
 Why this exists: every `ros2 <verb>` invocation starts a fresh Python process
 and re-discovers the graph, so answering "what does this system look like?"
 through the CLI costs N+1 process spawns and N+1 agent round-trips. This helper
-does the whole survey in a single rclpy process (graph API + one TF listen) and
-prints one JSON document, so a complex topology costs the agent one call.
+does the whole survey in a single rclpy process — graph API plus one listen
+window that covers TF and topic liveness — and prints one JSON document, so a
+complex topology costs the agent one call.
 
 Usage:
-    ros2_topology.py [--tf] [--tf-timeout S] [--params] [--params-limit N] [--discovery S]
+    ros2_topology.py [--tf] [--tf-timeout S] [--rates] [--rates-window S]
+                     [--params] [--params-limit N] [--node a,b] [--include-hidden]
+                     [--discovery S] [--selftest]
 
 Output: a single JSON object on stdout; diagnostics go to stderr.
 """
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import sys
 import time
@@ -27,6 +31,10 @@ ACTION_MSG_SUFFIXES = ('_SendGoal', '_GetResult', '_FeedbackMessage')
 SELF_NODE_NAME = '/dsh_ros2_topology'
 
 
+def _now_ms() -> int:
+    return int(time.time() * 1000)
+
+
 def is_hidden(name: str) -> bool:
     """Match the `ros2` CLI's hidden-name rule: any segment starting with `_`.
 
@@ -37,8 +45,20 @@ def is_hidden(name: str) -> bool:
     return any(segment.startswith('_') for segment in name.strip('/').split('/') if segment)
 
 
-def _now_ms() -> int:
-    return int(time.time() * 1000)
+def normalise(name: str) -> str:
+    return name.strip().lstrip('/')
+
+
+def resolve_msg_type(type_str: str):
+    """`std_msgs/msg/String` -> the Python message class, or None if unknown."""
+    package, _, kind = type_str.partition('/msg/')
+    if not kind:
+        return None
+    try:
+        module = importlib.import_module(f'{package}.msg')
+        return getattr(module, kind)
+    except Exception:
+        return None
 
 
 def derive_actions(services: list[dict], topics: list[dict]) -> list[dict]:
@@ -77,7 +97,15 @@ def derive_actions(services: list[dict], topics: list[dict]) -> list[dict]:
     return [found[k] for k in sorted(found)]
 
 
-def build_snapshot(node, want_tf: bool, want_params: bool, params_limit: int, include_hidden: bool = False) -> dict:
+def build_snapshot(
+    node,
+    want_tf: bool,
+    want_params: bool,
+    params_limit: int,
+    include_hidden: bool = False,
+    want_rates: bool = False,
+    only_nodes: tuple[str, ...] = (),
+) -> dict:
     """Collect the whole topology from an already-discovered node."""
     topics: list[dict] = []
     for name, types in sorted(node.get_topic_names_and_types()):
@@ -124,6 +152,12 @@ def build_snapshot(node, want_tf: bool, want_params: bool, params_limit: int, in
         for entry in actions:
             entry['topics'] = [t for t in entry.get('topics', []) if not is_hidden(t)]
 
+    not_found: list[str] = []
+    if only_nodes:
+        wanted = {normalise(n) for n in only_nodes if n.strip()}
+        nodes = [n for n in nodes if normalise(n['name']) in wanted]
+        not_found = sorted(wanted - {normalise(n['name']) for n in nodes})
+
     # Attach each action to the node serving it (mirrors `ros2 node info`).
     for entry in actions:
         entry['served_by'] = [
@@ -134,6 +168,8 @@ def build_snapshot(node, want_tf: bool, want_params: bool, params_limit: int, in
                 for line in node_entry['services']
             )
         ]
+    if only_nodes:
+        actions = [a for a in actions if a['served_by']]
 
     snapshot: dict = {
         'ok': True,
@@ -142,8 +178,12 @@ def build_snapshot(node, want_tf: bool, want_params: bool, params_limit: int, in
         'services': services,
         'actions': actions,
     }
+    if not_found:
+        snapshot['not_found'] = not_found
     if not include_hidden:
         snapshot['hidden'] = {k: v for k, v in hidden_names.items() if v}
+    if want_rates:
+        snapshot['rates'] = getattr(node, '_rates', {})
     if want_tf:
         snapshot['tf'] = collect_tf(node)
     if want_params:
@@ -168,8 +208,6 @@ def collect_parameters(node, nodes: list[dict], limit: int) -> dict:
     out: dict[str, dict] = {}
     for entry in nodes[:limit]:
         full = entry['name']
-        namespace, _, name = full.rpartition('/')
-        namespace = namespace or '/'
         try:
             lister = node.create_client(ListParameters, f'{full}/list_parameters')
             if not lister.wait_for_service(timeout_sec=0.4):
@@ -243,6 +281,7 @@ def selftest() -> int:
     check('parameter_events not hidden', not is_hidden('/parameter_events'))
     check('daemon node hidden', is_hidden('/_ros2cli_daemon_0_abc'))
     check('action plumbing hidden', is_hidden('/fibonacci/_action/send_goal'))
+    check('normalise strips slash', normalise('/talker') == 'talker')
 
     services = [
         {'name': '/fibonacci/_action/send_goal', 'types': ['action_tutorials_interfaces/action/Fibonacci_SendGoal']},
@@ -267,8 +306,12 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument('--tf', action='store_true', help='include TF frames')
     parser.add_argument('--tf-timeout', type=float, default=3.0)
+    parser.add_argument('--rates', action='store_true', help='measure publish rates for live topics')
+    parser.add_argument('--rates-window', type=float, default=3.0)
+    parser.add_argument('--rate-topics-limit', type=int, default=40)
     parser.add_argument('--params', action='store_true')
     parser.add_argument('--params-limit', type=int, default=8)
+    parser.add_argument('--node', default='', help='comma-separated node names to report (default: all)')
     parser.add_argument('--include-hidden', action='store_true', help='also list hidden nodes/topics/services')
     parser.add_argument('--selftest', action='store_true', help='run pure-logic checks and exit')
     parser.add_argument('--discovery', type=float, default=1.5, help='seconds to let discovery settle')
@@ -286,6 +329,7 @@ def main() -> int:
     node = Node('dsh_ros2_topology')
     frames: dict = {}
     node._tf_frames = frames
+    node._rates = {}
 
     def record(msg, is_static: bool) -> None:
         for transform in msg.transforms:
@@ -307,6 +351,13 @@ def main() -> int:
                 },
             }
 
+    started = _now_ms()
+
+    # 1) let discovery settle (this also collects the latched /tf_static)
+    settle = time.time() + max(args.discovery, 0.5)
+    while time.time() < settle:
+        rclpy.spin_once(node, timeout_sec=0.1)
+
     if args.tf:
         static_qos = QoSProfile(
             depth=200,
@@ -317,19 +368,50 @@ def main() -> int:
         node.create_subscription(TFMessage, '/tf_static', lambda m: record(m, True), static_qos)
         node.create_subscription(TFMessage, '/tf', lambda m: record(m, False), 200)
 
-    started = _now_ms()
-    # Let discovery settle (and pick up latched /tf_static) before sampling.
-    deadline = time.time() + max(args.discovery, args.tf_timeout if args.tf else 0.0)
+    # 2) liveness comes from the same process and the same wait: subscribe to
+    #    the topics that actually have publishers, then count during the window.
+    counts: dict[str, int] = {}
+    if args.rates:
+        candidates = [
+            (name, types)
+            for name, types in node.get_topic_names_and_types()
+            if node.count_publishers(name) > 0 and types and not is_hidden(name)
+        ][: args.rate_topics_limit]
+        for name, types in candidates:
+            message_type = resolve_msg_type(types[0])
+            if message_type is None:
+                continue
+            counts[name] = 0
+            node.create_subscription(
+                message_type, name,
+                (lambda topic: lambda _msg: counts.__setitem__(topic, counts[topic] + 1))(name),
+                10,
+            )
+
+    # 3) one listen window serves both TF and rates
+    window = max(args.tf_timeout if args.tf else 0.0, args.rates_window if args.rates else 0.0)
+    window_started = time.time()
+    deadline = window_started + window
     while time.time() < deadline:
         rclpy.spin_once(node, timeout_sec=0.1)
 
-    snapshot = build_snapshot(node, args.tf, args.params, args.params_limit, args.include_hidden)
+    elapsed = max(time.time() - window_started, 1e-6)
+    node._rates = {
+        name: {'count': count, 'hz': round(count / elapsed, 2)}
+        for name, count in counts.items()
+    }
+
+    only = tuple(part for part in (args.node or '').split(',') if part.strip())
+    snapshot = build_snapshot(
+        node, args.tf, args.params, args.params_limit, args.include_hidden, args.rates, only,
+    )
     snapshot['counts'] = {
         'nodes': len(snapshot['nodes']),
         'topics': len(snapshot['topics']),
         'services': len(snapshot['services']),
         'actions': len(snapshot['actions']),
         'tf_frames': snapshot.get('tf', {}).get('count', 0),
+        'live_topics': sum(1 for r in snapshot.get('rates', {}).values() if (r.get('hz') or 0) > 0),
     }
     snapshot['elapsed_ms'] = _now_ms() - started
 
