@@ -9,7 +9,12 @@ import { Config, type CoreConfig } from './config.js'
 import { makeRun, type ApprovalRequest, type JobsApi, type VisionProvider } from 'dsh-ros2-common'
 import { GuiManager } from './gui.js'
 import { createRos2Tools, type CoreToolDeps } from './tools.js'
-import { ros2DiagnosticsSkill } from './skill.js'
+import {
+  ros2BringupRecoverySkill,
+  ros2DiagnosticsSkill,
+  ros2LivenessTriageSkill,
+  ros2TfIntegritySkill,
+} from './skill.js'
 import { GUIDANCE_SECTION, buildGuidanceText } from './guidance.js'
 
 export const name = 'dsh-ros2-core'
@@ -67,9 +72,17 @@ export function apply(ctx: Context, config: CoreConfig): void {
     return () => disposers.forEach((dispose) => dispose())
   })
 
+  // One carrier per recurring journey: `ros2-diagnostics` is the general
+  // entry point; the other three own a named journey with its own L1 entry
+  // tool (bring-up recovery, liveness triage, TF integrity).
   ctx.effect(() => {
-    const disposer = ctx.skills.register(ros2DiagnosticsSkill)
-    return () => disposer()
+    const disposers = [
+      ctx.skills.register(ros2DiagnosticsSkill),
+      ctx.skills.register(ros2BringupRecoverySkill),
+      ctx.skills.register(ros2LivenessTriageSkill),
+      ctx.skills.register(ros2TfIntegritySkill),
+    ]
+    return () => disposers.forEach((dispose) => dispose())
   })
 
   // Steer ROS2 work to this toolchain for as long as core is mounted. The text
