@@ -116,6 +116,7 @@ repeated per id) and the vision provider lives only on `dsh-ros2-vision`:
 ### Three-minute taste
 
 ```bash
+ros2_topology --tf                  # WHOLE system (nodes/topics/services/actions/TF) in one call
 ros2_graph                          # whole system topology in one shot
 ros2_topic_list                     # all topics and types
 ros2_topic_echo /joint_states       # sample one frame of joint states
@@ -158,8 +159,9 @@ ros2_doctor                         # system health report
 | `ros2_interface_show` | `ros2 interface show <type>` | Full field definition of a message/service/action |
 | `ros2_interface_list` / `ros2_interface_prototype` / `ros2_interface_package` | `ros2 interface list|prototype|package ...` | All interface types / default-value prototype / types in a package |
 | `ros2_graph` | `ros2 node list` + per-node `node info` | Folded JSON topology graph |
-| `ros2_tf_list` | `ros2 topic echo /tf --once` | Current TF tree edges |
-| `ros2_tf_echo` | `ros2 topic echo /tf --once` | Transform between two frames |
+| `ros2_topology` | one `rclpy` process (no per-verb CLI spawns) | **Whole-system snapshot in one call**: nodes with their pub/sub/services, topics with types and pub/sub counts, services, actions, plus optional TF frames and parameters. Prefer it over several narrower calls |
+| `ros2_tf_list` | same `rclpy` snapshot | TF edges from `/tf` **and** the latched `/tf_static` (both dynamic and static frames) |
+| `ros2_tf_echo` | same `rclpy` snapshot | Transform between two frames, including the inverse edge |
 | `ros2_doctor` | `ros2 doctor` | System health report |
 | `ros2_bag_info` | `ros2 bag info <path>` | Bag summary |
 | `moveit_discover` | scans MoveIt packages + parses SRDF + probes move_group | Discover MoveIt2 config packages (any package shipping an SRDF), their planning groups and named poses, and whether `/move_action` / `/execute_trajectory` / `/compute_cartesian_path` are online. Pass `srdf` to parse a specific file directly — generic, not bound to a specific package |

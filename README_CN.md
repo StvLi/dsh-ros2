@@ -129,6 +129,7 @@ provider 只存在于 `dsh-ros2-vision`：
 ### 三分钟体验
 
 ```bash
+ros2_topology --tf                  # 一次调用拿到全系统（节点/话题/服务/动作/TF）
 ros2_graph                          # 一键看清系统拓扑
 ros2_topic_list                     # 当前所有话题及类型
 ros2_topic_echo /joint_states       # 采样一帧关节状态
@@ -171,8 +172,9 @@ ros2_doctor                         # 系统健康报告
 | `ros2_interface_show` | `ros2 interface show <type>` | 消息/服务/动作完整字段定义 |
 | `ros2_interface_list` / `ros2_interface_prototype` / `ros2_interface_package` | `ros2 interface list|prototype|package ...` | 全部接口类型 / 默认值原型 / 包内类型 |
 | `ros2_graph` | `ros2 node list` + 逐节点 `node info` | 折叠式 JSON 拓扑图 |
-| `ros2_tf_list` | `ros2 topic echo /tf --once` | 当前 TF 树边 |
-| `ros2_tf_echo` | `ros2 topic echo /tf --once` | 两帧间变换 |
+| `ros2_topology` | 单个 `rclpy` 进程（不再逐个 CLI 调用） | **一次调用拿到全系统快照**：节点及其 pub/sub/服务、带类型的话题与 pub/sub 计数、服务、动作，可选 TF 帧与参数。优先用它替代多次窄查询 |
+| `ros2_tf_list` | 同上（同一 `rclpy` 快照） | 同时采样 `/tf` **与**锁存的 `/tf_static`，动态与静态帧一并给出 |
+| `ros2_tf_echo` | 同上（同一 `rclpy` 快照） | 两帧间变换，含反向边 |
 | `ros2_doctor` | `ros2 doctor` | 系统健康报告 |
 | `ros2_bag_info` | `ros2 bag info <path>` | bag 摘要 |
 | `moveit_discover` | 扫描 MoveIt 包 + 解析 SRDF + 探测 move_group | 发现宿主上的 MoveIt2 配置包（任意带 SRDF 的包）、规划组与命名姿态，以及 `/move_action`/`/execute_trajectory`/`/compute_cartesian_path` 是否在线；可直接传 `srdf` 解析指定文件——通用，不绑定具体包 |
