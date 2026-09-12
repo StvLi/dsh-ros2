@@ -104,6 +104,13 @@ npm install dsh-ros2-state dsh-ros2-sidecar --registry=https://registry.npmmirro
 > `dsh-ros2-vision`（视觉流水线）· `dsh-ros2-state`（状态客户端）·
 > `dsh-ros2-sidecar`（数据面守护进程）。
 
+> **提示词引导**：`dsh-ros2` 聚合包会额外向 system prompt 注入一段分节，引导模型
+> 用本工具链做 ROS2 相关工作——用 `ros2_*_list`/`ros2_graph` 发现、用
+> `ros2_topic_*`/`ros2_param_*` 采样、用 `moveit_*`/`robot_safety_*` 规划与执行
+> （均需审批，并以 `/safety/state` 为闸门）——而不是临时拼 `ros2` CLI 或私自写
+> `rclpy` 脚本。该分节与插件**同生命周期**注册：禁用/卸载插件即从提示词中移除，
+> 不会留下残留。精简安装（如只装 `dsh-ros2-core`）不含此引导。
+
 ### 最小配置（per-bundle，整体对象替换）
 
 拆分后每个 bundle 携带各自的**运行 seam 配置**（同样的键按 id 重复），vision

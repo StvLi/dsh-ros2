@@ -91,6 +91,15 @@ npm install dsh-ros2-state dsh-ros2-sidecar
 > `dsh-ros2-vision` (vision pipeline) · `dsh-ros2-state` (state client) ·
 > `dsh-ros2-sidecar` (data-plane daemon).
 
+> **Prompt guidance.** The `dsh-ros2` aggregate also contributes a system-prompt
+> section that points the model at this toolchain for ROS2 work — discover with
+> `ros2_*_list`/`ros2_graph`, sample with `ros2_topic_*`/`ros2_param_*`, plan and
+> act through `moveit_*`/`robot_safety_*` (approval-gated, gated on
+> `/safety/state`) — instead of ad-hoc `ros2` CLI calls or private `rclpy`
+> scripts. The section is registered with the plugin's own lifetime: disabling or
+> removing the plugin removes it from the prompt, so an unloaded dsh-ros2 leaves
+> no residue. Lean installs (`dsh-ros2-core`, …) do not add it.
+
 ### Minimal configuration (per-bundle, whole-object replacement)
 
 After the split, each bundle carries its **own run-seam config** (same keys
