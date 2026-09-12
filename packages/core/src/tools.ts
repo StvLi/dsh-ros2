@@ -1094,7 +1094,7 @@ export function createRos2Tools(deps: ToolDeps) {
     }),
     ros2Tool(deps, {
       name: 'ros2_topic_info',
-      description: 'Show topic metadata: type, publisher/subscriber counts and QoS (`ros2 topic info <topic> [-v]`).',
+      description: 'Show topic metadata: type, publisher/subscriber counts and QoS (`ros2 topic info <topic> [-v]`). `ros2_topic_sample` returns this plus a live message and its rate in one call.',
       parameters: {
         topic: { type: 'string', required: true, description: 'Topic name, e.g. /joint_states.' },
         verbose: { type: 'boolean', default: false, description: 'Detailed QoS and participant info (-v).' },
@@ -1104,7 +1104,7 @@ export function createRos2Tools(deps: ToolDeps) {
     }),
     ros2Tool(deps, {
       name: 'ros2_topic_echo',
-      description: 'Sample one message from a topic (`ros2 topic echo <topic> --once`). Returns parsed JSON when possible. QoS overrides (--qos-reliability / --qos-durability) let you read TRANSIENT_LOCAL latched topics that volatile subscribers would miss.',
+      description: 'Sample one message from a topic (`ros2 topic echo <topic> --once`). Returns parsed JSON when possible. QoS overrides (--qos-reliability / --qos-durability) let you read TRANSIENT_LOCAL latched topics that volatile subscribers would miss. For message + rate + pub/sub counts together, use `ros2_topic_sample`.',
       parameters: {
         topic: { type: 'string', required: true, description: 'Topic name, e.g. /joint_states.' },
         field: { type: 'string', default: '', description: 'Optional YAML field path to print, e.g. position.' },
@@ -1357,6 +1357,38 @@ export function createRos2Tools(deps: ToolDeps) {
       runOpts: () => ({ timeoutMs: 60000 }),
       parse: (res) => parseJsonOrRaw(res.stdout),
       onNonZero: (res) => ({ ok: false, message: 'topology snapshot failed', detail: res.stderr.trim() || res.stdout.trim() }),
+    }),
+    ros2Tool(deps, {
+      name: 'ros2_topic_sample',
+      description:
+        'Sample one or more topics in ONE call: message type, publisher/subscriber counts, measured publish rate and the latest message payload. This is `ros2_topic_info` + `ros2_topic_echo` + `ros2_topic_hz` in a single round-trip; call those separately when you only need one of the three.',
+      bin: 'python3',
+      parameters: {
+        topic: { type: 'string', required: true, description: 'Topic name, or several comma-separated, e.g. "/chatter,/cmd_vel".' },
+        windowS: { type: 'number', description: 'Seconds to listen for messages (default 4).' },
+      },
+      buildArgs: (params) => [
+        topologyHelperPath(),
+        '--sample', String(params.topic),
+        '--sample-window', String(params.windowS ?? '4'),
+      ],
+      runOpts: () => ({ timeoutMs: 60000 }),
+      parse: (res) => {
+        const value = parseJsonOrRaw(res.stdout)
+        const samples = (value as { samples?: unknown } | null)?.samples
+        if (samples === undefined || samples === null) return value
+        const out: Record<string, JsonValue> = { samples: samples as JsonValue }
+        out.count = Object.keys(samples as Record<string, unknown>).length
+        return out
+      },
+      onNonZero: (res) => {
+        const out: Record<string, JsonValue> = {
+          message: 'topic sampling failed',
+          detail: res.stderr.trim() || res.stdout.trim(),
+        }
+        out.samples = {}
+        return out
+      },
     }),
     ros2Tool(deps, {
       name: 'ros2_doctor',
@@ -1850,7 +1882,7 @@ function makeTopicHzTool(deps: ToolDeps) {
   return defineTool({
     name: 'ros2_topic_hz',
     description:
-      'Measure the publish frequency of a topic (`ros2 topic hz <topic>`). Runs for `timeoutMs` (default 8s) and returns the measured rate (average/min/max/std dev/messages over the window) — the natural termination is the timeout, reported as a successful measurement. Read-only, no approval.',
+      'Measure the publish frequency of a topic (`ros2 topic hz <topic>`). Runs for `timeoutMs` (default 8s) and returns the measured rate (average/min/max/std dev/messages over the window) — the natural termination is the timeout, reported as a successful measurement. Read-only, no approval. When you also want a sample message and the pub/sub counts, `ros2_topic_sample` gets all of it in one call.',
     parameters: {
       topic: { type: 'string', required: true, description: 'Topic name, e.g. /joint_states.' },
       window: { type: 'number', default: 0, description: 'Sliding window size (0 = no window).' },

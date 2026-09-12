@@ -61,6 +61,28 @@ def resolve_msg_type(type_str: str):
         return None
 
 
+def message_to_dict(msg) -> dict:
+    """A ROS message as plain JSON data, with a repr fallback."""
+    try:
+        from rosidl_runtime_py.convert import message_to_ordereddict
+
+        return dict(message_to_ordereddict(msg))
+    except Exception:
+        return {'repr': str(msg)[:2000]}
+
+
+def sample_callback(record: dict):
+    """Count messages, keeping the first and the most recent sample."""
+
+    def callback(msg) -> None:
+        record['count'] += 1
+        if record['first'] is None:
+            record['first'] = message_to_dict(msg)
+        record['last'] = message_to_dict(msg)
+
+    return callback
+
+
 def derive_actions(services: list[dict], topics: list[dict]) -> list[dict]:
     """Derive action servers from the hidden `_action/*` services and topics.
 
@@ -104,6 +126,7 @@ def build_snapshot(
     params_limit: int,
     include_hidden: bool = False,
     want_rates: bool = False,
+    want_samples: bool = False,
     only_nodes: tuple[str, ...] = (),
 ) -> dict:
     """Collect the whole topology from an already-discovered node."""
@@ -184,6 +207,8 @@ def build_snapshot(
         snapshot['hidden'] = {k: v for k, v in hidden_names.items() if v}
     if want_rates:
         snapshot['rates'] = getattr(node, '_rates', {})
+    if want_samples:
+        snapshot['samples'] = getattr(node, '_samples', {})
     if want_tf:
         snapshot['tf'] = collect_tf(node)
     if want_params:
@@ -309,6 +334,8 @@ def main() -> int:
     parser.add_argument('--rates', action='store_true', help='measure publish rates for live topics')
     parser.add_argument('--rates-window', type=float, default=3.0)
     parser.add_argument('--rate-topics-limit', type=int, default=40)
+    parser.add_argument('--sample', default='', help='comma-separated topics to sample (message + rate together)')
+    parser.add_argument('--sample-window', type=float, default=4.0)
     parser.add_argument('--params', action='store_true')
     parser.add_argument('--params-limit', type=int, default=8)
     parser.add_argument('--node', default='', help='comma-separated node names to report (default: all)')
@@ -330,6 +357,7 @@ def main() -> int:
     frames: dict = {}
     node._tf_frames = frames
     node._rates = {}
+    node._samples = {}
 
     def record(msg, is_static: bool) -> None:
         for transform in msg.transforms:
@@ -388,8 +416,43 @@ def main() -> int:
                 10,
             )
 
-    # 3) one listen window serves both TF and rates
-    window = max(args.tf_timeout if args.tf else 0.0, args.rates_window if args.rates else 0.0)
+    # 3) explicit sampling: one subscription yields the message AND its rate,
+    #    which is what `topic echo` plus `topic hz` would take two calls for.
+    samples: dict[str, dict] = {}
+    sample_topics = [t.strip() for t in (args.sample or '').split(',') if t.strip()]
+    if sample_topics:
+        types_by_topic = dict(node.get_topic_names_and_types())
+        for topic in sample_topics:
+            types = types_by_topic.get(topic)
+            if not types:
+                samples[topic] = {'topic': topic, 'found': False, 'reason': 'topic not in the graph'}
+                continue
+            message_type = resolve_msg_type(types[0])
+            if message_type is None:
+                samples[topic] = {
+                    'topic': topic, 'found': False, 'types': sorted(types),
+                    'reason': f'unsupported message type {types[0]}',
+                }
+                continue
+            record = {
+                'topic': topic,
+                'found': True,
+                'types': sorted(types),
+                'publishers': node.count_publishers(topic),
+                'subscribers': node.count_subscribers(topic),
+                'count': 0,
+                'first': None,
+                'last': None,
+            }
+            samples[topic] = record
+            node.create_subscription(message_type, topic, sample_callback(record), 10)
+
+    # 4) one listen window serves TF, rates and samples
+    window = max(
+        args.tf_timeout if args.tf else 0.0,
+        args.rates_window if args.rates else 0.0,
+        args.sample_window if sample_topics else 0.0,
+    )
     window_started = time.time()
     deadline = window_started + window
     while time.time() < deadline:
@@ -400,10 +463,16 @@ def main() -> int:
         name: {'count': count, 'hz': round(count / elapsed, 2)}
         for name, count in counts.items()
     }
+    for record in samples.values():
+        if record.get('found'):
+            record['hz'] = round(record['count'] / elapsed, 2)
+            record['window_s'] = round(elapsed, 2)
+    node._samples = samples
 
     only = tuple(part for part in (args.node or '').split(',') if part.strip())
     snapshot = build_snapshot(
-        node, args.tf, args.params, args.params_limit, args.include_hidden, args.rates, only,
+        node, args.tf, args.params, args.params_limit, args.include_hidden, args.rates,
+        bool(sample_topics), only,
     )
     snapshot['counts'] = {
         'nodes': len(snapshot['nodes']),
@@ -415,7 +484,7 @@ def main() -> int:
     }
     snapshot['elapsed_ms'] = _now_ms() - started
 
-    json.dump(snapshot, sys.stdout, ensure_ascii=False)
+    json.dump(snapshot, sys.stdout, ensure_ascii=False, default=str)
     sys.stdout.write('\n')
     node.destroy_node()
     rclpy.shutdown()
