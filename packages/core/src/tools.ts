@@ -28,7 +28,6 @@ import {
   parseLines,
   parseNodeInfo,
   parseTopicList,
-  parseTransforms,
   foldGraph,
   commonScriptPath,
   resultSchema,
@@ -86,21 +85,28 @@ const GUI_PRESETS: Record<string, GuiPreset> = {
   },
 }
 
-function extractTransform(entry: unknown): Record<string, JsonValue> {
-  const e = entry as {
-    transform?: { translation?: unknown; rotation?: unknown }
-    header?: { frame_id?: unknown; stamp?: unknown }
-    child_frame_id?: unknown
-  }
-  const out: Record<string, JsonValue> = { found: true }
-  const parent = typeof e.header?.frame_id === 'string' ? e.header.frame_id : undefined
-  const child = typeof e.child_frame_id === 'string' ? e.child_frame_id : undefined
-  if (parent !== undefined) out.parent = parent
-  if (child !== undefined) out.child = child
-  if (e.transform?.translation !== undefined) out.translation = e.transform.translation as JsonValue
-  if (e.transform?.rotation !== undefined) out.rotation = e.transform.rotation as JsonValue
-  if (e.header?.stamp !== undefined) out.stamp = e.header.stamp as JsonValue
-  return out
+/**
+ * One TF edge as reported by `scripts/ros2_topology.py`, which samples `/tf`
+ * and the latched `/tf_static` in the same process.
+ */
+interface TfFrame {
+  parent: string
+  child: string
+  static?: boolean
+  translation?: JsonValue
+  rotation?: JsonValue
+}
+
+/** Pull the TF frames out of a `ros2_topology.py` snapshot. */
+function tfFramesOf(value: JsonValue): TfFrame[] {
+  const tf = (value as { tf?: { frames?: unknown } } | null)?.tf
+  const frames = tf?.frames
+  return Array.isArray(frames) ? (frames as TfFrame[]) : []
+}
+
+/** The public shape of one listed TF edge. */
+function framePair(frame: TfFrame): { parent: string; child: string; static: boolean } {
+  return { parent: frame.parent, child: frame.child, static: frame.static === true }
 }
 
 function buildInterfaceContent(kind: string, fields: string): { ok: true; content: string } | { ok: false; error: string } {
@@ -169,6 +175,20 @@ async function probeRos2(deps: CoreToolDeps): Promise<{ installed: boolean; vers
 function ptyHelperPath(): string {
   return fileURLToPath(new URL('../scripts/pty_session.py', import.meta.url))
 }
+
+/**
+ * One-process ROS2 topology snapshot (`scripts/ros2_topology.py`).
+ *
+ * Every `ros2 <verb>` spawns a fresh process and re-discovers the graph, so a
+ * whole-system survey through the CLI costs N+1 spawns and N+1 agent
+ * round-trips. This helper does the survey once, in a single rclpy process.
+ */
+function topologyHelperPath(): string {
+  return fileURLToPath(new URL('../scripts/ros2_topology.py', import.meta.url))
+}
+
+/** Seconds to listen for TF while taking a snapshot. */
+const TF_LISTEN_SECONDS = '4'
 
 function ptyDir(): string {
   return path.join(process.env.TMPDIR ?? '/tmp', 'dsh-ros2', 'pty')
@@ -1260,50 +1280,77 @@ export function createRos2Tools(deps: ToolDeps) {
     }),
     ros2Tool(deps, {
       name: 'ros2_tf_list',
-      description: 'List current TF tree edges from the latest /tf sample (`ros2 topic echo /tf --once --field transforms`).',
-      buildArgs: () => ['topic', 'echo', '/tf', '--once', '--field', 'transforms'],
-      runOpts: () => ({ timeoutMs: 8000 }),
+      description:
+        'List TF tree edges by sampling both /tf (dynamic) and the latched /tf_static in one process, so static and dynamic frames are reported together.',
+      bin: 'python3',
+      buildArgs: () => [topologyHelperPath(), '--tf', '--tf-timeout', TF_LISTEN_SECONDS],
+      runOpts: () => ({ timeoutMs: 30000 }),
       parse: (res) => {
-        const frames = parseTransforms(parseJsonOrRaw(res.stdout))
-        return { frames, count: frames.length }
+        const frames = tfFramesOf(parseJsonOrRaw(res.stdout)).map(framePair)
+        return {
+          frames,
+          count: frames.length,
+          static: frames.filter((f) => f.static).length,
+          dynamic: frames.filter((f) => !f.static).length,
+        }
       },
-      onNonZero: (res) => ({ message: 'no /tf sample received (no transforms published yet)', detail: res.stderr.trim() || res.stdout.trim() }),
+      onNonZero: (res) => ({ frames: [], count: 0, message: 'TF snapshot failed', detail: res.stderr.trim() || res.stdout.trim() }),
     }),
     ros2Tool(deps, {
       name: 'ros2_tf_echo',
-      description: 'Look up the transform between two frames from the latest /tf sample (`ros2 topic echo /tf --once --field transforms`). Returns translation and rotation.',
+      description:
+        'Look up the transform between two frames by sampling /tf and /tf_static in one process. Returns translation and rotation, and resolves the inverse edge when only that one exists.',
       parameters: {
         target: { type: 'string', required: true, description: 'Target (child) frame, e.g. /base_link.' },
         source: { type: 'string', required: true, description: 'Source (parent) frame, e.g. /map.' },
       },
-      buildArgs: () => ['topic', 'echo', '/tf', '--once', '--field', 'transforms'],
-      runOpts: () => ({ timeoutMs: 8000 }),
+      bin: 'python3',
+      buildArgs: () => [topologyHelperPath(), '--tf', '--tf-timeout', TF_LISTEN_SECONDS],
+      runOpts: () => ({ timeoutMs: 30000 }),
       parse: (res, params) => {
         const target = String(params.target).replace(/^\//, '')
         const source = String(params.source).replace(/^\//, '')
-        const value = parseJsonOrRaw(res.stdout)
-        const transforms = Array.isArray(value) ? value : []
-        const direct = transforms.find((t) => {
-          const header = (t as { header?: { frame_id?: unknown } }).header
-          return (t as { child_frame_id?: unknown }).child_frame_id === target && header?.frame_id === source
-        })
-        if (direct) return extractTransform(direct)
-        const inverse = transforms.find((t) => {
-          const header = (t as { header?: { frame_id?: unknown } }).header
-          return (t as { child_frame_id?: unknown }).child_frame_id === source && header?.frame_id === target
-        })
+        const frames = tfFramesOf(parseJsonOrRaw(res.stdout))
+        const direct = frames.find((f) => f.child === target && f.parent === source)
+        if (direct) {
+          const out: Record<string, JsonValue> = { found: true, ...framePair(direct) }
+          out.translation = direct.translation ?? null
+          out.rotation = direct.rotation ?? null
+          return out
+        }
+        const inverse = frames.find((f) => f.child === source && f.parent === target)
         if (inverse) {
-          const found = extractTransform(inverse)
-          return { ...found, inverted: true }
+          const out: Record<string, JsonValue> = { found: true, ...framePair(inverse), inverted: true }
+          out.translation = inverse.translation ?? null
+          out.rotation = inverse.rotation ?? null
+          return out
         }
-        return {
-          found: false,
-          target,
-          source,
-          availableFrames: parseTransforms(value),
+        const missing: Record<string, JsonValue> = {
+          found: false, target, source, availableFrames: frames.map(framePair),
         }
+        return missing
       },
-      onNonZero: (res) => ({ found: false, message: 'no /tf sample received', detail: res.stderr.trim() || res.stdout.trim() }),
+      onNonZero: (res) => ({ found: false, message: 'TF snapshot failed', detail: res.stderr.trim() || res.stdout.trim() }),
+    }),
+    ros2Tool(deps, {
+      name: 'ros2_topology',
+      description:
+        'Whole-system topology snapshot in ONE call: nodes with their publishers/subscribers/services, topics with message types and pub/sub counts, services, action servers, plus optional TF frames and node parameters. Prefer this over several narrower calls when the question is "what does this system look like".',
+      bin: 'python3',
+      parameters: {
+        tf: { type: 'boolean', description: 'Include TF frames (samples /tf and /tf_static; adds a few seconds).' },
+        params: { type: 'boolean', description: 'Include node parameters (opt-in: costs a service round-trip per node).' },
+        tfTimeout: { type: 'number', description: 'Seconds to listen for TF (default 4).' },
+      },
+      buildArgs: (params) => {
+        const args = [topologyHelperPath()]
+        if (params.tf) args.push('--tf', '--tf-timeout', String(params.tfTimeout ?? TF_LISTEN_SECONDS))
+        if (params.params) args.push('--params')
+        return args
+      },
+      runOpts: () => ({ timeoutMs: 60000 }),
+      parse: (res) => parseJsonOrRaw(res.stdout),
+      onNonZero: (res) => ({ ok: false, message: 'topology snapshot failed', detail: res.stderr.trim() || res.stdout.trim() }),
     }),
     ros2Tool(deps, {
       name: 'ros2_doctor',

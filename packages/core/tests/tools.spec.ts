@@ -143,26 +143,95 @@ describe('command failures', () => {
   })
 })
 
-describe('ros2_tf_echo', () => {
-  const transforms = [
-    { header: { frame_id: 'map' }, child_frame_id: 'odom', transform: { translation: { x: 1 } } },
-    { header: { frame_id: 'odom' }, child_frame_id: 'base_link', transform: { translation: { x: 2 } } },
+describe('ros2_tf_list / ros2_tf_echo (one-process TF snapshot, #14)', () => {
+  // Shape produced by `scripts/ros2_topology.py --tf`, which samples /tf and
+  // the latched /tf_static in the same process.
+  const frames = [
+    { parent: 'odom', child: 'base_link', static: false, translation: { x: 2 }, rotation: { w: 1 } },
+    { parent: 'base_link', child: 'camera_link', static: true, translation: { z: 0.2 }, rotation: { w: 1 } },
   ]
-  it('finds a direct transform', async () => {
-    const run = makeRun(() => ({ stdout: JSON.stringify(transforms) }))
-    const out = await call('ros2_tf_echo', run, { target: '/base_link', source: '/odom' })
-    expect(out.data).toMatchObject({ found: true, parent: 'odom', child: 'base_link' })
+  const snapshot = (list: unknown[] = frames) => JSON.stringify({
+    ok: true,
+    tf: {
+      frames: list,
+      count: list.length,
+      dynamic: list.filter((f) => !(f as { static?: boolean }).static).length,
+      static: list.filter((f) => (f as { static?: boolean }).static).length,
+    },
   })
-  it('finds an inverse transform and marks it', async () => {
-    const run = makeRun(() => ({ stdout: JSON.stringify(transforms) }))
-    const out = await call('ros2_tf_echo', run, { target: '/map', source: '/odom' })
-    expect(out.data).toMatchObject({ found: true, inverted: true })
+
+  it('lists dynamic and latched static frames together', async () => {
+    const run = makeRun((bin, args) => {
+      expect(bin).toBe('python3')
+      expect(args[0]).toContain('ros2_topology.py')
+      return { stdout: snapshot() }
+    })
+    const out = await call('ros2_tf_list', run, {})
+    expect(out.data).toMatchObject({ count: 2, static: 1, dynamic: 1 })
+    expect((out.data as { frames: unknown[] }).frames).toEqual([
+      { parent: 'odom', child: 'base_link', static: false },
+      { parent: 'base_link', child: 'camera_link', static: true },
+    ])
   })
-  it('reports not found with available frames', async () => {
-    const run = makeRun(() => ({ stdout: JSON.stringify(transforms) }))
+
+  it('never reports an empty tree while frames exist (the #14 regression)', async () => {
+    const run = makeRun(() => ({ stdout: snapshot() }))
+    const out = await call('ros2_tf_list', run, {})
+    expect((out.data as { count: number }).count).toBe(2)
+  })
+
+  it('resolves a direct transform', async () => {
+    const run = makeRun(() => ({ stdout: snapshot() }))
+    const out = await call('ros2_tf_echo', run, { target: '/camera_link', source: '/base_link' })
+    expect(out.data).toMatchObject({ found: true, parent: 'base_link', child: 'camera_link', static: true })
+  })
+
+  it('resolves an inverse transform and marks it', async () => {
+    const run = makeRun(() => ({ stdout: snapshot() }))
+    const out = await call('ros2_tf_echo', run, { target: '/odom', source: '/base_link' })
+    expect(out.data).toMatchObject({ found: true, inverted: true, parent: 'odom', child: 'base_link' })
+  })
+
+  it('reports not found with the frames that do exist', async () => {
+    const run = makeRun(() => ({ stdout: snapshot() }))
     const out = await call('ros2_tf_echo', run, { target: '/nope', source: '/map' })
     expect(out.data).toMatchObject({ found: false })
     expect((out.data as { availableFrames: unknown[] }).availableFrames).toHaveLength(2)
+  })
+})
+
+describe('ros2_topology', () => {
+  const snapshot = JSON.stringify({
+    ok: true,
+    nodes: [{ name: '/lab_action', services: ['/lab/fibonacci/_action/send_goal: example_interfaces/action/Fibonacci_SendGoal'] }],
+    topics: [{ name: '/chatter', types: ['std_msgs/msg/String'], publishers: 1, subscribers: 1 }],
+    services: [{ name: '/spawn', types: ['turtlesim/srv/Spawn'] }],
+    actions: [{ name: '/lab/fibonacci', types: ['example_interfaces/action/Fibonacci'], served_by: ['/lab_action'] }],
+    counts: { nodes: 1, topics: 1, services: 1, actions: 1, tf_frames: 0 },
+    elapsed_ms: 12,
+  })
+
+  it('returns the whole topology in one call', async () => {
+    const run = makeRun((bin, args) => {
+      expect(bin).toBe('python3')
+      expect(args[0]).toContain('ros2_topology.py')
+      return { stdout: snapshot }
+    })
+    const out = await call('ros2_topology', run, {})
+    expect(out.data).toMatchObject({ ok: true, counts: { nodes: 1, topics: 1, actions: 1 } })
+  })
+
+  it('only asks the helper for TF and parameters when requested', async () => {
+    const seen: string[][] = []
+    const run = makeRun((_bin, args) => {
+      seen.push(args)
+      return { stdout: snapshot }
+    })
+    await call('ros2_topology', run, {})
+    await call('ros2_topology', run, { tf: true, tfTimeout: 2, params: true })
+    expect(seen[0]).not.toContain('--tf')
+    expect(seen[0]).not.toContain('--params')
+    expect(seen[1]).toEqual(expect.arrayContaining(['--tf', '--tf-timeout', '2', '--params']))
   })
 })
 
@@ -254,6 +323,7 @@ describe('tool inventory', () => {
     expect(names).toContain('ros2_interface_show')
     expect(names).toContain('ros2_tf_list')
     expect(names).toContain('ros2_tf_echo')
+    expect(names).toContain('ros2_topology')
     expect(names).toContain('ros2_doctor')
     expect(names).toContain('ros2_bag_info')
     expect(names).toContain('ros2_graph')
@@ -299,7 +369,7 @@ describe('tool inventory', () => {
     expect(names).toContain('ros2_action_type')
     expect(names).toContain('ros2_env_check')
     expect(names).toContain('ros2_workspace')
-    expect(names).toHaveLength(59)
+    expect(names).toHaveLength(60)
   })
 })
 
