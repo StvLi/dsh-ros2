@@ -9,6 +9,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { Config, type SafetyPackageConfig } from './config.js'
 import { makeRun, type ApprovalRequest, type JobsApi } from 'dsh-ros2-common'
 import { createRos2Tools, type SafetyToolDeps } from './tools.js'
+import { robotSafetyProcedureSkill } from './skill.js'
 
 export const name = 'dsh-ros2-safety'
 
@@ -38,5 +39,12 @@ export function apply(ctx: Context, config: SafetyPackageConfig): void {
   ctx.effect(() => {
     const disposers = tools.map((tool) => ctx.tools.register(tool))
     return () => disposers.forEach((dispose) => dispose())
+  })
+
+  // The safety journey's carrier, registered with the bundle that ships the
+  // tools it routes to — a diagnostics-only install never sees it.
+  ctx.effect(() => {
+    const disposer = ctx.skills.register(robotSafetyProcedureSkill)
+    return () => disposer()
   })
 }

@@ -9,6 +9,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { Config, type MoveitPackageConfig } from './config.js'
 import { makeRun, type ApprovalRequest, type JobsApi } from 'dsh-ros2-common'
 import { createRos2Tools } from './tools.js'
+import { robotMotionControlSkill } from './skill.js'
 
 export const name = 'dsh-ros2-moveit'
 
@@ -29,5 +30,12 @@ export function apply(ctx: Context, config: MoveitPackageConfig): void {
   ctx.effect(() => {
     const disposers = tools.map((tool) => ctx.tools.register(tool))
     return () => disposers.forEach((dispose) => dispose())
+  })
+
+  // The motion journey's carrier, registered with the bundle that ships the
+  // tools it routes to — a core-only install never sees it.
+  ctx.effect(() => {
+    const disposer = ctx.skills.register(robotMotionControlSkill)
+    return () => disposer()
   })
 }

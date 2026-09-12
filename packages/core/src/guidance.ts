@@ -94,8 +94,13 @@ const OUTRO: readonly string[] = [
 
 /** Skills shipped alongside the families above, listed only when present. */
 const SKILLS: readonly { readonly probe: string; readonly names: readonly string[] }[] = [
-  { probe: 'ros2_topic_list', names: ['ros2-diagnostics'] },
+  {
+    probe: 'ros2_topic_list',
+    names: ['ros2-diagnostics', 'ros2-bringup-recovery', 'ros2-liveness-triage', 'ros2-tf-integrity'],
+  },
   { probe: 'robot_load', names: ['robot-registration', 'robot-retrieval'] },
+  { probe: 'moveit_move', names: ['robot-motion-control'] },
+  { probe: 'robot_safety_state', names: ['robot-safety-procedure'] },
   { probe: 'ros2_vision_describe', names: ['robot-state-vision-analysis'] },
 ]
 

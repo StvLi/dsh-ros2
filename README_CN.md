@@ -39,14 +39,14 @@
 
 ## 特性一览
 
-- **零侵入诊断**：79 个工具覆盖 ROS2 调试的绝大多数场景，从"包装了没有"到"这一帧话题里是什么"，一条命令一个结果；
+- **零侵入诊断**：83 个工具覆盖 ROS2 调试的绝大多数场景，从"包装了没有"到"这一帧话题里是什么"，一条命令一个结果；
 - **全图拓扑**：`ros2_graph` 将节点/发布/订阅/服务/动作折叠为一份 JSON，几秒看清系统结构；
 - **审批门控的写操作**：构建、装依赖、生成消息骨架等写操作通过 DSH 审批服务，fail-closed，拒绝即失败；
 - **可视化即服务**：无头也能"看"——截图/多模态描述/窗口交互全部本地化，不依赖远程显示；
 - **并行实时视觉**：VLM 跑在独立 ROS2 进程（`vlm_node`，服务 `/vlm/describe`），图像来自话题（`sensor_msgs/Image` / `CompressedImage`），`vision_bringup` 自动为每个图像话题建桥，无头可用；
 - **RViz2 离屏渲染（llvmpipe ~22 Hz，GPU 直通 30 Hz 满帧）**：真实 rviz 渲染内核（`rviz_common` + OGRE）在虚拟显示器下渲染任意 `.rviz` 场景并发布为图像话题——不截图、不依赖 X11 窗口层级。**性能优化**：open3d 低模 mesh（`scripts/simplify_visual_meshes.py`）+ OGRE 直接读像素（跳过 PNG 中转）+ 消除双重渲染 → 动作渲染 1.9 → llvmpipe ~22 Hz（11×），NVIDIA GPU 直通达 **30 Hz 满帧**（v0.9.3），内存 -2.5×；
 - **实时安全框架**（`safety_monitor` 节点 + `robot_safety_*` 工具，详见[安全框架](#安全框架)）：分层防御——工具层安全门（执行前查 `/safety/state`）→ 反应式监视（轨迹跟踪/堵转 + 迟滞、关节反馈丢失、看门狗、可选力矩）→ 事件驱动 VLM 语义仲裁 → 人工仲裁。锁存 `NORMAL`/`LOCKED` 状态机（锁存直至人工解锁；非致命事件永不锁死）；阈值/话题/锁动作全部按机器人在档案 `safety` 段注册；几何预检（关节限位/速度/FK 自碰撞）为预留层；
-- **内置技能**：`ros2-diagnostics`（何时用哪个工具、如何由宽到窄排查）与 `robot-state-vision-analysis`（状态读取 → 离屏渲染 → VLM → 交叉验证的完整流水线）。
+- **内置技能（9）**：每个反复出现的"旅程"一个载体——`ros2-diagnostics`（何时用哪个工具、由宽到窄排查）、`ros2-bringup-recovery`（环境 → 启动 → 验证）、`ros2-liveness-triage`（一两次调用量出速率与载荷）、`ros2-tf-integrity`（边、查表、定位缺失广播者）、`robot-registration` / `robot-retrieval`（本体档案与即时复用）、`robot-state-vision-analysis`（状态 → 渲染 → VLM → 交叉验证）、`robot-motion-control`（唯一的 规划 → 校验 → 审批 → 执行 → 验证 路径）与 `robot-safety-procedure`（锁存、LOCKED、边界声明）。
 
 ---
 
@@ -402,9 +402,14 @@ snapshot` 固化聚合层；`robot_topology learn` 在使用中逐个追加重�
 | Skill | 内容 |
 | --- | --- |
 | `ros2-diagnostics` | 何时用哪个工具、如何由宽到窄定位、排查"话题无数据"/消息格式不匹配/TF 问题的方法论 |
+| `ros2-bringup-recovery` | 旅程"起不来"：`ros2_env_check` → `ros2_workspace use`（会话内切换，不重启）→ 启动 → 作业跟踪 → doctor 验证 |
+| `ros2-liveness-triage` | 旅程"还活着吗 / 为什么没数据"：`ros2_topology {rates}` → `ros2_topic_sample` → 读发布者数量/速率/QoS，并说明造成误报的超时语义 |
+| `ros2-tf-integrity` | 旅程"TF 树对不对"：帧与图并列、`/tf` 与 latch 的 `/tf_static` 边、反向边查表、把缺失的边定位到广播者 |
 | `robot-state-vision-analysis` | 完整流水线：状态读取 → 离屏渲染 → 传 VLM → 交叉验证（含 Jazzy `Description Source/Topic`、URDF↔TF 帧名一致、`file://` mesh、视距、`FM frames` 信号、校准后的零位语义） |
 | `robot-registration` | 首接触流程：问名称/URDF → 采集本体 + 零位语义校准 → `robot_register` → 拓扑基线快照 |
 | `robot-retrieval` | 即时加载档案（`robot_load`）并拉起渲染/诊断/运动；读取并渐进学习通信拓扑（`robot_topology`） |
+| `robot-motion-control` | 旅程"能不能动 / 怎么动"：`moveit_status` → 发现规划组 → `planOnly` → `motion_validate` → 唯一的审批与 `/safety/state` 门控执行路径 → pass/fail 验证 |
+| `robot-safety-procedure` | 旅程"安全吗"：先读 `robot_safety_state`，LOCKED 即停止信号，VLM 仲裁（`uncertain` ≠ `safe`），六层防御与明确的边界声明 |
 
 ---
 
@@ -453,8 +458,8 @@ dsh-ros2/                      # pnpm monorepo（工作区根，private）
 ## 插件拆分（9 个包）
 
 自 v0.15.0 起插件为 **pnpm monorepo**，含 9 个 npm 包（见
-[`docs/plugin-split-plan.md`](docs/plugin-split-plan.md)，ISP 收紧版）：79 工具 +
-4 skills 全部保留、**名称与行为不变**。按需安装域包（或安装 `dsh-ros2` 聚合包获得全集）：
+[`docs/plugin-split-plan.md`](docs/plugin-split-plan.md)，ISP 收紧版）：83 工具 +
+9 skills（原有 4 个 skill 的名称与行为**不变**）。按需安装域包（或安装 `dsh-ros2` 聚合包获得全集）：
 
 - `dsh-ros2-common` 为纯库（非 cordis bundle）——共享 runner/解析/toolkit 与
   `scripts/robot_profile.py`（零复制）；

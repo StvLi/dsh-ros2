@@ -8,12 +8,29 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 
 ### Added
 
+- **5 个 journey skill**（issue #19 切片 1：按"反复出现的旅程"组织能力面）：
+  `ros2-bringup-recovery`（"起不来"：`ros2_env_check` → 会话内 `ros2_workspace use`，不改配置不重启 → 启动/作业跟踪 → doctor 验证）、
+  `ros2-liveness-triage`（"还活着吗/为什么没数据"：一次 `ros2_topology {rates}` + 一次 `ros2_topic_sample`，并说明造成误报的超时语义）、
+  `ros2-tf-integrity`（"TF 树对不对"：`/tf` 与 latch 的 `/tf_static`、反向边查表、把缺失的边定位到广播者）——三者由 `dsh-ros2-core` 注册；
+  `robot-motion-control`（"能不能动/怎么动"：唯一的 规划 → 确定性校验 → 审批 → 指纹复验 → 执行 → 看门狗 → 验证 路径与两道闸门）——由 `dsh-ros2-moveit` 注册；
+  `robot-safety-procedure`（"安全吗"：先读锁存、LOCKED 即停止信号、`uncertain` ≠ `safe`、六层防御与明确的边界声明）——由 `dsh-ros2-safety` 注册。
+  每个载体都由**提供其所路由工具的 bundle** 注册，因此只装 core 的安装不会看到 moveit/safety 载体（与系统提示"只广告已挂载族"的规则一致）。
+- **journey 目录与组合不变量**（issue #19 切片 3）：`packages/dsh-ros2/tests/journey-catalogue.ts` 为唯一事实来源，
+  `journeys.spec.ts` 断言每个旅程的 L1 入口与 primitives 仍是已注册工具、每个载体在其 bundle 中既定义又有 `ctx.skills.register(...)` 接线、
+  无未覆盖旅程且无未编目技能，并断言 README / README_CN / 包描述中的工具与技能数量同代码树一致（重命名或计数漂移即失败）。
+- `docs/journey-catalogue.md`：旅程目录（8 旅程 / 9 载体）、L0–L3 分层、以及 L3 缩面的两种机制
+  （安装级 bundle 挂载 vs 作用域级 `tools.restrict`）**已核实**的契约与配方。
 - `packages/vision/scripts/requirements.txt`：为离屏低模脚本
   `simplify_visual_meshes.py` 显式声明运行依赖 **`open3d`**（此前仅在脚本 docstring
   提到 `pip install open3d`，安全扫描建议补齐声明；随 `scripts/` 一并发布）。
 
 ### Changed
 
+- **工具/技能计数校正**：README / README_CN / `packages/dsh-ros2/package.json` / `packages/core/package.json` / 聚合包源码注释
+  由 **79 tools + 4 skills** 更新为 **83 tools + 9 skills**（core 59 → 61）；README / README_CN 的"内置技能"表补齐到 9 项。
+  漂移由本轮新增的组合不变量测试捕获（见 Added）。
+- 工作区 vitest 用例 **210 → 214 例**（+4 journey 组合不变量）；顺带校正：CHANGELOG 上一轮记录的"195 例"未随
+  #16–#18 的测试增补同步，实测基数为 210 例。
 - README / README_CN 开发章节：显式说明安装需 **pnpm 11.x**（仓库固定
   `packageManager: pnpm@11.22.0`，CI 用 `pnpm/action-setup@v6` 安装匹配版本）与
   Node `^22.19 || >=24`。
@@ -35,6 +52,10 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 
 ### Fixed
 
+- `ros2-diagnostics` 技能内容**截断**（`2ebe3a4` 引入）：`## MoveIt2 motions` 小节头与其首句在替换时被删除，却留下了残句
+  （`s \`srdf\` for a direct path), returns …`）。该残句还**无条件**介绍 `moveit_discover` / `moveit_move`——技能内容是静态的
+  （不同于按已注册工具重建的系统提示），所以只装 core 的安装会被引导去移动它根本没有挂载的机器人。已删除残句；
+  运动引导改由 `dsh-ros2-moveit` 的 `robot-motion-control` 载体承担。
 - `ros2_process_cleanup` 的 `signal` 参数（安全扫描发现）：该值此前**未加引号**直接
   插进 `bash -lc` 清理脚本（`kill -${signal} $pids`），传入 `"TERM; echo pwned"` 之类
   的值即可在批准后、存在匹配进程时**执行任意 shell 命令**。现只接受合法信号名
