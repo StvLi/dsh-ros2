@@ -247,6 +247,41 @@ describe('ros2_topology', () => {
   })
 })
 
+describe('ros2_topic_sample', () => {
+  const sampled = JSON.stringify({
+    samples: {
+      '/chatter': {
+        topic: '/chatter', found: true, types: ['std_msgs/msg/String'],
+        publishers: 1, subscribers: 1, count: 4, hz: 0.99, window_s: 4.02,
+        last: { data: 'hi' },
+      },
+    },
+  })
+
+  it('returns message, rate and counts from a single call', async () => {
+    const run = makeRun((bin, args) => {
+      expect(bin).toBe('python3')
+      expect(args[0]).toContain('ros2_topology.py')
+      expect(args).toEqual(expect.arrayContaining(['--sample', '/chatter']))
+      return { stdout: sampled }
+    })
+    const out = await call('ros2_topic_sample', run, { topic: '/chatter' })
+    expect(out.data).toMatchObject({ count: 1 })
+    const samples = (out.data as { samples: Record<string, Record<string, unknown>> }).samples
+    expect(samples['/chatter']).toMatchObject({ hz: 0.99, publishers: 1, types: ['std_msgs/msg/String'] })
+  })
+
+  it('passes several topics and a custom window through', async () => {
+    const seen: string[][] = []
+    const run = makeRun((_bin, args) => {
+      seen.push(args)
+      return { stdout: sampled }
+    })
+    await call('ros2_topic_sample', run, { topic: '/a,/b', windowS: 2 })
+    expect(seen[0]).toEqual(expect.arrayContaining(['--sample', '/a,/b', '--sample-window', '2']))
+  })
+})
+
 describe('ros2_install', () => {
   it('check reports installed when ros2 --version succeeds', async () => {
     const run = makeRun(() => ({ stdout: 'ros2 0.33.2\n' }))
@@ -336,6 +371,7 @@ describe('tool inventory', () => {
     expect(names).toContain('ros2_tf_list')
     expect(names).toContain('ros2_tf_echo')
     expect(names).toContain('ros2_topology')
+    expect(names).toContain('ros2_topic_sample')
     expect(names).toContain('ros2_doctor')
     expect(names).toContain('ros2_bag_info')
     expect(names).toContain('ros2_graph')
@@ -381,7 +417,7 @@ describe('tool inventory', () => {
     expect(names).toContain('ros2_action_type')
     expect(names).toContain('ros2_env_check')
     expect(names).toContain('ros2_workspace')
-    expect(names).toHaveLength(60)
+    expect(names).toHaveLength(61)
   })
 })
 
