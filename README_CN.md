@@ -104,12 +104,15 @@ npm install dsh-ros2-state dsh-ros2-sidecar --registry=https://registry.npmmirro
 > `dsh-ros2-vision`（视觉流水线）· `dsh-ros2-state`（状态客户端）·
 > `dsh-ros2-sidecar`（数据面守护进程）。
 
-> **提示词引导**：`dsh-ros2` 聚合包会额外向 system prompt 注入一段分节，引导模型
-> 用本工具链做 ROS2 相关工作——用 `ros2_*_list`/`ros2_graph` 发现、用
-> `ros2_topic_*`/`ros2_param_*` 采样、用 `moveit_*`/`robot_safety_*` 规划与执行
-> （均需审批，并以 `/safety/state` 为闸门）——而不是临时拼 `ros2` CLI 或私自写
-> `rclpy` 脚本。该分节与插件**同生命周期**注册：禁用/卸载插件即从提示词中移除，
-> 不会留下残留。精简安装（如只装 `dsh-ros2-core`）不含此引导。
+> **提示词引导**：`dsh-ros2-core` 会向 system prompt 注入一段分节，引导模型用本
+> 工具链做 ROS2 相关工作——用 `ros2_*` 发现图、用 `robot_load`/`robot_topology`
+> 载入机体、用 `moveit_*`/`robot_safety_*` 规划与执行（均需审批，并以
+> `/safety/state` 为闸门）——而不是临时拼 `ros2` CLI 或私自写 `rclpy` 脚本。
+> 因此**凡是装了 core 的安装形态都带它**（含 `dsh-ros2` 聚合包）。
+>
+> 该分节在**每次组装的当下**依据已注册的工具重建，所以只装 core 时不会被引导去调用
+> 它并未随附的 `moveit_move`/`robot_safety_*`。它与插件**同生命周期**注册：
+> 禁用/卸载插件即从提示词中移除，不会留下残留。
 
 ### 最小配置（per-bundle，整体对象替换）
 
