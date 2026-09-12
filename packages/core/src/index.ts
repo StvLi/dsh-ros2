@@ -10,6 +10,7 @@ import { makeRun, type ApprovalRequest, type JobsApi, type VisionProvider } from
 import { GuiManager } from './gui.js'
 import { createRos2Tools, type CoreToolDeps } from './tools.js'
 import { ros2DiagnosticsSkill } from './skill.js'
+import { GUIDANCE_SECTION, buildGuidanceText } from './guidance.js'
 
 export const name = 'dsh-ros2-core'
 
@@ -20,6 +21,18 @@ export { Config }
 export type { CoreConfig }
 
 const VISION_SERVICE = 'dshRos2.vision'
+
+/** The slice of the harness `systemPrompt` service this bundle contributes to. */
+interface PromptSection {
+  readonly name: string
+  readonly order: number
+  readonly text: string | ((context: unknown) => string)
+}
+
+interface SystemPromptService {
+  section(section: PromptSection): () => void
+  getSectionOrder(name: string): number
+}
 
 export function apply(ctx: Context, config: CoreConfig): void {
   const run = makeRun(config)
@@ -57,5 +70,23 @@ export function apply(ctx: Context, config: CoreConfig): void {
   ctx.effect(() => {
     const disposer = ctx.skills.register(ros2DiagnosticsSkill)
     return () => disposer()
+  })
+
+  // Steer ROS2 work to this toolchain for as long as core is mounted. The text
+  // is rebuilt on every assembly from the tools that are registered right now,
+  // so a core-only install never advertises families it did not ship (and the
+  // aggregate, which mounts the other bundles, advertises all of them).
+  //
+  // `ctx.inject()` runs the callback in a fiber scoped to this plugin, and
+  // `systemPrompt.section()` registers its effect in the *calling* context —
+  // Cordis' service tracker rebinds the service's `this.ctx` to the caller.
+  // Disabling the plugin therefore disposes the section with it: no residue.
+  ctx.inject(['systemPrompt'], (promptCtx) => {
+    const { systemPrompt } = promptCtx as unknown as { systemPrompt: SystemPromptService }
+    systemPrompt.section({
+      name: GUIDANCE_SECTION,
+      order: systemPrompt.getSectionOrder('TOOLS_SDK'),
+      text: () => buildGuidanceText((tool) => ctx.tools.get(tool) !== undefined),
+    })
   })
 }
