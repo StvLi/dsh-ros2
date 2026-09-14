@@ -293,15 +293,90 @@ def safety_set(name: str, key: str, value_json: str) -> dict:
             "problems": validate_safety(safety), "profile_path": path}
 
 
-def find_tf_root():
-    """Best-effort TF root from tf_static sample (child of the first edge)."""
-    ok, out, _ = ros2("topic", "echo", "/tf_static", "--once", "--field", "transforms")
+# --- TF root resolution -----------------------------------------------------
+# `ros2 topic echo` emits two different shapes depending on how it is invoked:
+#   * plain (`ros2 topic echo /tf_static --once`): YAML,
+#     `frame_id: base_link` / `child_frame_id: chest`
+#   * `--field transforms` on Jazzy: a Python repr,
+#     `frame_id='base_link'), child_frame_id='chest'`
+# The old parser split every line on ":" and took field 1, which raised an
+# uncaught IndexError on the repr shape and silently returned "" on any line
+# without a colon (issue #21). Matching both shapes keeps the parse independent
+# of the CLI's output format.
+_TF_FRAME_TOKEN_RE = re.compile(
+    r"(?<![\w.])(child_frame_id|frame_id)\s*[=:]\s*(['\"]?)([^'\"\s,)\]}]+)\2"
+)
+
+
+def parse_tf_edges(out: str):
+    """Parent→child TF edges from a `ros2 topic echo` sample.
+
+    Accepts both output shapes above. Returns [(parent, child), ...] in
+    emission order; a malformed/empty sample yields fewer edges (or none)
+    instead of raising, so a silent topic can never crash registration.
+    """
+    edges = []
+    parent = None
+    for tok in _TF_FRAME_TOKEN_RE.finditer(out or ""):
+        kind, value = tok.group(1), tok.group(3)
+        if kind == "child_frame_id":
+            edges.append((parent or "", value))
+            parent = None
+        else:
+            if parent is not None:  # a second parent with no child between them
+                edges.append((parent, ""))
+            parent = value
+    if parent is not None:
+        edges.append((parent, ""))
+    return edges
+
+
+def tf_root_from_edges(edges) -> str:
+    """The TF root: the frame that appears as a parent but never as a child.
+
+    This replaces the old "child of the first edge", which returned a leaf
+    frame rather than the root. Returns '' when no such frame exists (empty
+    sample, or a cycle where every frame is also somebody's child).
+    """
+    parents = {p for p, _ in edges if p}
+    children = {c for _, c in edges if c}
+    roots = sorted(parents - children)
+    return roots[0] if roots else ""
+
+
+def urdf_root_link(urdf_xml: str) -> str:
+    """URDF root link: declared as a link but never as a joint's child.
+
+    Sampling-free fallback for when no TF broadcaster is up yet.
+    """
+    if not urdf_xml:
+        return ""
+    try:
+        body = parse_urdf(urdf_xml)
+    except ET.ParseError:
+        return ""
+    children = {j.get("child") for j in body["joints"] if j.get("child")}
+    roots = sorted(set(body["links"]) - children)
+    return roots[0] if roots else ""
+
+
+def find_tf_root(urdf_xml: str = "") -> dict:
+    """Best-effort TF root, decoupled from the `ros2 topic echo` output shape.
+
+    Samples `/tf_static` without `--field` (the parseable YAML shape) and falls
+    back to the URDF root link when the sample carries no edges. Reports which
+    source answered, so an empty root is attributable instead of silent.
+    Returns {"root": str, "source": "tf_static" | "urdf" | "unresolved"}.
+    """
+    ok, out, _ = ros2("topic", "echo", "/tf_static", "--once")
     if ok and out.strip():
-        for line in out.splitlines():
-            line = line.strip()
-            if "child_frame_id" in line:
-                return line.split(":", 1)[1].strip().strip("'\"")
-    return ""
+        root = tf_root_from_edges(parse_tf_edges(out))
+        if root:
+            return {"root": root, "source": "tf_static"}
+    fallback = urdf_root_link(urdf_xml)
+    if fallback:
+        return {"root": fallback, "source": "urdf"}
+    return {"root": "", "source": "unresolved"}
 
 
 def list_image_topics():
@@ -666,6 +741,7 @@ def register(name: str, urdf: str, srdf: str, description: str) -> dict:
     srdf_resolved = resolve_srdf(srdf)
     groups = parse_srdf_groups(srdf_resolved) if srdf_resolved else {}
     zero = read_zero_pose()
+    tf = find_tf_root(urdf_xml)
 
     profile = {
         "robot": {
@@ -675,7 +751,8 @@ def register(name: str, urdf: str, srdf: str, description: str) -> dict:
             "urdf": urdf or "/robot_description (live)",
             "urdf_links": body["links"],
             "joints": body["joints"],
-            "tf_root": find_tf_root(),
+            "tf_root": tf["root"],
+            "tf_root_source": tf["source"],
             "cameras": list_image_topics(),
             "moveit": {
                 "srdf": srdf_resolved,
@@ -690,7 +767,18 @@ def register(name: str, urdf: str, srdf: str, description: str) -> dict:
         import yaml as pyyaml
         f.write(f"# robot body profile (written by dsh-ros2 robot_profile)\n")
         pyyaml.safe_dump(profile, f, allow_unicode=True, sort_keys=False)
-    return {"ok": True, "written": path, "robot": profile["robot"]}
+    # Fail loud instead of silently shipping an unusable tf_root: downstream
+    # (offscreen Fixed Frame, TF baselines) reads it from the written profile.
+    warnings = []
+    if not tf["root"]:
+        warnings.append(
+            "未能解析 TF 根帧：/tf_static 无数据且 URDF 也推不出根 link，档案已写入但 tf_root 为空"
+            "（离屏渲染的 Fixed Frame 与 TF 完整性基线会失效）。请确认广播者在线后重新 register。")
+    elif tf["source"] == "urdf":
+        warnings.append(
+            f"/tf_static 未采样到边，tf_root 回退为 URDF 根 link「{tf['root']}」；"
+            "若机器人 TF 根与 URDF 根不同，请在广播者在线后重新 register。")
+    return {"ok": True, "written": path, "robot": profile["robot"], "warnings": warnings}
 
 
 def load(name: str):
@@ -709,7 +797,15 @@ def load(name: str):
             robot["link_count"] = len(robot["urdf_links"])
         if "joints" in robot:
             robot["joint_count"] = len(robot["joints"])
-        return {"ok": True, "robot": robot, "profile_path": path}
+        # An empty/stale tf_root is a use-time hazard, not just a registration
+        # one: surface it whenever the profile is loaded (issue #21).
+        warnings = []
+        if not robot.get("tf_root"):
+            warnings.append(
+                "档案 tf_root 为空（来源：" + str(robot.get("tf_root_source") or "未记录") +
+                "）：离屏渲染无法设置 Fixed Frame，TF 基线校验不可用；"
+                "请确认广播者在线后重新 register。")
+        return {"ok": True, "robot": robot, "profile_path": path, "warnings": warnings}
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "error": f"解析档案失败: {e}"}
 
@@ -760,6 +856,47 @@ def selftest() -> int:
           _raises(lambda: read_profile_yaml("../evil")))
     check("_profile_path() rejects an unsafe name",
           _raises(lambda: _profile_path("a/b")))
+
+    # --- issue #21: TF-root parsing must not depend on the echo output shape ---
+    # The exact Jazzy `--field transforms` sample from the issue (a Python repr
+    # whose single line has no ":" after child_frame_id) used to raise
+    # IndexError inside find_tf_root().
+    jazzy_repr = (
+        "[geometry_msgs.msg.TransformStamped(header=std_msgs.msg.Header("
+        "stamp=builtin_interfaces.msg.Time(sec=1787195223, nanosec=730945432), "
+        "frame_id='base_link'), child_frame_id='chest', "
+        "transform=geometry_msgs.msg.Transform(...))]")
+    yaml_sample = (
+        "transforms:\n- header:\n    stamp:\n      sec: 1787195223\n"
+        "      nanosec: 730945432\n    frame_id: base_link\n"
+        "  child_frame_id: chest\n  transform:\n    translation:\n      x: 0.0\n"
+        "- header:\n    frame_id: base_link\n  child_frame_id: camera_link\n")
+    check("parse_tf_edges reads the Jazzy repr shape",
+          parse_tf_edges(jazzy_repr) == [("base_link", "chest")])
+    check("parse_tf_edges reads the YAML shape",
+          parse_tf_edges(yaml_sample) == [("base_link", "chest"), ("base_link", "camera_link")])
+    check("parse_tf_edges is empty (not raising) on an empty sample",
+          parse_tf_edges("") == [])
+    check("parse_tf_edges is empty (not raising) on noise",
+          parse_tf_edges("no transforms here") == [])
+    check("tf_root_from_edges returns the parent-only frame",
+          tf_root_from_edges([("base_link", "chest"), ("base_link", "camera_link")]) == "base_link")
+    check("tf_root_from_edges follows a two-hop chain to the real root",
+          tf_root_from_edges([("base_link", "chest"), ("chest", "camera_link")]) == "base_link")
+    check("tf_root_from_edges is empty for an empty tree",
+          tf_root_from_edges([]) == "")
+    check("tf_root_from_edges is empty for a cycle",
+          tf_root_from_edges([("a", "b"), ("b", "a")]) == "")
+    check("find_tf_root's parser does not raise on the issue's repr sample",
+          tf_root_from_edges(parse_tf_edges(jazzy_repr)) == "base_link")
+    check("urdf_root_link takes the link that is never a joint child",
+          urdf_root_link('<robot name="r"><link name="base_link"/><link name="chest"/>'
+                         '<joint name="j" type="fixed"><parent link="base_link"/>'
+                         '<child link="chest"/></joint></robot>') == "base_link")
+    check("urdf_root_link tolerates a malformed URDF",
+          urdf_root_link("<robot") == "")
+    check("urdf_root_link tolerates an empty URDF",
+          urdf_root_link("") == "")
     print("SELFTEST " + ("OK" if ok else "FAILED") + " (robot_profile)")
     return 0 if ok else 1
 

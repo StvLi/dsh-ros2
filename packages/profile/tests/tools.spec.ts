@@ -93,6 +93,32 @@ describe('robot_register / robot_load', () => {
     expect((listed.data as { robots: string[] }).robots).toContain('lite')
   })
 
+  it('robot_load lifts an unresolved-tf_root warning to the tool result (issue #21)', async () => {
+    const run = makeRun(() => ({
+      stdout: JSON.stringify({
+        ok: true,
+        robot: { name: 'lite', tf_root: '', tf_root_source: 'unresolved' },
+        profile_path: '/x.yaml',
+        warnings: ['档案 tf_root 为空（来源：unresolved）：离屏渲染无法设置 Fixed Frame'],
+      }),
+    }))
+    const loaded = await call('robot_load', run, { name: 'lite' })
+    expect(loaded.ok).toBe(true)
+    expect(loaded.warnings).toHaveLength(1)
+    expect(loaded.warnings?.[0]).toContain('tf_root 为空')
+    // the raw field stays in data, so nothing is lost for programmatic readers
+    expect((loaded.data as { robot: { tf_root_source: string } }).robot.tf_root_source).toBe('unresolved')
+  })
+
+  it('robot_load adds no warnings for a healthy profile', async () => {
+    const run = makeRun(() => ({
+      stdout: JSON.stringify({ ok: true, robot: { name: 'lite', tf_root: 'base_link' }, warnings: [] }),
+    }))
+    const loaded = await call('robot_load', run, { name: 'lite' })
+    expect(loaded.ok).toBe(true)
+    expect(loaded.warnings).toBeUndefined()
+  })
+
   it('rejects profile names that could escape the profiles directory', async () => {
     const calls: string[][] = []
     let approvals = 0

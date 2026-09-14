@@ -52,6 +52,26 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 
 ### Fixed
 
+- **`robot_profile.py` 的 `find_tf_root()` 在 ROS2 Jazzy 上解析失败**（issue #21，与 issue #14
+  同一根因——当时只修了 TS 侧的 TF 工具，漏了 profile 脚本）：
+  - `/tf_static` 有数据时，`--field transforms` 输出的是**单行 Python repr**
+    （`child_frame_id='chest'`，字段用 `=` 而非 `:`），旧实现按行 `split(":", 1)[1]`
+    直接抛未捕获的 `IndexError`，使 `robot_register` **以异常结束**；
+  - `/tf_static` 静默时旧实现**静默写入空 `tf_root`**，下游（离屏渲染 Fixed Frame、
+    TF 完整性基线）因此拿到空根帧。
+  修复：
+  - 新增与输出格式解耦的纯函数 `parse_tf_edges()`（同时接受 YAML 与 repr 两种形状）、
+    `tf_root_from_edges()` 与 `urdf_root_link()`；`find_tf_root()` 改为**不带 `--field`**
+    采样（默认 YAML 可解析），并返回 `{root, source}`（`tf_static` / `urdf` / `unresolved`）。
+  - **语义修正**：`tf_root` 取"只作父、不作子"的帧（真正的根），而不是旧实现的
+    "第一条边的 child"（那是叶子）；无 TF 可采样时回退为 URDF 根 link。
+  - **不再静默**：`register` 写入 `tf_root_source`，并在根帧为空或回退时返回显式
+    `warnings`；`robot_load` 遇到空 `tf_root` 也会在结果里给出可操作的告警。
+  - 新增 13 项离线自检（含 issue 原文的 Jazzy repr 样本——旧实现在该样本上必抛
+    `IndexError`），随 `dsh-ros2-common` 的 `test` 脚本进入 CI。
+  - 已在**真实 ROS2 Jazzy + `static_transform_publisher`** 上端到端复核：
+    `find_tf_root` → `{root: base_link, source: tf_static}`；停止广播者后 →
+    `{root: base_link, source: urdf}`；旧实现在同一份 live 输入上复现 `IndexError`。
 - `ros2-diagnostics` 技能内容**截断**（`2ebe3a4` 引入）：`## MoveIt2 motions` 小节头与其首句在替换时被删除，却留下了残句
   （`s \`srdf\` for a direct path), returns …`）。该残句还**无条件**介绍 `moveit_discover` / `moveit_move`——技能内容是静态的
   （不同于按已注册工具重建的系统提示），所以只装 core 的安装会被引导去移动它根本没有挂载的机器人。已删除残句；

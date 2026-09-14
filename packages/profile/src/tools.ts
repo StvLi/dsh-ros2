@@ -47,6 +47,20 @@ function scriptPath(name: string): string {
   return fileURLToPath(new URL(`../scripts/${name}`, import.meta.url))
 }
 
+/**
+ * Lift the Python helper's profile `warnings` (e.g. an unresolved `tf_root`
+ * after issue #21) into the tool result's top-level `warnings`, so a degraded
+ * profile is rendered as a warning instead of staying buried in `data`.
+ */
+function withProfileWarnings(result: ToolResult): ToolResult {
+  const data = result.data as { warnings?: unknown } | undefined
+  const warnings = Array.isArray(data?.warnings)
+    ? data.warnings.filter((w): w is string => typeof w === 'string')
+    : []
+  if (warnings.length > 0 && result.warnings === undefined) result.warnings = warnings
+  return result
+}
+
 function makeZeroPoseSemanticsTool(deps: ToolDeps) {
   return defineTool({
     name: 'ros2_zero_pose_semantics',
@@ -172,12 +186,12 @@ function makeRobotRegisterTool(deps: ToolDeps) {
         }
       }
       const out = data ?? parseJsonOrRaw(res.stdout)
-      return okResult('robot_register', command, {
+      return withProfileWarnings(okResult('robot_register', command, {
         ...(out as Record<string, unknown>),
         ...(jobId ? { safety_monitor: { jobId, status: 'started' } }
           : params.startSafety === false ? { safety_monitor: { status: 'skipped' } }
           : { safety_monitor: { status: 'not_started', note: 'jobs 服务不可用或 safety 未启用——用 robot_safety_start 手动启动' } }),
-      })
+      }))
     },
   })
 }
@@ -209,7 +223,7 @@ function makeRobotLoadTool(deps: ToolDeps) {
         return toolError('robot_load', command, res.error ?? 'COMMAND_FAILED',
           res.stderr.trim() || `exit ${res.exitCode ?? 'unknown'}`)
       }
-      return okResult('robot_load', command, parseJsonOrRaw(res.stdout))
+      return withProfileWarnings(okResult('robot_load', command, parseJsonOrRaw(res.stdout)))
     },
   })
 }

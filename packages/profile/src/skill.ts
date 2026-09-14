@@ -72,12 +72,16 @@ with the known facts instead of re-discovering.
 ## Flow
 
 1. **Look up the profile**: \`robot_load {name}\` (or \`robot_load {}\` to list
-   all). Returns: URDF path (or live topic), links/joints, TF root, cameras,
-   MoveIt groups (+ SRDF), zero-pose semantics.
+   all). Returns: URDF path (or live topic), links/joints, TF root (+ its
+   \`tf_root_source\` — \`tf_static\` / \`urdf\` / \`unresolved\`), cameras,
+   MoveIt groups (+ SRDF), zero-pose semantics. An empty \`tf_root\` is
+   reported as a warning: fix the broadcaster and re-register before rendering.
 2. **Bring up an offscreen render** (using the profile):
    - Publish the profile's URDF (file path, or live \`/robot_description\`) with
      \`file://\` mesh paths; start \`robot_state_publisher\` remapped to
-     \`/robot_description_abs\`; Fixed Frame = profile \`tf_root\`;
+     \`/robot_description_abs\`; Fixed Frame = profile \`tf_root\`
+     (when \`tf_root_source\` is \`urdf\` the profile fell back to the URDF root
+     link — re-register with the broadcaster up if the TF root differs);
    - Start \`rviz_offscreen_node\` (config with Grid/TF/RobotModel) and verify
      \`FM frames=N\` + \`transformHasProblems=0\`.
 3. **Analyze / move** with profile facts:
