@@ -7,7 +7,7 @@
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { Config, type ProfilePackageConfig } from './config.js'
-import { makeRun, type ApprovalRequest, type JobsApi } from 'dsh-ros2-common'
+import { makeRun, readOwnVersion, registerLoadedBundle, type ApprovalRequest, type JobsApi } from 'dsh-ros2-common'
 import { createRos2Tools } from './tools.js'
 import { robotRegistrationSkill, robotRetrievalSkill } from './skill.js'
 
@@ -19,7 +19,13 @@ export { Config }
 
 export type { ProfilePackageConfig }
 
+/** The package.json this process actually loaded (issue #22: stale detection). */
+const BUNDLE_INFO = readOwnVersion(import.meta.url)
+
 export function apply(ctx: Context, config: ProfilePackageConfig): void {
+  ctx.effect(() => registerLoadedBundle({ name: 'dsh-ros2-profile', ...BUNDLE_INFO }))
+  ctx.logger.info(`dsh-ros2: loaded bundle dsh-ros2-profile@${BUNDLE_INFO.version}`)
+
   const run = makeRun(config)
   const approvalService = (ctx as unknown as { approval: { request(req: unknown): Promise<string> } }).approval
   const approval = (req: ApprovalRequest): Promise<string> => approvalService.request(req)

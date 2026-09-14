@@ -5,6 +5,7 @@
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { Config, type StateConfig } from './config.js'
+import { readOwnVersion, registerLoadedBundle } from 'dsh-ros2-common'
 import { createRos2StateTools } from './tools.js'
 import { UdsStateClient } from './state-client.js'
 
@@ -16,7 +17,13 @@ export { Config }
 
 export type { StateConfig }
 
+/** The package.json this process actually loaded (issue #22: stale detection). */
+const BUNDLE_INFO = readOwnVersion(import.meta.url)
+
 export function apply(ctx: Context, config: StateConfig): void {
+  ctx.effect(() => registerLoadedBundle({ name: 'dsh-ros2-state', ...BUNDLE_INFO }))
+  ctx.logger.info(`dsh-ros2: loaded bundle dsh-ros2-state@${BUNDLE_INFO.version}`)
+
   const client = new UdsStateClient(config.state.socketPath, config.state.timeoutMs, config.state.tcp)
   const tools = createRos2StateTools({ state: client })
 

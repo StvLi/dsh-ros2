@@ -8,6 +8,22 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 
 ### Added
 
+- **已加载 bundle 版本登记 + 陈旧进程自检**（issue #22）：磁盘上的 bundle 更新后，运行中的
+  harness 仍是旧代码，此前只在调用时才以 `Error: unknown tool "ros2_topology"`（或技能目录缺项）
+  暴露。现在：
+  - `dsh-ros2-common` 新增 `readOwnVersion()` / `registerLoadedBundle()` / `listLoadedBundles()` /
+    `compareBundles()` / `bundleDriftReport()`；**每个 bundle 在挂载时登记自己**
+    （`name` + 从 `package.json` 读到的 loaded `version` + 该文件路径），并打一行启动日志
+    `dsh-ros2: loaded bundle dsh-ros2-core@0.1.5`。登记放在 `dsh-ros2-common` 是因为**每个
+    bundle 都已依赖它**——bundle 报告自己，无需跨包解析（符号链接安装时 Node 会把入口模块解析到
+    realpath，兄弟包解析必然失败，已实测）。
+  - `ros2_env_check` 返回 `data.bundles = { loaded, drift, stale, unresolved }`：把登记的
+    `package.json` **重新从磁盘读一次**得到 installed 版本，`stale: true` 即"磁盘已更新、进程未更新"，
+    并给出显式告警与"重启 harness"的指引；`package.json` 不可读的记为 `unresolved` 而非猜测。
+  - 组合不变量测试（`packages/dsh-ros2/tests/bundles.spec.ts`）断言每个 bundle 都按**真实包名**
+    登记、都写入启动日志、都把 `dsh-ros2-common` 列为依赖——漏登记即失败。
+  - 文档：`docs/versioning.md` 新增"已加载版本 vs 磁盘版本（陈旧进程自检）"一节，说明两个版本的
+    区别、如何读 `ros2_env_check`、以及"该自检本身也要重启一次才生效"的边界。
 - **5 个 journey skill**（issue #19 切片 1：按"反复出现的旅程"组织能力面）：
   `ros2-bringup-recovery`（"起不来"：`ros2_env_check` → 会话内 `ros2_workspace use`，不改配置不重启 → 启动/作业跟踪 → doctor 验证）、
   `ros2-liveness-triage`（"还活着吗/为什么没数据"：一次 `ros2_topology {rates}` + 一次 `ros2_topic_sample`，并说明造成误报的超时语义）、

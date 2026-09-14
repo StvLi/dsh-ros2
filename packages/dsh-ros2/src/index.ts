@@ -10,6 +10,7 @@
  */
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
+import { readOwnVersion, registerLoadedBundle } from 'dsh-ros2-common'
 
 export const name = 'dsh-ros2'
 
@@ -17,6 +18,11 @@ export const inject = [] as const
 
 export const Config = z.object({})
 
-export function apply(_ctx: Context): void {
+/** The package.json this process actually loaded (issue #22: stale detection). */
+const BUNDLE_INFO = readOwnVersion(import.meta.url)
+
+export function apply(ctx: Context): void {
   // aggregate: all capability is provided by the dependency bundles.
+  ctx.effect(() => registerLoadedBundle({ name: 'dsh-ros2', ...BUNDLE_INFO }))
+  ctx.logger.info(`dsh-ros2: loaded bundle dsh-ros2@${BUNDLE_INFO.version}`)
 }

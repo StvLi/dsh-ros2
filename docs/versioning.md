@@ -52,3 +52,48 @@
 - 应用内市场（dsh-market）数据源为 npm + awesome 列表——**npm 发布后市场自动同步**
   （镜像如 npmmirror 有传播延迟，验证用 `--registry=https://registry.npmjs.org`）。
 - 下次功能发布时：bump 受影响包的版本 → npm 发布 → GitHub 打对应 tag，让两侧重新对齐。
+
+## 已加载版本 vs 磁盘版本（陈旧进程自检）
+
+同一个包有**两个**版本，问题几乎都出在二者不一致时：
+
+| | 含义 | 何时改变 |
+| --- | --- | --- |
+| **loaded（已加载）** | 进程启动时从磁盘读入内存的那份代码 | 只在挂载 bundle 的那一刻确定；之后更新磁盘**不会**改变它 |
+| **installed（已安装）** | 当前磁盘上 `package.json` 记录的版本 | 每次 `pnpm build` / `npm install` / 更新包时 |
+
+bundle 是**一次性加载**的：磁盘更新后，运行中的 harness 仍是旧代码。旧版本只有在
+真正调用时才暴露症状——`Error: unknown tool "ros2_topology"`，或会话技能目录少了几项载体。
+拆分方案里的"profile 迁移需重启生效"是同样的约束。
+
+**怎么查**：每个 bundle 在挂载时都会报告自己（并打一行启动日志
+`dsh-ros2: loaded bundle dsh-ros2-<x>@<version>`）。只读诊断入口是 `ros2_env_check`：
+
+```jsonc
+{
+  "data": {
+    "bundles": {
+      "loaded":  [{ "name": "dsh-ros2-core", "version": "0.1.5" }],
+      "drift":   [{ "name": "dsh-ros2-core", "loaded": "0.1.5", "installed": "0.1.6", "drifted": true }],
+      "stale":   true,           // 任一 bundle 的 loaded ≠ installed
+      "unresolved": []           // package.json 已不可读，无法判断的 bundle
+    }
+  },
+  "warnings": ["检测到磁盘上的 dsh-ros2 bundle 已更新，但运行中的进程仍是旧代码：… 请重启 harness 后重试。"]
+}
+```
+
+`stale: true` 的处理：**重启 harness**（装了 dsh-phoenix 时会优雅重启并在空闲边界执行）。
+不要靠"再调一次工具"绕过——新工具在旧进程里根本不存在。
+
+> 一个诚实的边界：这个自检本身也需要在**重启后**才会生效。若当前进程早于本功能，
+> `ros2_env_check` 不会返回 `bundles` 段（会给出"未记录到任何已加载的 dsh-ros2 bundle"告警）；
+> 重启一次之后，后续每次更新都能被看到。
+
+**开发时的自查**（不依赖运行中的 dsh）：
+
+```bash
+pnpm run build   # 忘记 build 就会留下陈旧的 lib/ —— 这正是本机制要发现问题
+node -e "import('dsh-ros2-common').then(m=>console.log(m.listLoadedBundles()))"
+```
+
