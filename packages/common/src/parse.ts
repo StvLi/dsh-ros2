@@ -102,15 +102,80 @@ export function foldGraph(nodes: NodeInfo[]): { nodes: GraphNode[]; topics: stri
   return { nodes: folded, topics: [...topics].sort(), nodeCount: folded.length }
 }
 
-/** Best-effort JSON parse of a topic sample; falls back to raw text. */
+/**
+ * Best-effort JSON parse of a helper's stdout; falls back to raw text.
+ *
+ * The ROS2 middleware can write its own log lines to *stdout* — FastDDS prints
+ * shared-memory transport errors there — so parsing the whole buffer as one
+ * document silently degraded every JSON-backed tool to `{ raw: … }` (observed
+ * as `nodes: 0` from `ros2_topology`). Helper scripts emit exactly one JSON
+ * document, optionally surrounded by such noise, so find it by brace matching.
+ */
 export function parseJsonOrRaw(stdout: string): JsonValue {
   const text = stdout.trim()
   if (text.length === 0) return null
+  const direct = tryParseJson(text)
+  if (direct !== undefined) return direct
+  const extracted = extractJsonDocument(text)
+  const parsed = extracted === undefined ? undefined : tryParseJson(extracted)
+  if (parsed !== undefined) return parsed
+  return { raw: text.slice(0, 4000) }
+}
+
+/** JSON.parse that reports failure as `undefined` (a parsed `null` is kept). */
+function tryParseJson(text: string): JsonValue | undefined {
   try {
     return JSON.parse(text) as JsonValue
   } catch {
-    return { raw: text.slice(0, 4000) }
+    return undefined
   }
+}
+
+/** Cap on candidate starts we are willing to brace-match (bounds worst case). */
+const MAX_JSON_CANDIDATES = 64
+
+/**
+ * The first brace-balanced, parseable JSON value embedded in `text`, if any.
+ * Log noise can itself contain brackets (`[RTPS_TRANSPORT_SHM Error]`), so a
+ * candidate only counts once its matching close is found and it parses.
+ */
+function extractJsonDocument(text: string): string | undefined {
+  let tried = 0
+  for (let i = 0; i < text.length && tried < MAX_JSON_CANDIDATES; i++) {
+    const ch = text[i]
+    if (ch !== '{' && ch !== '[') continue
+    tried++
+    const end = matchingClose(text, i)
+    if (end < 0) continue
+    const candidate = text.slice(i, end + 1)
+    if (tryParseJson(candidate) !== undefined) return candidate
+  }
+  return undefined
+}
+
+/** Index of the bracket closing the one at `start`, or -1 (string-aware). */
+function matchingClose(text: string, start: number): number {
+  const open = text[start]
+  const close = open === '{' ? '}' : ']'
+  let depth = 0
+  let inString = false
+  let escaped = false
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i]
+    if (inString) {
+      if (escaped) escaped = false
+      else if (ch === '\\') escaped = true
+      else if (ch === '"') inString = false
+      continue
+    }
+    if (ch === '"') inString = true
+    else if (ch === open) depth++
+    else if (ch === close) {
+      depth--
+      if (depth === 0) return i
+    }
+  }
+  return -1
 }
 
 /** Unique frame pairs from a `/tf` transforms sample. */

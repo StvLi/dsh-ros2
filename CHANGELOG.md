@@ -24,6 +24,15 @@ All notable changes to **dsh-ros2** are documented here. Format follows
     登记、都写入启动日志、都把 `dsh-ros2-common` 列为依赖——漏登记即失败。
   - 文档：`docs/versioning.md` 新增"已加载版本 vs 磁盘版本（陈旧进程自检）"一节，说明两个版本的
     区别、如何读 `ros2_env_check`、以及"该自检本身也要重启一次才生效"的边界。
+- **可复现的验收测量台**（issue #19 的 ≤2 次调用验收）：`scripts/verification/` 把此前
+  "手工搭一次就没了"的多节点系统固化为可重复执行的装置 ——
+  `system.sh start|stop|status` 拉起 10 节点系统（turtlesim + 手写 `lab_sensor`/`lab_service`/
+  `lab_action` + `demo_nodes_cpp` + `action_tutorials_cpp` + latch 的 `static_transform_publisher`），
+  `measure.mjs` 用**本仓库构建出的 lib/** 逐旅程调用 L1 入口、统计调用数与墙钟并给出判定
+  （退出码非 0 即验收失败）。测量结果与边界记入 `docs/journey-catalogue.md` §6：
+  **6/6 可测旅程在 ≤2 次调用内作答**（topology / TF / bring-up / identity / safety 各 1 次，
+  liveness 2 次）；三条例程（state / vision / motion）因本装置不具备相应硬件而明确记为
+  `not_measurable`，不计入通过。
 - **5 个 journey skill**（issue #19 切片 1：按"反复出现的旅程"组织能力面）：
   `ros2-bringup-recovery`（"起不来"：`ros2_env_check` → 会话内 `ros2_workspace use`，不改配置不重启 → 启动/作业跟踪 → doctor 验证）、
   `ros2-liveness-triage`（"还活着吗/为什么没数据"：一次 `ros2_topology {rates}` + 一次 `ros2_topic_sample`，并说明造成误报的超时语义）、
@@ -88,6 +97,13 @@ All notable changes to **dsh-ros2** are documented here. Format follows
   - 已在**真实 ROS2 Jazzy + `static_transform_publisher`** 上端到端复核：
     `find_tf_root` → `{root: base_link, source: tf_static}`；停止广播者后 →
     `{root: base_link, source: urdf}`；旧实现在同一份 live 输入上复现 `IndexError`。
+- **`parseJsonOrRaw()` 被 ROS2 中间件的 stdout 日志击穿**（本轮验收测量时现场发现）：
+  FastDDS 在 `/dev/shm` 不可用等情况下会把 shared-memory 传输错误写到 **stdout**（不是 stderr），
+  于是"把整个缓冲区当作文档 `JSON.parse`"必然失败，所有 helper 支撑的工具**静默降级为
+  `{ raw: … }`**——实测在健康的 10 节点系统上 `ros2_topology` 报 **`nodes: 0`**。
+  修复：用**字符串感知的括号配对**（候选数有上限）在缓冲区中定位那个 JSON 文档再解析；
+  日志噪声本身含方括号（`[RTPS_TRANSPORT_SHM Error]`）算不出结果，因此候选必须
+  "找到匹配闭括号**且**能解析"才成立；完全不含 JSON 的文本仍回退 `{ raw }`。新增 4 例回归测试。
 - `ros2-diagnostics` 技能内容**截断**（`2ebe3a4` 引入）：`## MoveIt2 motions` 小节头与其首句在替换时被删除，却留下了残句
   （`s \`srdf\` for a direct path), returns …`）。该残句还**无条件**介绍 `moveit_discover` / `moveit_move`——技能内容是静态的
   （不同于按已注册工具重建的系统提示），所以只装 core 的安装会被引导去移动它根本没有挂载的机器人。已删除残句；
