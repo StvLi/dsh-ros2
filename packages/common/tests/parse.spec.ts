@@ -76,6 +76,30 @@ describe('parseJsonOrRaw', () => {
     const out = parseJsonOrRaw('not json')
     expect(out).toEqual({ raw: 'not json' })
   })
+  it('keeps a parsed JSON null instead of treating it as a failure', () => {
+    expect(parseJsonOrRaw('null')).toBeNull()
+  })
+
+  // FastDDS writes shared-memory transport errors to *stdout*; without this the
+  // whole buffer failed to parse and every helper-backed tool silently returned
+  // `{ raw }` (observed as `nodes: 0` from ros2_topology).
+  it('parses the JSON document when the middleware printed log lines before it', () => {
+    const noisy = '2026-09-14 20:57:55.234 [RTPS_TRANSPORT_SHM Error] Failed to create segment: Permission denied\n' +
+      '  -> Function compute_per_allocation_extra_size\n' +
+      '{"ok": true, "nodes": [{"name": "/talker"}]}\n'
+    expect(parseJsonOrRaw(noisy)).toEqual({ ok: true, nodes: [{ name: '/talker' }] })
+  })
+
+  it('parses the JSON document when log lines follow it', () => {
+    const noisy = '{"ok": true}\n' +
+      '2026-09-14 20:57:55.234 [RTPS_TRANSPORT_SHM Error] something went wrong\n'
+    expect(parseJsonOrRaw(noisy)).toEqual({ ok: true })
+  })
+
+  it('still falls back to raw for text with no JSON value at all', () => {
+    const out = parseJsonOrRaw('header:\n  stamp: 1\n[RTPS Error] noise without a document')
+    expect(out).toEqual({ raw: 'header:\n  stamp: 1\n[RTPS Error] noise without a document' })
+  })
 })
 
 describe('parseTransforms', () => {
