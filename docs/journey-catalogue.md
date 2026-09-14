@@ -144,17 +144,53 @@ into a verified artifact.
 The RFC's success criterion: **a journey answered in ≤2 calls from one L1 entry
 point**, plus a narrow scope exposing a measurably smaller surface.
 
-Method: reuse the hand-built 10-node system from
+Method: reuse the hand-built multi-node system from
 [verification-toolchain-efficiency.md](verification-toolchain-efficiency.md)
 (turtlesim + hand-written `lab_sensor` / `lab_service` / `lab_action` +
 `demo_nodes_cpp` + `action_tutorials_cpp` + a latched static
-`static_transform_publisher`; 10 nodes, 13 topics, 82 services, 4 actions, one
-TF tree with a dynamic and a latched edge), then count tool calls and wall time
-from question to answer, per journey.
+`static_transform_publisher`), then count tool calls and wall time from question
+to answer, per journey.
 
-**Outstanding:** not re-measured in this round — that test system was not
-running. The catalogue and its invariant are the enabling work; the ≤2-call
-measurement remains the acceptance test.
+The system is now **reproducible** — `scripts/verification/`
+(`system.sh start|status|stop`, `measure.mjs`, the three lab nodes) brings it up
+and scores the criterion; `measure.mjs` exits non-zero if any measurable journey
+breaks the budget. Measured 2026-09-14 on ROS2 Jazzy, 10 nodes / 10 topics /
+86 services / 3 actions / 2 TF frames (1 static + 1 dynamic):
+
+| journey | L1 entry | tool calls | wall time | answer |
+| --- | --- | --- | --- | --- |
+| topology | `ros2_topology` | **1** | 2.1 s | 10 nodes / 10 topics / 86 services / 3 actions |
+| liveness | `ros2_topology {rates}` → `ros2_topic_sample` | **2** | 10.3 s | live rates for 9 topics; `/tf_static` (latched, 0 Hz) resolved in call 2 |
+| TF integrity | `ros2_topology {tf}` | **1** | 6.3 s | 2 frames (1 static, 1 dynamic) with translation + rotation |
+| bring-up | `ros2_env_check` | **1** | 1.1 s | setup + 440 visible packages |
+| robot identity | `robot_load` | **1** | 0.3 s | profile (links, TF root, cameras, groups) |
+| safety | `robot_safety_state` | **1** | 0.6 s | latched state (`monitor_running: false` here) |
+
+**6/6 measurable journeys answered within the ≤2-call budget**, with one L1
+entry point each — the aggregate layer does what the RFC predicted. For
+comparison, the same topology inventory took 17 raw `ros2` CLI invocations in
+the efficiency study.
+
+**Boundaries (honest scope):**
+
+- Three journeys are **not measurable** on this rig and are therefore not
+  claimed: `state` (needs the dsh-ros2-sidecar data plane), `vision` (needs a
+  camera topic + the VLM pipeline), `motion` (needs MoveIt2 + a robot
+  description). `measure.mjs` reports them as `not_measurable`.
+- The bring-up row measures the *healthy* system (`ros2_env_check` answering in
+  one call). The journey's actual failure path — stale `rosSetup` → session
+  `ros2_workspace use` — is still only covered by
+  `docs/feedback-env-recovery.md`, not by this rig.
+- Wall time here is ROS2-side work, not agent wall time: §1–4 of the efficiency
+  study showed agent time is model-bound, so the **call count** is the lever
+  being verified.
+- This measures the aggregate surface, not L3 narrowing. Slice 2 remains a
+  documented recipe (§5) — a preset lives outside this npm package and cannot be
+  exercised in-repo.
+- The measurement rig surfaced a real defect while being built: FastDDS writes
+  shared-memory errors to stdout, which defeated `parseJsonOrRaw()` and made
+  `ros2_topology` report `nodes: 0` on a healthy system. Fixed in
+  `fix(common): tolerate ROS2 middleware log noise around helper JSON`.
 
 ## 7. Non-goals (unchanged)
 
