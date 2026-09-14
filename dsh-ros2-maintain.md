@@ -824,3 +824,232 @@ journey "bringup" entry tool: expected [ 'ros2_graph', …(82) ] to include 'ros
   4. **把本轮代码加载进运行中的 dsh**：需要一次 phoenix 优雅重启（`cordis_run` 触发 → 忙时 `deferring (agent busy)` → 空闲时 `executing deferred restart`）。
      本轮为不中断维护流程而**有意未触发**；可在空闲时触发，journal 应按上述顺序出现两行。
   5. 维持验收线："提交前 typecheck + test + build 全绿 + 行为变更补测试 + push 后 CI 绿"；`pnpm audit` 需带 `--registry=https://registry.npmjs.org`（默认镜像无审计端点）。
+
+---
+
+## 14. 维护记录（2026-09-14 · 第八轮：3 个 open issue → 全部落地/收敛 + #19 验收测量 + 安全复测）
+
+> 本轮结论：**存在 3 个未处理 issue（#21 / #22 / #19）**，走 `1 → 2 → 3 → 4 → 5 → 6` 全流程。
+> 评估后：#21 **确认为真缺陷并修复**（现场在真机 Jazzy 上复现）；#22 **接受并落地**（保留 open，边界如实声明）；
+> #19 的**遗留验收测量：本轮完成**（固化测量台 + 6/6 可测旅程 ≤2 次调用），测量过程本身又**发现并修复一个真缺陷**。
+> 安全扫描**未发现新漏洞**（依赖审计干净、历史无密钥、无 `eval`/`shell:true`、新增面为纯字符串处理与只读 `readFileSync`）。
+
+### 14.0 仓库快照（本轮起始/结束）
+
+| 项 | 值 |
+| --- | --- |
+| 开始 `origin/main` | `34935b1`（第七轮日志；工作树干净，本地 `main` 与 `origin/main` 0/0） |
+| 新开分支（3 条，均已合并并删除远端分支） | `fix/profile-tf-root`、`feat/bundle-version-drift`、`fix/tool-stdout-noise` |
+| 结束 `origin/main` | `fcde2a6`（PR **#25** 合并 commit）+ 本维护日志提交 |
+| PR | **#23** `496255b`、**#24** `fbdc685`、**#25** `fcde2a6`（均 merge commit；CI run `34846921337` / `34846941355` / `34847994417`，Node 22/24 矩阵**全 success**） |
+| 本地 Node / pnpm | Node `v24.16.0` / pnpm `11.22.0`（= root `packageManager`） |
+| 包数量 | 9 个（common/core/dsh-ros2/dsh-ros2-state/moveit/profile/safety/sidecar/vision） |
+| 工具 / 技能 | **83 工具 / 9 技能**（本轮不增删工具；新增的是 `ros2_env_check` 的返回字段与 1 个组合不变量测试） |
+| 工作区测试 | **240 vitest 通过 + 1 skip**（214 → 240；核心 110 → 113，common 21 → 35，profile 12 → 14，dsh-ros2 6 → 14）＋ sidecar 10 场景 ＋ `robot_profile` / `zero_pose` Python 自检 |
+
+### 14.1 Issue 检查（step 1）
+
+```
+gh issue list --state open  →  3 open
+  22  dx: surface loaded vs installed bundle versions …   (2026-09-14, OWNER)
+  21  fix(profile): find_tf_root crashes on Jazzy and silently writes an empty tf_root  (2026-09-14, OWNER)
+  19  RFC: need-shaped composition …                      (2026-09-12, OWNER, 1 comment)
+gh pr list --state open     →  0 open
+```
+→ **存在未处理 issue**，转 step 2（不再跳过 `1 → 5`）。
+
+### 14.2 建议评估（step 2）——逐条判断合理性与必要性
+
+#### #21 `find_tf_root()` 在 Jazzy 上崩溃 / 静默写空 —— **合理且必要，接受，最高优先**
+
+- **先复现，再判断**（不采信描述）：把 issue 原文的 Jazzy repr 样本喂给旧实现 →
+  `IndexError: list index out of range`，**与 issue 描述一致**；空/失败输入 → 静默 `return ""`。
+- **真机复核**（ROS2 Jazzy + `tf2_ros static_transform_publisher`）：
+  - `ros2 topic echo /tf_static --once --field transforms` → 单行 Python repr（`=` 而非 `:`），与 issue 一致；
+  - `ros2 topic echo /tf_static --once`（不带 `--field`）→ 可解析 YAML（`transforms:` / `child_frame_id: chest`）；
+  - 旧实现喂**同一份 live 输入** → `IndexError`；`robot_profile.py register` **当场 traceback 退出**。
+- **必要性**：这与 **#14 完全同源**——第七轮只修了 TS 侧 `ros2_tf_list` / `ros2_tf_echo`，
+  **漏了 profile 脚本**；影响面是 `robot_register` 直接失败，或档案 `tf_root` 为空导致
+  离屏渲染 Fixed Frame 失效（`robot-state-vision-analysis` 记载的"所有 link 堆在原点"症状）。
+- **顺带修正的语义错误**：旧实现取"第一条边的 child"，那是**叶子**不是根；issue 建议的
+  "只作父、不作子"才是正确判据。本轮一并改正（属同一处代码、同一 purpose）。
+
+#### #22 让"进程陈旧"可见 —— **方向合理、必要性中等偏上，接受；但边界必须如实说明**
+
+- **事实核实**：issue 描述的场景真实存在——本轮**现场遇到**：运行中的 dsh 于 `20:46:34` 启动，
+  而磁盘代码在 `20:52` 之后更新；该进程的 `ros2_env_check` 返回**没有 `bundles` 段**，
+  且第七轮新工具 `ros2_topology` 在旧进程里表现为 `unknown tool`。
+- **实现路径的关键约束（本轮实测，决定了设计）**：bundle **无法**通过解析兄弟包得到各自的 loaded 版本 ——
+  Node 会把符号链接入口解析到 **realpath**：
+
+  | 解析基准 | core | profile | moveit | safety | vision |
+  | --- | --- | --- | --- | --- | --- |
+  | 符号链接路径（`~/.dsh/profiles/web/node_modules/dsh-ros2-core/…`） | ✅ | ✅ | ✅ | ✅ | ✅ |
+  | realpath（`…/dsh-ros2/packages/core/…`，即 `import.meta.url`） | ✅ | ❌ MODULE_NOT_FOUND | ❌ | ❌ | ❌ |
+
+  → 因此**由每个 bundle 在挂载时登记自己**（登记表放在所有 bundle 都已依赖的 `dsh-ros2-common`），
+  而不是让 core 去"发现"兄弟包。这是本轮设计取舍的核心证据。
+- **保留意见（故 issue 保持 open）**：
+  1. **自检本身也要重启一次才生效**——旧进程里根本不存在这段代码。这是**固有限制**，不是实现缺陷，
+     必须在文档与 issue 里讲清楚（否则会变成"为什么我升级了还是没提示"的假承诺）。
+  2. issue 里"会话技能目录与实际注册数不一致"那一半，本轮只提供**信号**（loaded 版本），并未做目录对账。
+  3. issue 建议的"启动时一行汇总日志"：bundle 是**顺序挂载**的，任何时刻打汇总都必然是**部分列表**，
+     故改为**每个 bundle 一行**（`dsh-ros2: loaded bundle dsh-ros2-core@0.1.5`），更准确也更可 grep。
+
+#### #19 RFC 验收（≤2 次调用 / 缩面）—— **接受并完成"可测"部分，缩面部分维持"文档配方"**
+
+- 第七轮已落地切片 1（5 个 journey skill，4 → 9 载体）与切片 3（组合不变量），遗留项是
+  **"每旅程 ≤2 次调用"的验收测量**。
+- **本轮把它做完**（详见 §14.4）：先补齐**可复现**的测量台（此前那个 10 节点系统"手工搭一次就没了"），
+  再逐旅程测量：**6/6 可测旅程 ≤2 次调用**。**三条例程（state / vision / motion）在本装置上不可测**，
+  明确记为 `not_measurable`，**不计入通过**——这是本轮对"通过"口径的自我约束。
+- **缩面（切片 2）不改口径**：preset 位于 harness 的 preset 目录、不属本 npm 包，仓库 CI 无法验证；
+  维持第七轮的"文档配方"结论，不产出无法验证的产物。
+
+**非目标（不删 primitive、不一 verb 一工具、不再加提示词散文）—— 判断合理，继续遵守。**
+
+### 14.3 开发管理（git · step 3）
+
+按 issue 类型新开 3 条分支（`fix/…` 修缺陷、`feat/…` 加功能），全部按 Conventional Commits 提交：
+
+| commit | 分支 | 类型 | 说明 |
+| --- | --- | --- | --- |
+| `726deef` | `fix/profile-tf-root` | `fix(profile)` | TF 根帧解析与输出格式解耦；不再崩溃、不再静默；语义改为"只作父"；13 项离线自检 |
+| `47d54ca` | `feat/bundle-version-drift` | `feat(common)` | loaded-bundle 登记表 + 每个 bundle 自登记 + 组合不变量 |
+| `b7593e4` | `feat/bundle-version-drift` | `feat(core)` | `ros2_env_check` 返回 `bundles{loaded,drift,stale,unresolved}` + 陈旧告警 |
+| `12a7c6b` | `feat/bundle-version-drift` | `docs` | `docs/versioning.md` 新增"已加载版本 vs 磁盘版本"一节 + CHANGELOG |
+| `1852577` | `fix/tool-stdout-noise` | `fix(common)` | `parseJsonOrRaw` 容忍中间件 stdout 噪声（括号配对定位 JSON 文档） |
+| `d81a274` | `fix/tool-stdout-noise` | `test(verification)` | `scripts/verification/` 可复现测量台（`system.sh` + `measure.mjs` + 3 个 lab 节点） |
+| `61482f7` | `fix/tool-stdout-noise` | `docs` | `docs/journey-catalogue.md` §6 记录 ≤2 次调用测量结果与边界 |
+| `cb59fd4` | `fix/tool-stdout-noise` | `fix(verification)` | 测量台 teardown 收敛到自己的进程组；启动等待图收敛 |
+
+**PR 与合并**：PR **#23 / #24 / #25**（base `main`）。#24 与 #25 在 `#23` 合并后**rebase 到最新 `main`**
+（`CHANGELOG.md` 出现冲突，按 **union 保留双方条目**解决）；三条 PR 的 CI（Node 22/24 矩阵）**全 success**
+后按仓库惯例以 **merge commit** 合并，三个远端分支已删除，本地 `main` 已 `reset --hard origin/main`。
+
+**"测量中发现缺陷"的分支归属**：`parseJsonOrRaw` 的缺陷是**做 #19 验收测量时**现场发现的。
+它不属于 #21/#22，故单独开 `fix/tool-stdout-noise`；测量台与测量结果留在同一条分支
+（fix 在前、使能/文档在后），避免把无关的 fix 混进 `feat/` 分支。
+
+### 14.4 本地验收 + issue #19 的验收测量
+
+```bash
+cd /home/stvli/Desktop/embody_agent_ws/dsh-ros2
+CI=true pnpm run typecheck   # 9 项目 tsc --noEmit 全部 Done（exit 0）
+CI=true pnpm run build       # 9 包 tsc 全部 Done（exit 0）
+CI=true pnpm -r test         # 240 vitest 通过 + 1 skip + sidecar 10 场景 + 2 个 Python 自检；exit 0
+```
+
+**#21 的真机端到端复核**（ROS2 Jazzy + `tf2_ros static_transform_publisher`）：
+
+| 探针 | 结果 |
+| --- | --- |
+| 新 `find_tf_root(urdf)`（广播者在线的同一份 live 输入） | `{"root": "base_link", "source": "tf_static"}` |
+| 同上，停掉广播者 | `{"root": "base_link", "source": "urdf"}` |
+| 无广播者且无 URDF | `{"root": "", "source": "unresolved"}` |
+| 旧实现喂同一份 live 输入 | `IndexError: list index out of range` |
+| CLI `register`（回退路径） | `tf_root='base_link'`、`tf_root_source='urdf'` + 显式 warning |
+
+**#22 的独立复核**（用 Cordis `Context` + 假服务挂载 **7 个 bundle 的已构建 `lib/`**）：
+
+```text
+registry : ["dsh-ros2@0.1.0","dsh-ros2-core@0.1.5","dsh-ros2-moveit@0.1.0","dsh-ros2-profile@0.1.0",
+            "dsh-ros2-safety@0.1.0","dsh-ros2-state@0.1.0","dsh-ros2-vision@0.1.3"]
+startup  : 每 bundle 一行 "dsh-ros2: loaded bundle <name>@<version>"
+surface  : 83 tools / 9 skills（与不变量一致）
+drift    : loaded 0.1.5 / disk 0.1.6 →  stale: true + "…请重启 harness 后重试。"
+```
+**反向验证**：把 `dsh-ros2-vision` 的登记名改错 → 不变量测试失败并给出可定位信息
+（`vision must register dsh-ros2-vision: expected '…' to contain …`），随后已复原。
+
+**#19 验收测量**（`scripts/verification/`，2026-09-14 Jazzy；10 节点 / 10 话题 / 86 服务 / 3 动作 / 2 帧）：
+
+| 旅程 | L1 入口 | 工具调用 | 墙钟 | 判定 |
+| --- | --- | --- | --- | --- |
+| topology | `ros2_topology` | **1** | 2.1 s | 10 节点 / 10 话题 / 86 服务 / 3 动作 |
+| liveness | `ros2_topology {rates}` → `ros2_topic_sample` | **2** | 10.4 s | 每话题实时速率 + `/tf_static`（latch、0 Hz）在第 2 次调用定性 |
+| TF integrity | `ros2_topology {tf}` | **1** | 6.2 s | 2 帧（1 static / 1 dynamic，含位姿） |
+| bring-up | `ros2_env_check` | **1** | 1.1 s | setup + 440 可见包 |
+| robot identity | `robot_load` | **1** | 0.3 s | 档案（link / tf_root / 相机 / 组） |
+| safety | `robot_safety_state` | **1** | 0.6 s | 锁存状态（本机 `monitor_running: false`） |
+
+**6/6 可测旅程在 ≤2 次调用内作答**；对照：同一份拓扑盘点在效率研究中需要 **17 次裸 `ros2` CLI 调用**。
+`measure.mjs` 在任一可测旅程破预算时**退出码非 0**，即验收结论可自动化。
+
+**不可测的三条例程**（如实声明，不计入通过）：`state`（需 sidecar 数据面）、`vision`（需相机 + VLM 流水线）、
+`motion`（需 MoveIt2 + 机器人描述）。另：bring-up 一行只覆盖**健康系统**，其真实故障路径
+（陈旧 `rosSetup` → 会话内 `ros2_workspace use`）仍只有 `docs/feedback-env-recovery.md` 记载。
+
+**测量台自身的两个修正**（都是"测量工具必须能被信任"的一部分）：
+1. 初版 `measure.mjs` 用**最后一次调用**的结果判定整条旅程，导致 liveness 被误判为 FAIL（实际两次调用已作答）→ 改为**整条旅程可见其全部调用结果**。
+2. 初版 teardown 用 `pkill -f "demo_nodes_cpp"` 这类**裸节点名**匹配命令行，可能误杀开发者自己的进程 →
+   改为 `setsid` + 负 PID 杀**自己的进程组**；启动也从固定 `sleep 8` 改为**等待图收敛到 10 节点**
+   （UDP 下发现不是瞬时的，实测曾把 10 节点误报成 3 节点）。
+
+**测量过程中发现并修复的真缺陷（`fix(common)`）**：FastDDS 在 `/dev/shm` 不可用时把
+shared-memory 传输错误写到 **stdout**（不是 stderr）。此前 `parseJsonOrRaw()` 把整个缓冲区当作
+一个 JSON 文档解析，必然失败并**静默降级为 `{ raw: … }`** —— 在**健康的 10 节点系统**上
+`ros2_topology` 报 **`nodes: 0`**。修复用**字符串感知的括号配对**（候选数有上限）定位内嵌文档；
+噪声本身含方括号（`[RTPS_TRANSPORT_SHM Error]`）也算不出结果，因此候选必须"找到匹配闭括号**且**能解析"才成立。
+新增 4 例回归测试（含"噪声在前"与"噪声在后"两种形状）。
+
+### 14.5 dsh-phoenix 持续更新 / 测试链路（step 4）
+
+- **活动 profile**：`~/.dsh/profiles/web/package.json` 含 `dsh-ros2: link:…/dsh-ros2/packages/dsh-ros2`
+  与 `dsh-phoenix: link:…/dsh-phoenix`；`node_modules` 内 **7 个** `dsh-ros2*` 条目
+  （core/common/profile/moveit/safety/vision + 聚合包）均为指向本仓库的 symlink。
+- **运行态**：`systemctl --user is-active dsh-web.service` → `active`；`NRestarts=0`；
+  `curl http://127.0.0.1:3080/__dsh_health` → `{"token":"1789389995735-fdddikwqy7t"}`；
+  `/home/stvli/tmp/dsh-phoenix-state.json` → `generation 16, lifecycleState running, pendingResume false`。
+- **phoenix 自测**：`cd dsh-phoenix && npm test`（`node --test`）→ **41/41 pass**（exit 0）。
+- **本轮行为变更的生效方式**：改动位于 symlink 指向的包源码，`lib/` 已重建（`packages/core/lib/tools.js`
+  含 `bundleDriftReport`、`packages/common/lib/parse.js` 含括号配对、`packages/profile/lib/skill.js` 含
+  `tf_root_source`）。dsh 自身的 HMR 忽略 `node_modules`，运行中的 dsh web 需**重启**才加载新代码；
+  本轮**有意未就地触发重启**（理由见 §14.7-1）。
+- **顺带取得的"活体证据"**：运行中的 dsh 于 `20:46:34` 启动，**早于**本轮构建（`20:52+`），
+  因此它的 `ros2_env_check` **没有 `bundles` 段** —— 这正是 issue #22 描述的"陈旧进程"的**现场实例**，
+  同时也印证了 §14.2 对 #22 的边界声明（自检需重启一次才生效）。
+
+### 14.6 安全扫描（step 5）——复测 + 本轮新增面复核，未发现新漏洞
+
+| 检查 | 结果 |
+| --- | --- |
+| `pnpm audit --registry=https://registry.npmjs.org` | **No known vulnerabilities found**（exit 0） |
+| 硬编码密钥（`AKIA…` / `sk-…` / `ghp_…` / `BEGIN … PRIVATE KEY` / `AIza…` / `xox…`） | 源码（`packages`/`scripts`/`docs`）与 **git 全历史**（`git log -p --all`）均无 |
+| `eval` / `new Function` / `node:vm` / `shell:true` | 无 |
+| TS 命令执行面 | `execFile` / `spawn` 均**数组参数**；shell 字符串仅出现在 `runCommand` 的 `bash -lc`(runner.ts:196) 且命令由**已校验输入**拼装（`shq()`、`KILL_SIGNAL_RE`、`isSafeProfileName`、`buildRos2InstallDownloadCommand`、`gui` 的 `{output}` 经 `shq()`） |
+| Python 命令面 | `subprocess.run` / `Popen` **全部 argv 列表**，无 `shell=True`、无 `os.system` |
+| 历史加固回归 | `KILL_SIGNAL_RE`、`isSafeProfileName`、`buildSafetyMonitorCommand`、`_PROFILE_NAME_RE`（`robot_profile.py` 档案名边界）—— **均在位** |
+| **本轮新增面** | ① `parseJsonOrRaw`：**纯字符串处理**（索引扫描 + 括号配对，候选数有上限，无正则回溯面）；② `bundles.ts`：`readFileSync` 读取的路径**全部来自 `import.meta.url`**（可信常量），无用户输入进入路径；③ `robot_profile.py`：仍是 **argv 列表**调用 `ros2`，新增的只是对输出的**正则解析**；④ `ros2_env_check`：只读登记表；⑤ `scripts/verification/*`：**不随任何 npm 包发布**（root `scripts/` 不在任何 `files` 中，root 包 `private`） |
+
+**新增面的一项卫生加固（本轮自查发现）**：测量台初版的 teardown 用 `pkill -f "demo_nodes_cpp"` /
+`"turtlesim_node"` 等**裸节点名**匹配命令行，可能误杀开发者正在运行的同名进程。已改为
+`setsid` + `kill -- -PID`（**只杀自己的进程组**），仅保留一条锚定 `$HERE/lab_` 的兜底。
+这不构成漏洞（脚本不发布、需人工执行），但属于"工具不应有超出必要范围的杀伤力"。
+
+> 结论：本轮**未发现新漏洞、无需安全修复**；报告为"复测通过 + 新增面无风险 + 1 项工具卫生加固"。
+
+### 14.7 结论与下一步建议
+
+- 本轮把 3 个 open issue 全部推进：**#21 修复并真机复现/复核**（可 close）、
+  **#22 落地但按边界保留 open**、**#19 完成遗留的验收测量**（可 close 或按维护者口径保留）。
+  8 个提交 / 3 条 PR / 3 次 CI 全绿；240 vitest + 自检全绿，`pnpm audit` 干净，phoenix 41/41。
+- 下次维护可选：
+  1. **把本轮代码加载进运行中的 dsh**：需要一次 phoenix 优雅重启。本轮**仍有意未触发**——
+     与第七轮同一理由：重启会中断维护流程本身。重启后应能看到 §14.5 所述的两行 journal 顺序，
+     并且 `ros2_env_check` 开始返回 `bundles` 段（届时 #22 的自检才真正"上线"）。
+  2. **`/tf_static` 的 latch 采样**：本轮实测 `find_tf_root()`（默认 volatile QoS）在广播者
+     "只 latch 一次"时采样不到边，因而走了 URDF 回退（档案 `tf_root=base_link`、`source=urdf`，
+     结果正确但来源不是 TF）。可加 `--qos-durability transient_local` 让 `tf_static` 成为首选来源，
+     使 "TF 根 ≠ URDF 根"（如带虚拟 `world` 帧）的场景也正确。属 #21 的自然延续，本轮未做以控制范围。
+  3. **#22 的两项遗留**：① issue 里"会话技能目录 vs 实际注册数"的**对账**（本轮只给信号）；
+     ② 若希望"启动即报漂移"，可在挂载时**同时**读磁盘版本并比较（当前只在 `ros2_env_check` 调用时比较）。
+  4. **运行中 dsh 的 ROS 环境探针异常**：本会话（旧进程）的 `ros2_env_check` 报
+     "未检测到可见 ROS2 包"，而**同一条探针**在登录 shell 里 **0.8 s** 返回
+     `__PKGS=440 / __NODES=10`。怀疑与 systemd 服务的执行环境或 20 s 超时有关，
+     应在重启后复测；若复现，则是 `ros2-bringup-recovery` 旅程的真实反例。
+  5. **#19 剩余口径**：切片 2（L3 缩面）仍为文档配方；若要变成"可验证产物"，
+     需在 `${DSH_HOME}/.agent-presets/<id>/` 下写 diagnostics-only preset 并在 live agent scope 实测。
+  6. 维持验收线："提交前 typecheck + test + build 全绿 + 行为变更补测试 + push 后 CI 绿"；
+     `pnpm audit` 需带 `--registry=https://registry.npmjs.org`；**测量类结论须附可复现命令**
+     （本轮已把 #19 的测量台固化进 `scripts/verification/`，后续验收不应再"手工搭一次就没了"）。
