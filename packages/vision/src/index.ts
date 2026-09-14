@@ -6,7 +6,7 @@
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { Config, type VisionPackageConfig } from './config.js'
-import { makeRun, type ApprovalRequest, type JobsApi, type VisionProvider } from 'dsh-ros2-common'
+import { makeRun, readOwnVersion, registerLoadedBundle, type ApprovalRequest, type JobsApi, type VisionProvider } from 'dsh-ros2-common'
 import { createVisionProvider } from './vision.js'
 import { createRos2Tools, type VisionMeta, type VisionToolDeps } from './tools.js'
 import { readVlmApiKey } from './secrets.js'
@@ -22,7 +22,13 @@ export type { VisionPackageConfig }
 
 export const VISION_SERVICE = 'dshRos2.vision'
 
+/** The package.json this process actually loaded (issue #22: stale detection). */
+const BUNDLE_INFO = readOwnVersion(import.meta.url)
+
 export async function apply(ctx: Context, config: VisionPackageConfig): Promise<void> {
+  ctx.effect(() => registerLoadedBundle({ name: 'dsh-ros2-vision', ...BUNDLE_INFO }))
+  ctx.logger.info(`dsh-ros2: loaded bundle dsh-ros2-vision@${BUNDLE_INFO.version}`)
+
   const run = makeRun(config)
   const approvalService = (ctx as unknown as { approval: { request(req: unknown): Promise<string> } }).approval
   const approval = (req: ApprovalRequest): Promise<string> => approvalService.request(req)

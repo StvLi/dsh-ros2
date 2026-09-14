@@ -6,7 +6,7 @@
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { Config, type CoreConfig } from './config.js'
-import { makeRun, type ApprovalRequest, type JobsApi, type VisionProvider } from 'dsh-ros2-common'
+import { makeRun, readOwnVersion, registerLoadedBundle, type ApprovalRequest, type JobsApi, type VisionProvider } from 'dsh-ros2-common'
 import { GuiManager } from './gui.js'
 import { createRos2Tools, type CoreToolDeps } from './tools.js'
 import {
@@ -27,6 +27,9 @@ export type { CoreConfig }
 
 const VISION_SERVICE = 'dshRos2.vision'
 
+/** The package.json this process actually loaded (issue #22: stale detection). */
+const BUNDLE_INFO = readOwnVersion(import.meta.url)
+
 /** The slice of the harness `systemPrompt` service this bundle contributes to. */
 interface PromptSection {
   readonly name: string
@@ -40,6 +43,9 @@ interface SystemPromptService {
 }
 
 export function apply(ctx: Context, config: CoreConfig): void {
+  ctx.effect(() => registerLoadedBundle({ name: 'dsh-ros2-core', ...BUNDLE_INFO }))
+  ctx.logger.info(`dsh-ros2: loaded bundle dsh-ros2-core@${BUNDLE_INFO.version}`)
+
   const run = makeRun(config)
   const approvalService = (ctx as unknown as { approval: { request(req: unknown): Promise<string> } }).approval
   const approval = (req: ApprovalRequest): Promise<string> => approvalService.request(req)
