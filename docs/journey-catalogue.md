@@ -160,7 +160,7 @@ breaks the budget. Measured 2026-09-14 on ROS2 Jazzy, 10 nodes / 10 topics /
 | journey | L1 entry | tool calls | wall time | answer |
 | --- | --- | --- | --- | --- |
 | topology | `ros2_topology` | **1** | 2.1 s | 10 nodes / 10 topics / 86 services / 3 actions |
-| liveness | `ros2_topology {rates}` → `ros2_topic_sample` | **2** | 10.3 s | live rates for 9 topics; `/tf_static` (latched, 0 Hz) resolved in call 2 |
+| liveness | `ros2_topology {rates}` → `ros2_topic_sample` | **2** | 10.3 s | per-topic live rates; `/tf_static` (latched, 0 Hz) resolved in call 2 |
 | TF integrity | `ros2_topology {tf}` | **1** | 6.3 s | 2 frames (1 static, 1 dynamic) with translation + rotation |
 | bring-up | `ros2_env_check` | **1** | 1.1 s | setup + 440 visible packages |
 | robot identity | `robot_load` | **1** | 0.3 s | profile (links, TF root, cameras, groups) |

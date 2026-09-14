@@ -35,31 +35,39 @@ start() {
   # shellcheck disable=SC1090
   source "$ROS_SETUP"
 
-  python3 "$HERE/lab_sensor.py"                          >"$LOG_DIR/lab_sensor.log" 2>&1 &
-  echo $! >> "$PID_FILE"
-  python3 "$HERE/lab_service.py"                         >"$LOG_DIR/lab_service.log" 2>&1 &
-  echo $! >> "$PID_FILE"
-  python3 "$HERE/lab_action.py"                          >"$LOG_DIR/lab_action.log" 2>&1 &
-  echo $! >> "$PID_FILE"
-  ros2 run turtlesim turtlesim_node                      >"$LOG_DIR/turtlesim.log" 2>&1 &
-  echo $! >> "$PID_FILE"
-  ros2 run demo_nodes_cpp talker                         >"$LOG_DIR/talker.log" 2>&1 &
-  echo $! >> "$PID_FILE"
-  ros2 run demo_nodes_cpp listener                       >"$LOG_DIR/listener.log" 2>&1 &
-  echo $! >> "$PID_FILE"
-  ros2 run demo_nodes_cpp add_two_ints_server            >"$LOG_DIR/add_two_ints_server.log" 2>&1 &
-  echo $! >> "$PID_FILE"
-  ros2 run demo_nodes_cpp parameter_blackboard           >"$LOG_DIR/parameter_blackboard.log" 2>&1 &
-  echo $! >> "$PID_FILE"
-  ros2 run action_tutorials_cpp fibonacci_action_server  >"$LOG_DIR/fibonacci_action_server.log" 2>&1 &
-  echo $! >> "$PID_FILE"
-  ros2 run tf2_ros static_transform_publisher \
-    --x 0.1 --y 0 --z 0.5 --frame-id base_link --child-frame-id camera_link \
-    >"$LOG_DIR/static_transform.log" 2>&1 &
-  echo $! >> "$PID_FILE"
+  # `setsid` puts each node in its own process group (PGID == the recorded
+  # PID), so `stop` can kill the group without pattern-matching command lines —
+  # `ros2 run` forks the real node, and a `pkill -f demo_nodes_cpp` would hit
+  # unrelated processes.
+  launch() { # launch <log-name> <command...>
+    local log="$LOG_DIR/$1.log"; shift
+    setsid "$@" >"$log" 2>&1 &
+    echo $! >> "$PID_FILE"
+  }
+
+  launch lab_sensor   python3 "$HERE/lab_sensor.py"
+  launch lab_service  python3 "$HERE/lab_service.py"
+  launch lab_action   python3 "$HERE/lab_action.py"
+  launch turtlesim    ros2 run turtlesim turtlesim_node
+  launch talker       ros2 run demo_nodes_cpp talker
+  launch listener     ros2 run demo_nodes_cpp listener
+  launch add_two_ints_server ros2 run demo_nodes_cpp add_two_ints_server
+  launch parameter_blackboard ros2 run demo_nodes_cpp parameter_blackboard
+  launch fibonacci_action_server ros2 run action_tutorials_cpp fibonacci_action_server
+  launch static_transform ros2 run tf2_ros static_transform_publisher \
+    --x 0.1 --y 0 --z 0.5 --frame-id base_link --child-frame-id camera_link
 
   echo "started $(wc -l < "$PID_FILE") nodes; logs in $LOG_DIR"
-  sleep 8
+  # Wait for discovery to settle — over UDP the graph is not complete within a
+  # fixed sleep, and a measurement run against a half-discovered graph reports
+  # fewer nodes than are actually up.
+  local i=0 n=0
+  while (( i < 60 )); do
+    n="$(ros2 node list 2>/dev/null | wc -l)"
+    (( n >= 10 )) && break
+    sleep 1; (( i++ ))
+  done
+  echo "graph reports $n/10 nodes after ${i}s"
 }
 
 status() {
@@ -76,14 +84,12 @@ stop() {
     return 0
   fi
   while read -r pid; do
-    [[ -n "$pid" ]] && kill "$pid" 2>/dev/null
+    [[ -n "$pid" ]] || continue
+    # negative PID == the whole process group started by `setsid`
+    kill -- -"$pid" 2>/dev/null || kill "$pid" 2>/dev/null
   done < "$PID_FILE"
-  # The `ros2 run` wrappers fork the real node; clean those up too.
+  # Safety net, anchored to THIS rig's own scripts (never a bare node name).
   pkill -f "$HERE/lab_" 2>/dev/null
-  pkill -f "turtlesim_node" 2>/dev/null
-  pkill -f "demo_nodes_cpp" 2>/dev/null
-  pkill -f "fibonacci_action_server" 2>/dev/null
-  pkill -f "static_transform_publisher" 2>/dev/null
   rm -f "$PID_FILE"
   echo "stopped"
 }
