@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { execFileSync } from 'node:child_process'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 import { buildRos2InstallDownloadCommand, createRos2Tools } from '../src/tools.js'
-import { type RunFn, type ToolResult, type RosResult } from 'dsh-ros2-common'
+import { type RunFn, type ToolResult, type RosResult, registerLoadedBundle } from 'dsh-ros2-common'
 
 // The ros2_install interactive flow drives a real pseudo-terminal through
 // scripts/pty_session.py (python3 + pty). Some headless/container environments
@@ -749,6 +752,67 @@ describe('ros2_env_check', () => {
     const out = await call('ros2_env_check', run, {})
     expect(out.ok).toBe(true)
     expect(out.warnings?.[0]).toContain('未检测到可见 ROS2 包')
+  })
+
+  // issue #22: a bundle updated on disk while the process keeps the old code
+  // used to be invisible until something failed with "unknown tool".
+  it('reports a stale process by comparing loaded and on-disk bundle versions', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'dsh-bundle-drift-'))
+    const pkgPath = path.join(dir, 'package.json')
+    writeFileSync(pkgPath, JSON.stringify({ name: 'dsh-ros2-core', version: '0.1.6' }))
+    const dispose = registerLoadedBundle({ name: 'dsh-ros2-core', version: '0.1.5', packageJsonPath: pkgPath })
+    try {
+      const run = makeRun(() => ({ stdout: '__AMENT=/opt/ros/jazzy\n__COLCON=\n__PKGS=120\n__NODES=3\n' }))
+      const out = await call('ros2_env_check', run, {})
+      expect(out.ok).toBe(true)
+      const data = out.data as { bundles: { stale: boolean; loaded: { name: string; version: string }[]; drift: unknown[] } }
+      expect(data.bundles.stale).toBe(true)
+      expect(data.bundles.loaded).toEqual([{ name: 'dsh-ros2-core', version: '0.1.5' }])
+      expect(data.bundles.drift).toEqual([
+        { name: 'dsh-ros2-core', loaded: '0.1.5', installed: '0.1.6', drifted: true },
+      ])
+      expect(out.warnings?.some((w) => w.includes('dsh-ros2-core 0.1.5 → 0.1.6'))).toBe(true)
+      expect(out.warnings?.some((w) => w.includes('重启 harness'))).toBe(true)
+      // the ROS2 package hint must still be the first warning
+      expect(out.warnings?.some((w) => w.includes('未检测到可见 ROS2 包'))).toBe(false)
+    } finally {
+      dispose()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('reports no drift when the loaded bundle still matches disk', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'dsh-bundle-ok-'))
+    const pkgPath = path.join(dir, 'package.json')
+    writeFileSync(pkgPath, JSON.stringify({ name: 'dsh-ros2-profile', version: '0.1.0' }))
+    const dispose = registerLoadedBundle({ name: 'dsh-ros2-profile', version: '0.1.0', packageJsonPath: pkgPath })
+    try {
+      const run = makeRun(() => ({ stdout: '__AMENT=/opt/ros/jazzy\n__PKGS=120\n__NODES=3\n' }))
+      const out = await call('ros2_env_check', run, {})
+      const data = out.data as { bundles: { stale: boolean; unresolved: string[] } }
+      expect(data.bundles.stale).toBe(false)
+      expect(data.bundles.unresolved).toEqual([])
+      expect(out.warnings ?? []).toEqual([])
+    } finally {
+      dispose()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('flags a loaded bundle whose package.json is gone as unresolved', async () => {
+    const dispose = registerLoadedBundle({
+      name: 'dsh-ros2-gone', version: '9.9.9', packageJsonPath: '/nonexistent/dsh-ros2-gone/package.json',
+    })
+    try {
+      const run = makeRun(() => ({ stdout: '__AMENT=/opt/ros/jazzy\n__PKGS=120\n__NODES=3\n' }))
+      const out = await call('ros2_env_check', run, {})
+      const data = out.data as { bundles: { stale: boolean; unresolved: string[] } }
+      expect(data.bundles.stale).toBe(false)
+      expect(data.bundles.unresolved).toEqual(['dsh-ros2-gone'])
+      expect(out.warnings?.some((w) => w.includes('package.json 已不可读'))).toBe(true)
+    } finally {
+      dispose()
+    }
   })
 })
 
