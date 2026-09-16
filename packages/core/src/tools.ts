@@ -45,6 +45,7 @@ import {
   resolveSetup,
   shq,
   bundleDriftReport,
+  formatBundleStartupReport,
 } from 'dsh-ros2-common'
 import { spawnJob } from 'dsh-ros2-common'
 
@@ -1480,34 +1481,37 @@ function makeEnvCheckTool(deps: CoreToolDeps) {
       }
       grab('AMENT'); grab('COLCON'); grab('PKGS'); grab('NODES')
 
-      // Loaded vs installed bundle versions (issue #22). Each mounted bundle
-      // recorded the package.json it was loaded from; re-reading those files
-      // shows whether the disk moved on without the process.
+      // Loaded vs installed bundle versions + the surface each bundle actually
+      // registered in this process (issue #22). Each mounted bundle recorded the
+      // package.json it was loaded from; re-reading those files shows whether
+      // the disk moved on without the process, and the per-bundle tool/skill
+      // surface makes a session catalogue that disagrees directly comparable
+      // instead of inferred.
       const bundles = bundleDriftReport()
       out.bundles = {
         loaded: bundles.loaded,
         drift: bundles.drift,
         stale: bundles.stale,
         unresolved: bundles.unresolved,
+        surface: bundles.surface,
+        unreported: bundles.unreported,
+        totalTools: bundles.totalTools,
+        totalSkills: bundles.totalSkills,
+        expected: bundles.expected,
+        declaredBy: bundles.declaredBy,
+        missing: bundles.missing,
+        undeclared: bundles.undeclared,
       }
       if (setup.note) out.note = setup.note
 
       const result = okResult('ros2_env_check', 'ros2 env probe', out as JsonValue)
-      const warnings: string[] = []
+      // One wording for the stale/missing/unreported signals, shared with the
+      // startup probe: a diagnostic that says something different depending on
+      // how you ask is worse than no diagnostic.
+      const warnings: string[] = [...formatBundleStartupReport(bundles).warnings]
       const pkgs = out.visiblePackages as number | undefined
       if (pkgs === undefined || pkgs === 0) {
         warnings.push('未检测到可见 ROS2 包——环境可能未 source 或 rosSetup 路径无效；可用 ros2_workspace use <workspace> 切换')
-      }
-      const drifted = bundles.drift.filter((d) => d.drifted)
-      if (drifted.length > 0) {
-        warnings.push(
-          '检测到磁盘上的 dsh-ros2 bundle 已更新，但运行中的进程仍是旧代码：' +
-          drifted.map((d) => `${d.name} ${d.loaded} → ${d.installed}`).join('、') +
-          '。新工具/技能不会被加载（症状是 unknown tool 或技能目录缺项）；请重启 harness 后重试。')
-      }
-      if (bundles.unresolved.length > 0) {
-        warnings.push(
-          `以下已加载 bundle 的 package.json 已不可读，无法判断是否陈旧：${bundles.unresolved.join('、')}`)
       }
       if (bundles.loaded.length === 0) {
         warnings.push('未记录到任何已加载的 dsh-ros2 bundle——bundle 未挂载，或版本早于本诊断功能（重启 harness 后可自证）。')

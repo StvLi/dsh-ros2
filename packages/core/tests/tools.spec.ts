@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { buildRos2InstallDownloadCommand, createRos2Tools } from '../src/tools.js'
-import { type RunFn, type ToolResult, type RosResult, registerLoadedBundle } from 'dsh-ros2-common'
+import { type RunFn, type ToolResult, type RosResult, declareExpectedBundles, registerLoadedBundle } from 'dsh-ros2-common'
 
 // The ros2_install interactive flow drives a real pseudo-terminal through
 // scripts/pty_session.py (python3 + pty). Some headless/container environments
@@ -760,7 +760,10 @@ describe('ros2_env_check', () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'dsh-bundle-drift-'))
     const pkgPath = path.join(dir, 'package.json')
     writeFileSync(pkgPath, JSON.stringify({ name: 'dsh-ros2-core', version: '0.1.6' }))
-    const dispose = registerLoadedBundle({ name: 'dsh-ros2-core', version: '0.1.5', packageJsonPath: pkgPath })
+    const dispose = registerLoadedBundle({
+      name: 'dsh-ros2-core', version: '0.1.5', packageJsonPath: pkgPath,
+      surface: () => ({ tools: ['ros2_env_check'], skills: ['ros2-diagnostics'] }),
+    })
     try {
       const run = makeRun(() => ({ stdout: '__AMENT=/opt/ros/jazzy\n__COLCON=\n__PKGS=120\n__NODES=3\n' }))
       const out = await call('ros2_env_check', run, {})
@@ -785,13 +788,33 @@ describe('ros2_env_check', () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'dsh-bundle-ok-'))
     const pkgPath = path.join(dir, 'package.json')
     writeFileSync(pkgPath, JSON.stringify({ name: 'dsh-ros2-profile', version: '0.1.0' }))
-    const dispose = registerLoadedBundle({ name: 'dsh-ros2-profile', version: '0.1.0', packageJsonPath: pkgPath })
+    const dispose = registerLoadedBundle({
+      name: 'dsh-ros2-profile', version: '0.1.0', packageJsonPath: pkgPath,
+      surface: () => ({ tools: ['robot_load', 'robot_topology'], skills: ['robot-retrieval'] }),
+    })
     try {
       const run = makeRun(() => ({ stdout: '__AMENT=/opt/ros/jazzy\n__PKGS=120\n__NODES=3\n' }))
       const out = await call('ros2_env_check', run, {})
-      const data = out.data as { bundles: { stale: boolean; unresolved: string[] } }
+      const data = out.data as {
+        bundles: {
+          stale: boolean
+          unresolved: string[]
+          unreported: string[]
+          totalTools: number
+          totalSkills: number
+          surface: { name: string; tools: number; skills: string[] }[]
+        }
+      }
       expect(data.bundles.stale).toBe(false)
       expect(data.bundles.unresolved).toEqual([])
+      // issue #22: what the process actually registered, so a session catalogue
+      // that disagrees is comparable rather than inferred.
+      expect(data.bundles.unreported).toEqual([])
+      expect(data.bundles.surface).toEqual([
+        { name: 'dsh-ros2-profile', tools: 2, skills: ['robot-retrieval'] },
+      ])
+      expect(data.bundles.totalTools).toBe(2)
+      expect(data.bundles.totalSkills).toBe(1)
       expect(out.warnings ?? []).toEqual([])
     } finally {
       dispose()
@@ -799,9 +822,58 @@ describe('ros2_env_check', () => {
     }
   })
 
+  it('names a bundle that cannot report its surface (stale build) in a warning', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'dsh-bundle-nosurface-'))
+    const pkgPath = path.join(dir, 'package.json')
+    writeFileSync(pkgPath, JSON.stringify({ name: 'dsh-ros2-old', version: '0.1.0' }))
+    // A bundle built before the surface feature registered no thunk at all.
+    const dispose = registerLoadedBundle({ name: 'dsh-ros2-old', version: '0.1.0', packageJsonPath: pkgPath })
+    try {
+      const run = makeRun(() => ({ stdout: '__AMENT=/opt/ros/jazzy\n__PKGS=120\n__NODES=3\n' }))
+      const out = await call('ros2_env_check', run, {})
+      expect(out.ok).toBe(true)
+      const data = out.data as { bundles: { unreported: string[]; surface: unknown[] } }
+      expect(data.bundles.unreported).toEqual(['dsh-ros2-old'])
+      expect(data.bundles.surface).toEqual([])
+      expect(out.warnings?.some((w) => w.includes('未报告自身工具/技能') && w.includes('dsh-ros2-old'))).toBe(true)
+    } finally {
+      dispose()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('reconciles the declared bundle set against what actually mounted', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'dsh-bundle-declared-'))
+    const pkgPath = path.join(dir, 'package.json')
+    writeFileSync(pkgPath, JSON.stringify({ name: 'dsh-ros2', version: '0.1.0' }))
+    const disposeBundle = registerLoadedBundle({
+      name: 'dsh-ros2', version: '0.1.0', packageJsonPath: pkgPath,
+      surface: () => ({ tools: [], skills: [] }),
+    })
+    // The manifest declares core + profile; only the aggregate mounted.
+    const disposeDeclaration = declareExpectedBundles({
+      by: 'dsh-ros2', names: ['dsh-ros2', 'dsh-ros2-core', 'dsh-ros2-profile'],
+    })
+    try {
+      const run = makeRun(() => ({ stdout: '__AMENT=/opt/ros/jazzy\n__PKGS=120\n__NODES=3\n' }))
+      const out = await call('ros2_env_check', run, {})
+      const data = out.data as { bundles: { expected: string[]; declaredBy: string; missing: string[]; undeclared: string[] } }
+      expect(data.bundles.declaredBy).toBe('dsh-ros2')
+      expect(data.bundles.expected).toEqual(['dsh-ros2', 'dsh-ros2-core', 'dsh-ros2-profile'])
+      expect(data.bundles.missing).toEqual(['dsh-ros2-core', 'dsh-ros2-profile'])
+      expect(data.bundles.undeclared).toEqual([])
+      expect(out.warnings?.some((w) => w.includes('声明但未挂载') && w.includes('dsh-ros2-core'))).toBe(true)
+    } finally {
+      disposeDeclaration()
+      disposeBundle()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   it('flags a loaded bundle whose package.json is gone as unresolved', async () => {
     const dispose = registerLoadedBundle({
       name: 'dsh-ros2-gone', version: '9.9.9', packageJsonPath: '/nonexistent/dsh-ros2-gone/package.json',
+      surface: () => ({ tools: ['state_get'], skills: [] }),
     })
     try {
       const run = makeRun(() => ({ stdout: '__AMENT=/opt/ros/jazzy\n__PKGS=120\n__NODES=3\n' }))
