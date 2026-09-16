@@ -754,6 +754,42 @@ describe('ros2_env_check', () => {
     expect(out.warnings?.[0]).toContain('未检测到可见 ROS2 包')
   })
 
+  // A probe that never finished used to be indistinguishable from an unsourced
+  // environment, so the tool blamed the environment for its own failure.
+  it('blames the probe, not the environment, when the probe times out', async () => {
+    const run = makeRun(() => ({ ok: false, stdout: '', stderr: 'killed', exitCode: 124, timedOut: true, durationMs: 20000 }))
+    const out = await call('ros2_env_check', run, {})
+    expect(out.ok).toBe(true)
+    const data = out.data as { probe: { timedOut: boolean; durationMs: number; stdoutBytes: number; exitCode: number }; setup: Record<string, unknown> }
+    expect(data.probe).toMatchObject({ timedOut: true, durationMs: 20000, stdoutBytes: 0, exitCode: 124 })
+    expect(out.warnings?.some((w) => w.includes('超时') && w.includes('不代表环境未 source'))).toBe(true)
+    expect(out.warnings?.some((w) => w.includes('未检测到可见 ROS2 包'))).toBe(false)
+    expect(data.setup).toHaveProperty('sourcePath')
+  })
+
+  it('reports an empty or failing probe as unusable rather than as an unsourced environment', async () => {
+    const run = makeRun(() => ({ ok: false, stdout: '', stderr: 'bash: ros2: command not found', exitCode: 127 }))
+    const out = await call('ros2_env_check', run, {})
+    const data = out.data as { probe: { exitCode: number; stderrTail: string } }
+    expect(data.probe.exitCode).toBe(127)
+    expect(data.probe.stderrTail).toContain('command not found')
+    expect(out.warnings?.some((w) => w.includes('未返回可解析的结果') && w.includes('127'))).toBe(true)
+    expect(out.warnings?.some((w) => w.includes('未检测到可见 ROS2 包'))).toBe(false)
+  })
+
+  // The live shape: the probe exits 0 and prints something, but the marker the
+  // tool parses never arrives — previously reported as "环境未 source", which
+  // is a conclusion the evidence does not support.
+  it('does not diagnose sourcing when the probe output carries no package marker', async () => {
+    const run = makeRun(() => ({ stdout: 'something else entirely\n' }))
+    const out = await call('ros2_env_check', run, {})
+    const data = out.data as { probe: { stdoutBytes: number }; amentPrefixPath?: string }
+    expect(data.probe.stdoutBytes).toBeGreaterThan(0)
+    expect(data.amentPrefixPath).toBeUndefined()
+    expect(out.warnings?.some((w) => w.includes('缺少可解析的包计数标记'))).toBe(true)
+    expect(out.warnings?.some((w) => w.includes('未检测到可见 ROS2 包'))).toBe(false)
+  })
+
   // issue #22: a bundle updated on disk while the process keeps the old code
   // used to be invisible until something failed with "unknown tool".
   it('reports a stale process by comparing loaded and on-disk bundle versions', async () => {

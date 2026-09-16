@@ -1474,6 +1474,16 @@ function makeEnvCheckTool(deps: CoreToolDeps) {
           explicit: setup.explicit,
           sessionOverride: getSessionRosSetup(),
         },
+        // The probe's own outcome. Without this a probe that never finished was
+        // indistinguishable from an unsourced environment, and the tool blamed
+        // the environment for its own failure.
+        probe: {
+          exitCode: res.exitCode,
+          timedOut: res.timedOut,
+          durationMs: res.durationMs,
+          stdoutBytes: res.stdout.length,
+          stderrTail: tail(res.stderr).join(' | '),
+        },
       }
       const grab = (key: string) => {
         const m = new RegExp(`__${key}=(.*)`).exec(res.stdout)
@@ -1510,7 +1520,27 @@ function makeEnvCheckTool(deps: CoreToolDeps) {
       // how you ask is worse than no diagnostic.
       const warnings: string[] = [...formatBundleStartupReport(bundles).warnings]
       const pkgs = out.visiblePackages as number | undefined
-      if (pkgs === undefined || pkgs === 0) {
+      // A probe that never finished / failed says nothing about whether the
+      // environment is sourced, so it must not be reported as "not sourced".
+      if (res.timedOut) {
+        warnings.push(
+          `ROS2 环境探针在 ${res.durationMs}ms 后超时（上限 20000ms），没有取得任何结果——` +
+          '这不代表环境未 source，而是探针本身没跑完（常见于 `ros2 pkg list` 在该进程环境里挂住）。' +
+          `可先用 ros2_workspace show 或在登录 shell 里手工复核。stderr 末尾：${tail(res.stderr).join(' | ') || '(空)'}`)
+      } else if (res.stdout.trim() === '' || res.exitCode !== 0) {
+        warnings.push(
+          `ROS2 环境探针未返回可解析的结果（退出码 ${res.exitCode}、stdout ${res.stdout.length} 字节），` +
+          '因此下面的可见包/节点数字不可用；这通常说明探针命令在该进程环境里失败，而非 rosSetup 路径无效。' +
+          `stderr 末尾：${tail(res.stderr).join(' | ') || '(空)'}`)
+      } else if (pkgs === undefined) {
+        // The probe exited cleanly but no `__PKGS=` marker came back, so the
+        // result is unusable — still not evidence about sourcing. This is the
+        // shape a live session hit: a demonstrably sourced environment was
+        // reported as "未检测到可见 ROS2 包".
+        warnings.push(
+          `ROS2 环境探针有输出（${res.stdout.length} 字节）但缺少可解析的包计数标记，可见包/节点数字不可用；` +
+          `stderr 末尾：${tail(res.stderr).join(' | ') || '(空)'}`)
+      } else if (pkgs === 0) {
         warnings.push('未检测到可见 ROS2 包——环境可能未 source 或 rosSetup 路径无效；可用 ros2_workspace use <workspace> 切换')
       }
       if (bundles.loaded.length === 0) {
