@@ -30,6 +30,17 @@ const VISION_SERVICE = 'dshRos2.vision'
 /** The package.json this process actually loaded (issue #22: stale detection). */
 const BUNDLE_INFO = readOwnVersion(import.meta.url)
 
+/**
+ * Every skill this bundle ships — one source for both the registration below
+ * and the loaded-bundle surface report, so the two cannot drift apart.
+ */
+const SKILLS = [
+  ros2DiagnosticsSkill,
+  ros2BringupRecoverySkill,
+  ros2LivenessTriageSkill,
+  ros2TfIntegritySkill,
+] as const
+
 /** The slice of the harness `systemPrompt` service this bundle contributes to. */
 interface PromptSection {
   readonly name: string
@@ -43,7 +54,12 @@ interface SystemPromptService {
 }
 
 export function apply(ctx: Context, config: CoreConfig): void {
-  ctx.effect(() => registerLoadedBundle({ name: 'dsh-ros2-core', ...BUNDLE_INFO }))
+  // The surface thunk is lazy: it runs at report time, after `tools` below.
+  ctx.effect(() => registerLoadedBundle({
+    name: 'dsh-ros2-core',
+    ...BUNDLE_INFO,
+    surface: () => ({ tools: tools.map((tool) => tool.name), skills: SKILLS.map((skill) => skill.name) }),
+  }))
   ctx.logger.info(`dsh-ros2: loaded bundle dsh-ros2-core@${BUNDLE_INFO.version}`)
 
   const run = makeRun(config)
@@ -82,12 +98,7 @@ export function apply(ctx: Context, config: CoreConfig): void {
   // entry point; the other three own a named journey with its own L1 entry
   // tool (bring-up recovery, liveness triage, TF integrity).
   ctx.effect(() => {
-    const disposers = [
-      ctx.skills.register(ros2DiagnosticsSkill),
-      ctx.skills.register(ros2BringupRecoverySkill),
-      ctx.skills.register(ros2LivenessTriageSkill),
-      ctx.skills.register(ros2TfIntegritySkill),
-    ]
+    const disposers = SKILLS.map((skill) => ctx.skills.register(skill))
     return () => disposers.forEach((dispose) => dispose())
   })
 
