@@ -29,6 +29,7 @@
   - 缺失的 source 路径；
   - 已自动回退到哪个 setup（或无可用 setup）；
   - 宿主检测到的 `AMENT_PREFIX_PATH` / `COLCON_PREFIX_PATH`。
+  - 2026-09-21 起：**整条 `&&` 链逐段校验**（不再只看第一段），缺失段被剔除、其余段保留——见文末"整链校验"。
 - 诊断以 `sourceOk` / `envNote` 字段随结果返回，错误信息带 `[env]` 前缀，Agent 可直接读到。
 
 **新工具 `ros2_env_check`（L1 只读）**：一次报告"当前 source 哪个 overlay、路径是否存在、可见多少个包/多少节点"——0 包即环境未 source，一眼定位。
@@ -109,3 +110,40 @@ ros2_workspace {action: "reset"}
 2. **仅对"source 路径不存在"自动回退**：若显式 `rosSetup` 路径存在但内容过时（旧 overlay），不会静默替换（那是用户的明确选择）——诊断会如实报告。
 3. **无 source 兜底 = 裸宿主 PATH**：此时 `ros2` 可能不在 PATH，命令报 `command not found`——`ros2_env_check` 的 0 包结果即此情形，按 P2 路径处理。
 4. 若你希望**配置级** `rosSetup` 也支持"多工作区"，可后续在 DSH profile 里按 bundle 配置不同 `rosSetup`（各域包已支持），或反馈需要统一的全局配置入口。
+
+---
+
+## 整链校验（2026-09-21 更新）
+
+**动机（现场）**：一个部署的 `rosSetup` 是
+`source /home/stvli/lite_delivery_aio/install/setup.bash && source /tmp/vlm_ws/install/setup.bash &&`，
+而 `/tmp/vlm_ws` 已被删除。旧实现只 `existsSync` **第一段**，于是：
+
+- 判定"配置正常"（`explicit: true`、无 note）；
+- 每一次调用都实际失败（`bash: line 1: /tmp/vlm_ws/install/setup.bash: No such file or directory`）；
+- `ros2_env_check` 还把失败归给探针，明说"**而非 rosSetup 路径无效**"——与同一行的 stderr 互相矛盾。
+
+**现在的行为**：`resolveSetup` 按 `&&` 拆段、**逐段**校验每个 `source` 路径。
+
+| 情形 | 行为 |
+| --- | --- |
+| 全部段落都存在 | 前缀**原样返回**（逐字节不变，零行为变化） |
+| 部分段落缺失 | **只剔除缺失段，保留其余段**；`note` / `envNote` 点名缺失路径；`missingSources` 如实列出 |
+| 全部段落都缺失 | 沿用原策略：自动回退到 `workspaceRoot/install/setup.bash` → `/opt/ros/<distro>/setup.bash` → 无 source |
+
+**为什么"剔除"而不是"整链回退"**：这条链是用户为**构建当前环境**写的；整链换成自动探测到的 setup 会悄悄 source 成另一个环境（丢失交付工作区 overlay），而"剔除死段、保留活段"得到的正是用户本来的意图。若一段都不剩，才谈得上回退。
+
+`ros2_env_check` 的 `data.setup.missingSources`（非空才出现）与 `note` 都是这条判断的显式出口；探针失败时的告警也改为**引用**该结论，不再无条件否认 rosSetup 有问题。
+
+**实测（字面量使用上述线上配置，走已构建的 `lib/`）**：
+
+```text
+修复前：ok=false  exit=1  stdout 空  stderr: bash: line 1: /tmp/vlm_ws/install/setup.bash: No such file or directory
+修复后：ok=true   exit=0  __PKGS=450
+        envNote: [env] 配置的 rosSetup 链中有 source 路径不存在：/tmp/vlm_ws/install/setup.bash；
+                 已剔除该段，改用其余 1 段（首个 source：/home/stvli/lite_delivery_aio/install/setup.bash）。建议修正配置。
+```
+
+即：**插件能自愈这个坏配置**（无需改配置、无需重启即生效于下一次调用）。配置本身仍建议修正——自愈是兜底，不是许可。
+
+**新增测试**：common `runner.spec.ts` +5（尾段缺失保留头段、多段链只剔缺失段且其余逐字保留、全健康零变化、全缺失才回退并点名全部、会话覆盖链同样校验）；core `tools.spec.ts` +2（缺失段作为数据如实报告；探针失败时告警指向配置而非否认 rosSetup）。
