@@ -113,6 +113,15 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 
 ### Fixed
 
+- **根脚本 `typecheck` / `test` 在"干净 clone"（CI）上必然失败**（第九轮的在途分支从未开 PR，
+  故这条首次由 CI 抓出）：`packages/dsh-ros2/tests/mount.spec.ts` 按**真实包名**导入 6 个 bundle，
+  而 TypeScript 与 vite 依据各包 `package.json` 的 `types` / `main` 解析到 `lib/`；旧脚本却只在
+  类型检查前构建 **`dsh-ros2-common` 一个包**，其余包的 `lib/` 在 CI 里并不存在 —— 于是该测试文件
+  报 6 条 `TS2307: Cannot find module 'dsh-ros2-…'`，类型检查直接失败（`test` 步骤同因，只是还没跑到）。
+  本地全绿的原因正是工作区里**留着上一轮构建的 `lib/`**：典型的"本地绿、CI 红"。
+  修复：根 `typecheck` / `test` 改为先 `pnpm run build`（`pnpm -r build` 按拓扑序构建：common →
+  各域 bundle → 聚合包）再 `pnpm -r typecheck` / `pnpm -r test`，使每个根脚本在干净 clone 上自足。
+  实测从"删掉全部 `lib/`"起：`typecheck` 8.3s 全绿、`test` 8.0s 全绿（277 例）。
 - **`ros2_env_check` 把探针自身的失败怪到环境头上**：探针超时 / 退出码非 0 / 有输出但没有包计数标记时，
   旧实现一律报"未检测到可见 ROS2 包——环境可能未 source 或 rosSetup 路径无效"。现在返回
   `data.probe = { exitCode, timedOut, durationMs, stdoutBytes, stderrTail }`，并按形状分别措辞
