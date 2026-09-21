@@ -1552,6 +1552,10 @@ function makeEnvCheckTool(deps: CoreToolDeps) {
           sourcePath: setup.sourcePath,
           explicit: setup.explicit,
           sessionOverride: getSessionRosSetup(),
+          // Every configured segment is existence-checked (not just the first),
+          // so a chain whose tail was deleted shows up as data, not as a
+          // mysterious probe failure.
+          ...(setup.missingSources.length > 0 ? { missingSources: setup.missingSources } : {}),
         },
         // The probe's own outcome. Without this a probe that never finished was
         // indistinguishable from an unsourced environment, and the tool blamed
@@ -1613,9 +1617,20 @@ function makeEnvCheckTool(deps: CoreToolDeps) {
           '这不代表环境未 source，而是探针本身没跑完（常见于 `ros2 pkg list` 在该进程环境里挂住）。' +
           `可先用 ros2_workspace show 或在登录 shell 里手工复核。stderr 末尾：${tail(res.stderr).join(' | ') || '(空)'}`)
       } else if (res.stdout.trim() === '' || res.exitCode !== 0) {
+        // A misconfigured chain is a fact about the configuration, and the
+        // resolution knows it. Saying "the path is fine, it must be the probe"
+        // is only correct when no configured segment is missing — otherwise the
+        // tool contradicts its own diagnostic (a live deployment hit exactly
+        // this: stderr named the deleted setup file while the warning denied it).
+        const setupHint = setup.missingSources.length > 0
+          ? `其中配置的 rosSetup source 路径不存在（${setup.missingSources.join('、')}）——` +
+            (setup.prefix
+              ? '该段已按策略剔除，失败原因仍以 stderr 为准。'
+              : '且没有可用的回退 setup，失败点是配置本身。')
+          : '这通常说明探针命令在该进程环境里失败，而非 rosSetup 路径无效。'
         warnings.push(
           `ROS2 环境探针未返回可解析的结果（退出码 ${res.exitCode}、stdout ${res.stdout.length} 字节），` +
-          '因此下面的可见包/节点数字不可用；这通常说明探针命令在该进程环境里失败，而非 rosSetup 路径无效。' +
+          `因此下面的可见包/节点数字不可用；${setupHint}` +
           `stderr 末尾：${tail(res.stderr).join(' | ') || '(空)'}`)
       } else if (pkgs === undefined) {
         // The probe exited cleanly but no `__PKGS=` marker came back, so the
@@ -1703,6 +1718,7 @@ function makeWorkspaceTool(deps: CoreToolDeps) {
         action: 'show',
         sessionOverride: getSessionRosSetup() ?? null,
         effective: { prefix: setup.prefix || '(无 source)', sourcePath: setup.sourcePath, explicit: setup.explicit },
+        ...(setup.missingSources.length > 0 ? { missingSources: setup.missingSources } : {}),
         ...(setup.note ? { note: setup.note } : {}),
       })
     },

@@ -90,11 +90,12 @@ export function getSessionRosSetup(): string | null {
 }
 
 /**
- * Extract the source path from a shell prefix `source <path> && `, where
- * <path> may be bare, single-quoted (shq), or double-quoted. Returns the
- * unquoted path so callers can `existsSync` it. Bare paths are matched up to
- * the first whitespace / shell control token (legacy behaviour); quoted
- * paths are de-quoted so a path containing spaces round-trips correctly.
+ * Extract the source path from ONE `&&`-separated segment of a shell prefix
+ * (`source <path>`), where <path> may be bare, single-quoted (shq), or
+ * double-quoted. Returns the unquoted path so callers can `existsSync` it.
+ * Bare paths are matched up to the first whitespace / shell control token
+ * (legacy behaviour); quoted paths are de-quoted so a path containing spaces
+ * round-trips correctly.
  */
 function extractSourcePath(prefix: string): string | undefined {
   const m = /\bsource\s+(?:'([^']*)'|"([^"]*)"|([^\s&;|]+))/.exec(prefix)
@@ -135,25 +136,78 @@ export interface SetupResolution {
   autoCandidate: string | null
   /** Human note (fallback used / misconfiguration) — becomes envNote on errors. */
   note: string
+  /** Configured `source` paths that do not exist on disk ([] = healthy). */
+  missingSources: string[]
 }
 
-/** Resolve the effective setup prefix (session override -> config -> auto). */
+/**
+ * Split `source A && source B && ` into its `&&`-separated segments, keeping
+ * each segment's text verbatim so a rebuild cannot change its quoting. A
+ * trailing `&&` only produces an empty last part, which is a separator.
+ */
+function splitSourceChain(prefix: string): string[] {
+  const parts = prefix.split('&&')
+  if (parts.length > 1 && parts[parts.length - 1]!.trim() === '') parts.pop()
+  return parts
+}
+
+/**
+ * Resolve the effective setup prefix (session override -> config -> auto).
+ *
+ * EVERY `source` segment is existence-checked, not just the first one: a chain
+ * whose tail points at a since-deleted workspace makes each call fail on the
+ * tail while the head still looks healthy, so a first-segment-only check
+ * reported a healthy explicit setup and left the failure to stderr. When a
+ * segment is missing it is dropped and the remaining ones are kept — the chain
+ * was written to build *this* environment, so replacing it wholesale with an
+ * auto-detected setup would quietly source something else. If nothing usable
+ * remains, the original auto-detect fallback applies.
+ */
 export function resolveSetup(opts: RunOptions): SetupResolution {
   const explicit = sessionRosSetup ?? opts.rosSetup ?? ''
   if (explicit) {
-    const src = extractSourcePath(explicit)
-    if (src && !existsSync(src)) {
-      // explicit source path is wrong: report + auto-correct via the chain
+    const missingSources: string[] = []
+    const healthy: string[] = []
+    for (const segment of splitSourceChain(explicit)) {
+      const src = extractSourcePath(segment)
+      if (src && !existsSync(src)) missingSources.push(src)
+      else healthy.push(segment)
+    }
+    if (missingSources.length === 0) {
+      return {
+        prefix: explicit,
+        sourcePath: extractSourcePath(explicit) ?? null,
+        explicit: true,
+        autoCandidate: null,
+        note: '',
+        missingSources,
+      }
+    }
+    const kept = healthy.map((segment) => segment.trim()).filter((segment) => segment.length > 0)
+    if (kept.length === 0) {
+      // explicit source path(s) all wrong: report + auto-correct via the chain
       const auto = autoDetectSetup(opts)
       return {
         prefix: auto ? `source ${auto} && ` : '',
         sourcePath: auto ?? null,
         explicit: true,
         autoCandidate: auto ?? null,
-        note: `配置的 rosSetup source 路径不存在：${src}；已自动回退${auto ? `到 ${auto}` : '（无可用 setup，直接调用 ros2，依赖宿主 PATH）'}。建议修正配置。`,
+        note: `配置的 rosSetup source 路径不存在：${missingSources.join('、')}；已自动回退${auto ? `到 ${auto}` : '（无可用 setup，直接调用 ros2，依赖宿主 PATH）'}。建议修正配置。`,
+        missingSources,
       }
     }
-    return { prefix: explicit, sourcePath: src ?? null, explicit: true, autoCandidate: null, note: '' }
+    const prefix = `${kept.join(' && ')} && `
+    // `sourcePath` stays "the first source that will actually run": segments
+    // may precede it (e.g. `export …`), so read it off the rebuilt prefix.
+    const first = extractSourcePath(prefix)
+    return {
+      prefix,
+      sourcePath: first ?? null,
+      explicit: true,
+      autoCandidate: null,
+      note: `配置的 rosSetup 链中有 source 路径不存在：${missingSources.join('、')}；已剔除该段，改用其余 ${kept.length} 段（首个 source：${first ?? kept[0]!}）。建议修正配置。`,
+      missingSources,
+    }
   }
   const auto = autoDetectSetup(opts)
   return {
@@ -162,6 +216,7 @@ export function resolveSetup(opts: RunOptions): SetupResolution {
     explicit: false,
     autoCandidate: auto ?? null,
     note: auto ? '' : '未检测到 ros setup（直接调用 ros2，依赖宿主 PATH；可用 ros2_env_check 诊断）',
+    missingSources: [],
   }
 }
 

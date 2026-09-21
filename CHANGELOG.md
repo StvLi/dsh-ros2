@@ -78,6 +78,20 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 
 ### Changed
 
+- **工作区 vitest 用例 277 → 284 例**（本轮 +7：common +5 整链校验、core +2 诊断措辞与数据出口）。
+  分布：common 50 + core 131(130 过 +1 skip) + moveit 16 + profile 14 + safety 10 + vision 30 +
+  state 8 + dsh-ros2 25 = **284**。README / README_CN 开发章节同步校正为 284 例。
+- **`rosSetup` 改为整条 `&&` 链逐段校验**（旧实现只校验**第一段**）：链条 `source A && source B &&`
+  在 `B` 已删除时，旧行为判定"配置正常"却让**每一次**调用都失败在 `B` 上（现场案例：`/tmp/vlm_ws`
+  被删）。现在逐段 `existsSync`，并按情形处理：
+  - 全部存在 → 前缀**逐字节原样返回**（零行为变化）；
+  - 部分缺失 → **只剔除缺失段、保留其余段**（这条链是用户为构建当前环境写的，整链换成自动探测会悄悄
+    source 成另一个环境），`SetupResolution.missingSources` 与 `note` / `envNote` 点名缺失路径；
+  - 全部缺失 → 沿用原策略自动回退（`workspaceRoot/install/setup.bash` → `/opt/ros/<distro>/setup.bash`
+    → 无 source）。
+  `ros2_env_check` 的 `setup.missingSources`（非空才出现）与 `ros2_workspace show` 同步暴露该结论。
+  实测（字面量使用线上坏配置，走已构建 `lib/`）：修复前 `ok=false, exit=1, stdout 空` →
+  修复后 `ok=true, exit=0, __PKGS=450`。**插件自此能自愈这类坏配置**（仍是兜底，配置本身建议修正）。
 - **工作区 vitest 用例 241 → 277 例**（第八轮收尾 240 通过 + 1 skip → 本轮 276 通过 + 1 skip；
   +36 例：bundle 能力面 / 挂载对账 / 启动自检、`ros2_env_check` 探针自述、技能目录对账、
   setup 报告回归，外加挂载测试对能力面的断言）。分布：common 45 + core 129(128 过 +1 skip) +
@@ -113,6 +127,11 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 
 ### Fixed
 
+- **`ros2_env_check` 在探针失败时无条件否认 rosSetup 有问题**：告警文案写死"这通常说明探针命令在该进程
+  环境里失败，**而非 rosSetup 路径无效**"——在"链尾被删"的现场，同一行的 stderr 恰恰就是
+  `bash: line 1: /tmp/vlm_ws/install/setup.bash: No such file or directory`，诊断在自相矛盾。
+  现在该判断来自**环境解析本身**：有缺失段时告警点名缺失路径（并说明该段已被剔除，失败原因仍以 stderr
+  为准；若无可回退 setup 则直接指出失败点是配置），只有在没有任何缺失段时才保留原文案。
 - **根脚本 `typecheck` / `test` 在"干净 clone"（CI）上必然失败**（第九轮的在途分支从未开 PR，
   故这条首次由 CI 抓出）：`packages/dsh-ros2/tests/mount.spec.ts` 按**真实包名**导入 6 个 bundle，
   而 TypeScript 与 vite 依据各包 `package.json` 的 `types` / `main` 解析到 `lib/`；旧脚本却只在
