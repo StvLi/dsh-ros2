@@ -802,6 +802,58 @@ describe('ros2_env_check', () => {
     expect(out.warnings?.some((w) => w.includes('未检测到可见 ROS2 包'))).toBe(false)
   })
 
+  // The live deployment shape (2026-09-21): `source <delivery ws> && source
+  // /tmp/vlm_ws/…` where /tmp/vlm_ws had been deleted. Every ros2 call failed
+  // on the tail while the head existed, so the old first-segment-only check
+  // called the configuration healthy — and the warning then told the reader the
+  // rosSetup path was NOT the problem, contradicting the stderr on the same line.
+  it('heals a chain with a missing tail segment and reports it as configuration data', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'dsh-setup-chain-'))
+    const head = path.join(dir, 'setup.bash')
+    writeFileSync(head, 'true\n')
+    try {
+      const run = makeRun(() => ({ stdout: '__AMENT=/opt/ros/jazzy\n__PKGS=120\n__NODES=3\n' }))
+      const found = createRos2Tools({
+        run,
+        rosSetup: `source ${head} && source /nonexistent/dsh-chain/setup.bash && `,
+      }).find((t) => t.name === 'ros2_env_check')
+      expect(found).toBeDefined()
+      const out = (await found!.execute({}, execStub)) as ToolResult
+      expect(out.ok).toBe(true)
+      const data = out.data as { setup: { prefix: string; missingSources?: string[] }; note?: string }
+      // the head the config was written to source is kept; the dead tail is gone
+      expect(data.setup.prefix).toBe(`source ${head} && `)
+      expect(data.setup.missingSources).toEqual(['/nonexistent/dsh-chain/setup.bash'])
+      expect(data.note).toContain('/nonexistent/dsh-chain/setup.bash')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('blames the missing configured segment when the probe fails, not "the path is fine"', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'dsh-setup-chain-fail-'))
+    const head = path.join(dir, 'setup.bash')
+    writeFileSync(head, 'true\n')
+    try {
+      const run = makeRun(() => ({
+        ok: false,
+        stdout: '',
+        stderr: 'bash: line 1: /nonexistent/dsh-chain/setup.bash: No such file or directory',
+        exitCode: 1,
+      }))
+      const found = createRos2Tools({
+        run,
+        rosSetup: `source ${head} && source /nonexistent/dsh-chain/setup.bash && `,
+      }).find((t) => t.name === 'ros2_env_check')
+      const out = (await found!.execute({}, execStub)) as ToolResult
+      expect(out.warnings?.some((w) => w.includes('未返回可解析的结果') && w.includes('/nonexistent/dsh-chain/setup.bash'))).toBe(true)
+      // the old flat assertion is exactly what a broken chain contradicts
+      expect(out.warnings?.some((w) => w.includes('而非 rosSetup 路径无效'))).toBe(false)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   // issue #22: a bundle updated on disk while the process keeps the old code
   // used to be invisible until something failed with "unknown tool".
   it('reports a stale process by comparing loaded and on-disk bundle versions', async () => {
