@@ -78,11 +78,11 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 
 ### Changed
 
-- **工作区 vitest 用例 241 → 276 例**（第八轮收尾 240 通过 + 1 skip → 本轮 275 通过 + 1 skip；
-  +35 例：bundle 能力面 / 挂载对账 / 启动自检、`ros2_env_check` 探针自述、技能目录对账，
-  外加挂载测试对能力面的断言）。分布：common 45 + core 128(127 过 +1 skip) + moveit 16 +
-  profile 14 + safety 10 + vision 30 + state 8 + dsh-ros2 25 = **276**。
-  README / README_CN 开发章节同步校正：vitest 计数 "195 例" → **276 例**，`robot_profile` 自检数
+- **工作区 vitest 用例 241 → 277 例**（第八轮收尾 240 通过 + 1 skip → 本轮 276 通过 + 1 skip；
+  +36 例：bundle 能力面 / 挂载对账 / 启动自检、`ros2_env_check` 探针自述、技能目录对账、
+  setup 报告回归，外加挂载测试对能力面的断言）。分布：common 45 + core 129(128 过 +1 skip) +
+  moveit 16 + profile 14 + safety 10 + vision 30 + state 8 + dsh-ros2 25 = **277**。
+  README / README_CN 开发章节同步校正：vitest 计数 "195 例" → **277 例**，`robot_profile` 自检数
   由过时的 "17 项" 按**实测**改为 **29 项**（sidecar 10 场景、zero-pose 6 项实测一致）。
 - `ros2_env_check` 的返回**只做追加**，不改既有字段语义：新增
   `bundles.surface / unreported / totalTools / totalSkills / expected / declaredBy / missing / undeclared`、
