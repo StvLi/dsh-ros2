@@ -1464,8 +1464,16 @@ function makeEnvCheckTool(deps: CoreToolDeps) {
     parameters: {},
     output: { schema: resultSchema, render: renderResult },
     async execute() {
-      const setup = resolveSetup({ workspaceRoot: deps.workspaceRoot })
-      const probe = `${setup.prefix}echo "__AMENT=$AMENT_PREFIX_PATH"; echo "__COLCON=$COLCON_PREFIX_PATH"; echo "__PKGS=$(ros2 pkg list 2>/dev/null | wc -l)"; echo "__NODES=$(ros2 node list 2>/dev/null | wc -l)"`
+      // Resolve the setup with the SAME inputs the run seam uses: `makeRun`
+      // injects the configured `rosSetup` into every call, so resolving with
+      // bare options here reported an auto-detected prefix while the command
+      // actually ran under the configured one.
+      const setup = resolveSetup({ workspaceRoot: deps.workspaceRoot, rosSetup: deps.rosSetup })
+      // The probe string carries NO prefix: `deps.run` already applies the one
+      // effective prefix, and baking it in here applied it a second time around
+      // this command — two `source` chains, with the outer one deciding the
+      // outcome while the reported `setup` described the inner one.
+      const probe = 'echo "__AMENT=$AMENT_PREFIX_PATH"; echo "__COLCON=$COLCON_PREFIX_PATH"; echo "__PKGS=$(ros2 pkg list 2>/dev/null | wc -l)"; echo "__NODES=$(ros2 node list 2>/dev/null | wc -l)"'
       const res = await deps.run('bash', ['-lc', probe], { timeoutMs: 20000, workspaceRoot: deps.workspaceRoot })
       const out: Record<string, unknown> = {
         setup: {
@@ -1604,7 +1612,7 @@ function makeWorkspaceTool(deps: CoreToolDeps) {
           note: '会话覆盖已清除——恢复配置的 rosSetup 与自动回退链',
         })
       }
-      const setup = resolveSetup({ workspaceRoot: deps.workspaceRoot })
+      const setup = resolveSetup({ workspaceRoot: deps.workspaceRoot, rosSetup: deps.rosSetup })
       return okResult('ros2_workspace', 'ros2_workspace', {
         action: 'show',
         sessionOverride: getSessionRosSetup() ?? null,

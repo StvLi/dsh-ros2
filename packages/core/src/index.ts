@@ -84,6 +84,7 @@ export function apply(ctx: Context, config: CoreConfig): void {
     approval,
     jobs,
     workspaceRoot: config.workspaceRoot,
+    rosSetup: config.rosSetup,
     gui,
     vision,
   }

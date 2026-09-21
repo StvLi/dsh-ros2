@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { buildRos2InstallDownloadCommand, createRos2Tools } from '../src/tools.js'
-import { type RunFn, type ToolResult, type RosResult, declareExpectedBundles, registerLoadedBundle } from 'dsh-ros2-common'
+import { type RunFn, type ToolResult, type RosResult, declareExpectedBundles, getSessionRosSetup, registerLoadedBundle, setSessionRosSetup } from 'dsh-ros2-common'
 
 // The ros2_install interactive flow drives a real pseudo-terminal through
 // scripts/pty_session.py (python3 + pty). Some headless/container environments
@@ -922,6 +922,43 @@ describe('ros2_env_check', () => {
       dispose()
     }
   })
+
+  // The probe both REPORTS a setup resolution and RUNS under one; those must be
+  // the same, and the prefix must be applied exactly once. The tool used to
+  // resolve with bare options (→ auto-detect, `explicit: false`) while the run
+  // seam prepended the configured rosSetup around the probe, so a config that
+  // fails outright was reported as a healthy auto-detected environment.
+  it('reports the setup it actually probes under, with the prefix applied once', async () => {
+    const { mkdirSync } = await import('node:fs')
+    const dir = mkdtempSync(path.join(tmpdir(), 'dsh-setup-report-'))
+    mkdirSync(path.join(dir, 'install'), { recursive: true })
+    const configured = path.join(dir, 'install', 'setup.bash')
+    writeFileSync(configured, 'true\n')
+    const commands: string[] = []
+    const run = makeRun((bin, args) => {
+      commands.push(`${bin} ${args.join(' ')}`)
+      return { stdout: '__AMENT=/opt/ros/jazzy\n__PKGS=120\n__NODES=3\n' }
+    })
+    const previous = getSessionRosSetup()
+    setSessionRosSetup(null)
+    try {
+      const found = createRos2Tools({ run, rosSetup: `source ${configured} && ` }).find((t) => t.name === 'ros2_env_check')
+      if (!found) throw new Error('ros2_env_check not found')
+      const out = (await found.execute({}, execStub)) as ToolResult
+      const data = out.data as { setup: { prefix: string; sourcePath: string; explicit: boolean } }
+      // …the report names the configured setup, not an auto-detected one…
+      expect(data.setup.explicit).toBe(true)
+      expect(data.setup.sourcePath).toBe(configured)
+      expect(data.setup.prefix).toBe(`source ${configured} && `)
+      // …and the probe string does not re-embed it: exactly one source chain,
+      // owned by the run seam.
+      expect(commands).toHaveLength(1)
+      expect(commands[0]).not.toContain('source ')
+    } finally {
+      setSessionRosSetup(previous)
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
 })
 
 describe('ros2_workspace', () => {
@@ -948,6 +985,8 @@ describe('ros2_workspace', () => {
       expect(out.ok).toBe(true)
       expect((out.data as { sessionRosSetup: string }).sessionRosSetup).toContain(`${dir}/install/setup.bash`)
     } finally {
+      // The override is module-global state shared with every later test.
+      setSessionRosSetup(null)
       rmSync(dir, { recursive: true, force: true })
     }
   })
@@ -965,6 +1004,8 @@ describe('ros2_workspace', () => {
       const prefix = (out.data as { sessionRosSetup: string }).sessionRosSetup
       expect(prefix).toBe(`source '${dir}/install/setup.bash' && `)
     } finally {
+      // Leave no session override behind for later tests in this process.
+      setSessionRosSetup(null)
       rmSync(dir, { recursive: true, force: true })
     }
   })
