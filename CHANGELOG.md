@@ -8,6 +8,33 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 
 ### Added
 
+- **bundle 能力面登记 + 挂载对账 + 启动自检**（issue #22 的剩余三项）：上一轮只做到"哪些 bundle
+  以哪个版本加载"，本轮补齐"每个 bundle 到底注册了什么""安装清单声明的是否都挂上了""启动时就报告，
+  而不是等调用才暴露"：
+  - 每个 bundle 在挂载时登记一个**惰性能力面** thunk（`surface()`；bundle 先登记、后建工具，
+    登记时求值必然是空表，故在报告时求值），`bundleDriftReport()` 增加
+    `surface` / `unreported` / `totalTools` / `totalSkills`。
+  - **挂载对账**：聚合包 `dsh-ros2` 以**自己的 `package.json` 作为安装清单**
+    （`declareExpectedBundles()` + `declaredBundleNames()`，排除 `dsh-ros2-common` / `dsh-ros2-sidecar`
+    两个纯库包），报告 `expected` / `declaredBy` / `missing`（声明了却没挂上 = 挂载失败或进程代码旧）
+    / `undeclared`（清单没声明却挂上了，例如单独安装的 `state`；仅信息性，不告警）。
+  - **启动即报告**：`scheduleBundleStartupReport()` 轮询到挂载集合稳定后打**一行**汇总
+    （`dsh-ros2: bundles = … (6/6 declared bundles, 81 tools, 9 skills)`），并对
+    missing / drift / unresolved / unreported 各给一条告警。之所以轮询而非立即打印：bundle 是
+    **顺序挂载**的，任何瞬时快照都必然是部分列表（第七轮已拒绝过"一行汇总"的写法）。
+  - 组合不变量测试 `packages/dsh-ros2/tests/mount.spec.ts`：用真实 Cordis `Context` 挂载**已构建的
+    `lib/`** 六个 bundle，断言安装清单与登记完全对齐、能力面合计等于活服务注册表里的条目数，
+    且"声明了却没挂上"必须被报成 `missing`。
+- **技能目录对账**（issue #22 第 2 项，本轮补齐的最后一环）：`ros2_env_check` 现在把
+  **bundle 注册的技能名**与**会话真正能看到的技能目录**（harness
+  `skills.snapshot({ scope: agent })`）逐名比对，返回
+  `data.skillCatalogue = { available, complete, registered, visibleCount, missing }`——
+  "注册了但目录里看不到"正是 issue 描述的症状本身。边界按"不可用就说不可用"处理：
+  harness 没有 `snapshot()`、调用没有 agent 上下文、读取抛错、目录发现未完成（`complete: false`）
+  四种情况**只记录不可用/未完成及其原因，绝不产生 missing 告警**；只有
+  `available && complete && missing.length > 0` 才告警。只比对**存在性**、不比对数量：真实目录
+  合法地包含比 bundle 注册更多的技能（项目/用户技能）。
+  `snapshot()` 比本包 peer 固定的 `@deepseek-ai/dsh-skill@0.1.0-rc.6` 新，故走**特性探测**。
 - **已加载 bundle 版本登记 + 陈旧进程自检**（issue #22）：磁盘上的 bundle 更新后，运行中的
   harness 仍是旧代码，此前只在调用时才以 `Error: unknown tool "ros2_topology"`（或技能目录缺项）
   暴露。现在：
@@ -51,6 +78,15 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 
 ### Changed
 
+- **工作区 vitest 用例 241 → 276 例**（第八轮收尾 240 通过 + 1 skip → 本轮 275 通过 + 1 skip；
+  +35 例：bundle 能力面 / 挂载对账 / 启动自检、`ros2_env_check` 探针自述、技能目录对账，
+  外加挂载测试对能力面的断言）。分布：common 45 + core 128(127 过 +1 skip) + moveit 16 +
+  profile 14 + safety 10 + vision 30 + state 8 + dsh-ros2 25 = **276**。
+  README / README_CN 开发章节同步校正：vitest 计数 "195 例" → **276 例**，`robot_profile` 自检数
+  由过时的 "17 项" 按**实测**改为 **29 项**（sidecar 10 场景、zero-pose 6 项实测一致）。
+- `ros2_env_check` 的返回**只做追加**，不改既有字段语义：新增
+  `bundles.surface / unreported / totalTools / totalSkills / expected / declaredBy / missing / undeclared`、
+  `probe` 与 `skillCatalogue`。
 - **工具/技能计数校正**：README / README_CN / `packages/dsh-ros2/package.json` / `packages/core/package.json` / 聚合包源码注释
   由 **79 tools + 4 skills** 更新为 **83 tools + 9 skills**（core 59 → 61）；README / README_CN 的"内置技能"表补齐到 9 项。
   漂移由本轮新增的组合不变量测试捕获（见 Added）。
@@ -77,6 +113,11 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 
 ### Fixed
 
+- **`ros2_env_check` 把探针自身的失败怪到环境头上**：探针超时 / 退出码非 0 / 有输出但没有包计数标记时，
+  旧实现一律报"未检测到可见 ROS2 包——环境可能未 source 或 rosSetup 路径无效"。现在返回
+  `data.probe = { exitCode, timedOut, durationMs, stdoutBytes, stderrTail }`，并按形状分别措辞
+  （超时 / 输出不可解析 / 缺少标记 / 真的 0 可见包），**只有最后一种才指向 sourcing**。
+  触发场景是实测的：一个有 source 的环境因 `ros2 pkg list` 在该进程里挂住，被误报成"未 source"。
 - **`robot_profile.py` 的 `find_tf_root()` 在 ROS2 Jazzy 上解析失败**（issue #21，与 issue #14
   同一根因——当时只修了 TS 侧的 TF 工具，漏了 profile 脚本）：
   - `/tf_static` 有数据时，`--field transforms` 输出的是**单行 Python repr**
