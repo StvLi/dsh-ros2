@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { buildRos2InstallDownloadCommand, createRos2Tools } from '../src/tools.js'
+import { buildRos2InstallDownloadCommand, createRos2Tools, type CoreToolDeps } from '../src/tools.js'
 import { type RunFn, type ToolResult, type RosResult, declareExpectedBundles, getSessionRosSetup, registerLoadedBundle, setSessionRosSetup } from 'dsh-ros2-common'
 
 // The ros2_install interactive flow drives a real pseudo-terminal through
@@ -48,6 +48,18 @@ function tool(name: string, run: RunFn) {
 
 async function call(name: string, run: RunFn, args: Record<string, unknown>): Promise<ToolResult> {
   return (await tool(name, run).execute(args, execStub)) as ToolResult
+}
+
+/** Call one tool with extra deps (e.g. the skill-catalogue probe) and a fixed ros2 probe. */
+async function callWith(
+  name: string,
+  extra: Partial<CoreToolDeps>,
+  args: Record<string, unknown> = {},
+): Promise<ToolResult> {
+  const run = makeRun(() => ({ stdout: '__AMENT=/opt/ros/jazzy\n__PKGS=120\n__NODES=3\n' }))
+  const found = createRos2Tools({ run, ...extra }).find((t) => t.name === name)
+  if (!found) throw new Error(`tool ${name} not found`)
+  return (await found.execute(args, execStub)) as ToolResult
 }
 
 function tool2(name: string, run: RunFn, approval: () => Promise<string>) {
@@ -920,6 +932,134 @@ describe('ros2_env_check', () => {
       expect(out.warnings?.some((w) => w.includes('package.json 已不可读'))).toBe(true)
     } finally {
       dispose()
+    }
+  })
+
+  // issue #22, item 2: the bundle surface says what this process registered; only
+  // the catalogue says what a session can actually invoke. Reconciling the two is
+  // what turns "9 registered but 6 listed" from a user report into a diagnosis.
+  it('reconciles registered skills against the catalogue the session sees', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'dsh-skill-catalogue-'))
+    const pkgPath = path.join(dir, 'package.json')
+    writeFileSync(pkgPath, JSON.stringify({ name: 'dsh-ros2-core', version: '0.1.5' }))
+    const dispose = registerLoadedBundle({
+      name: 'dsh-ros2-core', version: '0.1.5', packageJsonPath: pkgPath,
+      surface: () => ({ tools: ['ros2_env_check'], skills: ['ros2-diagnostics', 'ros2-tf-integrity'] }),
+    })
+    let scopeSeen: unknown
+    try {
+      const out = await callWith('ros2_env_check', {
+        skillCatalogue: async (options) => {
+          scopeSeen = options.scope
+          return {
+            // A real catalogue holds more than the bundles register.
+            skills: [{ name: 'ros2-diagnostics' }, { name: 'ros2-tf-integrity' }, { name: 'project-skill' }],
+            complete: true,
+          }
+        },
+      })
+      const data = out.data as { skillCatalogue: Record<string, unknown> }
+      expect(data.skillCatalogue).toEqual({
+        available: true,
+        complete: true,
+        registered: ['ros2-diagnostics', 'ros2-tf-integrity'],
+        visibleCount: 3,
+        missing: [],
+      })
+      // The catalogue is read in the calling agent's scope — that is the set the
+      // agent can invoke, and the only one worth comparing against.
+      expect(scopeSeen).toBe((execStub as { agent: unknown }).agent)
+      expect(out.warnings ?? []).toEqual([])
+    } finally {
+      dispose()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('names a registered skill that the session catalogue cannot see', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'dsh-skill-missing-'))
+    const pkgPath = path.join(dir, 'package.json')
+    writeFileSync(pkgPath, JSON.stringify({ name: 'dsh-ros2-core', version: '0.1.5' }))
+    const dispose = registerLoadedBundle({
+      name: 'dsh-ros2-core', version: '0.1.5', packageJsonPath: pkgPath,
+      surface: () => ({ tools: ['ros2_env_check'], skills: ['ros2-diagnostics', 'ros2-tf-integrity'] }),
+    })
+    try {
+      const out = await callWith('ros2_env_check', {
+        skillCatalogue: async () => ({ skills: [{ name: 'ros2-diagnostics' }], complete: true }),
+      })
+      const data = out.data as { skillCatalogue: { missing: string[]; available: boolean } }
+      expect(data.skillCatalogue.available).toBe(true)
+      expect(data.skillCatalogue.missing).toEqual(['ros2-tf-integrity'])
+      expect(out.warnings?.some((w) => w.includes('技能目录看不到') && w.includes('ros2-tf-integrity'))).toBe(true)
+    } finally {
+      dispose()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  // Discovery that has not finished is not evidence of absence: report it in the
+  // data, never as "these skills are missing".
+  it('does not turn an incomplete catalogue into a missing-skill warning', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'dsh-skill-incomplete-'))
+    const pkgPath = path.join(dir, 'package.json')
+    writeFileSync(pkgPath, JSON.stringify({ name: 'dsh-ros2-core', version: '0.1.5' }))
+    const dispose = registerLoadedBundle({
+      name: 'dsh-ros2-core', version: '0.1.5', packageJsonPath: pkgPath,
+      surface: () => ({ tools: ['ros2_env_check'], skills: ['ros2-diagnostics'] }),
+    })
+    try {
+      const out = await callWith('ros2_env_check', {
+        skillCatalogue: async () => ({ skills: [], complete: false }),
+      })
+      const data = out.data as { skillCatalogue: { complete: boolean; missing: string[] } }
+      expect(data.skillCatalogue).toMatchObject({ available: true, complete: false, missing: ['ros2-diagnostics'] })
+      expect((out.warnings ?? []).some((w) => w.includes('技能目录看不到'))).toBe(false)
+    } finally {
+      dispose()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('reports the reconciliation as unavailable when the harness has no catalogue read', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'dsh-skill-noprobe-'))
+    const pkgPath = path.join(dir, 'package.json')
+    writeFileSync(pkgPath, JSON.stringify({ name: 'dsh-ros2-core', version: '0.1.5' }))
+    const dispose = registerLoadedBundle({
+      name: 'dsh-ros2-core', version: '0.1.5', packageJsonPath: pkgPath,
+      surface: () => ({ tools: ['ros2_env_check'], skills: ['ros2-diagnostics'] }),
+    })
+    try {
+      const out = await callWith('ros2_env_check', {})
+      const data = out.data as { skillCatalogue: { available: boolean; reason: string } }
+      expect(data.skillCatalogue.available).toBe(false)
+      expect(data.skillCatalogue.reason).toContain('snapshot()')
+      expect((out.warnings ?? []).some((w) => w.includes('技能目录看不到'))).toBe(false)
+    } finally {
+      dispose()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('reports a failing catalogue read as unavailable, not as a missing skill', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'dsh-skill-fail-'))
+    const pkgPath = path.join(dir, 'package.json')
+    writeFileSync(pkgPath, JSON.stringify({ name: 'dsh-ros2-core', version: '0.1.5' }))
+    const dispose = registerLoadedBundle({
+      name: 'dsh-ros2-core', version: '0.1.5', packageJsonPath: pkgPath,
+      surface: () => ({ tools: ['ros2_env_check'], skills: ['ros2-diagnostics'] }),
+    })
+    try {
+      const out = await callWith('ros2_env_check', {
+        skillCatalogue: async () => { throw new Error('registry offline') },
+      })
+      const data = out.data as { skillCatalogue: { available: boolean; reason: string } }
+      expect(data.skillCatalogue.available).toBe(false)
+      expect(data.skillCatalogue.reason).toContain('registry offline')
+      expect((out.warnings ?? []).some((w) => w.includes('技能目录看不到'))).toBe(false)
+    } finally {
+      dispose()
+      rmSync(dir, { recursive: true, force: true })
     }
   })
 

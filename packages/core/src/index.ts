@@ -8,7 +8,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { Config, type CoreConfig } from './config.js'
 import { makeRun, readOwnVersion, registerLoadedBundle, type ApprovalRequest, type JobsApi, type VisionProvider } from 'dsh-ros2-common'
 import { GuiManager } from './gui.js'
-import { createRos2Tools, type CoreToolDeps } from './tools.js'
+import { createRos2Tools, type CoreToolDeps, type SkillCatalogueProbe } from './tools.js'
 import {
   ros2BringupRecoverySkill,
   ros2DiagnosticsSkill,
@@ -53,6 +53,37 @@ interface SystemPromptService {
   getSectionOrder(name: string): number
 }
 
+/**
+ * Adapt the harness `skills` service to the one narrow read the env probe needs
+ * (issue #22, item 2): the catalogue as one agent sees it.
+ *
+ * `snapshot()` is newer than this bundle's pinned `@deepseek-ai/dsh-skill` peer,
+ * so it is feature-detected. Returning `undefined` is a real answer — the probe
+ * then says "reconciliation unavailable" instead of inventing a verdict — and
+ * only the fields the comparison uses are copied, so the tool result owns plain
+ * JSON rather than live catalogue entries.
+ */
+export function makeSkillCatalogueProbe(ctx: Context): SkillCatalogueProbe | undefined {
+  const service = ctx.get('skills') as unknown as {
+    snapshot?: (options?: { scope?: object }) => Promise<{
+      skills?: readonly { name?: unknown }[]
+      complete?: unknown
+    }>
+  } | undefined
+  if (service === undefined || typeof service.snapshot !== 'function') return undefined
+  const snapshot = service.snapshot.bind(service)
+  return async (options) => {
+    const raw = await snapshot(options)
+    const skills = Array.isArray(raw.skills) ? raw.skills : []
+    return {
+      skills: skills
+        .filter((skill): skill is { name: string } => typeof skill?.name === 'string')
+        .map((skill) => ({ name: skill.name })),
+      complete: raw.complete === true,
+    }
+  }
+}
+
 export function apply(ctx: Context, config: CoreConfig): void {
   // The surface thunk is lazy: it runs at report time, after `tools` below.
   ctx.effect(() => registerLoadedBundle({
@@ -87,6 +118,7 @@ export function apply(ctx: Context, config: CoreConfig): void {
     rosSetup: config.rosSetup,
     gui,
     vision,
+    skillCatalogue: makeSkillCatalogueProbe(ctx),
   }
   const tools = createRos2Tools(deps)
 

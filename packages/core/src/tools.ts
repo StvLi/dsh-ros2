@@ -56,8 +56,30 @@ function scriptPath(name: string): string {
 
 import type { GuiManager } from './gui.js'
 
+/**
+ * Minimal structural view of the harness skill catalogue. Only the fields the
+ * reconciliation reads are named, so this compiles against any harness whose
+ * `skills` service exposes `snapshot()` — and stays honest when one does not.
+ */
+export interface SkillCatalogueEntry {
+  readonly name: string
+}
+
+export interface SkillCatalogueSnapshot {
+  readonly skills: readonly SkillCatalogueEntry[]
+  /** False while discovery is still running: an incomplete view proves nothing. */
+  readonly complete: boolean
+}
+
+/**
+ * Read the skill catalogue as one agent sees it. Supplied only when the harness
+ * exposes `skills.snapshot()`; an older harness leaves it absent, and the
+ * reconciliation then reports itself unavailable instead of inventing a verdict.
+ */
+export type SkillCatalogueProbe = (options: { scope?: object }) => Promise<SkillCatalogueSnapshot>
+
 /** Core deps: gui lifecycle manager (concrete type from ./gui.js). */
-export type CoreToolDeps = ToolDeps & { gui?: GuiManager }
+export type CoreToolDeps = ToolDeps & { gui?: GuiManager; skillCatalogue?: SkillCatalogueProbe }
 
 const INTERFACE_KINDS = ['msg', 'srv', 'action'] as const
 
@@ -1452,6 +1474,55 @@ export function createRos2Tools(deps: ToolDeps) {
 }
 
 /**
+ * Reconcile the skills the mounted bundles registered against the catalogue the
+ * session actually sees (issue #22, item 2).
+ *
+ * The bundle surface says "this process registered these names"; the catalogue
+ * says which of them a session can reach. A name in the first set but not the
+ * second is the exact symptom the issue reported — registered, yet absent from
+ * the session's skill directory — and it is invisible from either side alone.
+ *
+ * Every unanswerable case is reported as unavailable *with its reason*, never as
+ * a finding: a diagnostic that turns "I could not look" into "something is
+ * broken" is worse than no diagnostic.
+ */
+async function reconcileSkillCatalogue(
+  deps: CoreToolDeps,
+  exec: { readonly agent?: unknown },
+  registered: readonly string[],
+): Promise<Record<string, unknown>> {
+  const names = [...new Set(registered)].sort()
+  const probe = deps.skillCatalogue
+  if (probe === undefined) {
+    return { available: false, reason: '该 harness 的 skills 服务没有 snapshot()，无法读取技能目录', registered: names }
+  }
+  if (exec.agent === undefined) {
+    return { available: false, reason: '本次调用没有 agent 上下文，无法确定目录的 scope', registered: names }
+  }
+  try {
+    // `scope` is the agent itself: the catalogue merges the global layer with
+    // the viewing agent's chain, which is exactly the set that agent can invoke.
+    const snapshot = await probe({ scope: exec.agent as object })
+    const visible = snapshot.skills.map((skill) => skill.name)
+    return {
+      available: true,
+      complete: snapshot.complete,
+      registered: names,
+      visibleCount: visible.length,
+      // Only presence is compared. The catalogue legitimately holds more than
+      // the bundles register (project/user skills), so counts are not evidence.
+      missing: names.filter((name) => !visible.includes(name)),
+    }
+  } catch (error) {
+    return {
+      available: false,
+      reason: `读取技能目录失败：${error instanceof Error ? error.message : String(error)}`,
+      registered: names,
+    }
+  }
+}
+
+/**
  * L1: self-check the ROS2 environment resolution — which setup is sourced
  * (session override / config / auto-detected), path existence, and visible
  * packages/nodes. Read-only, no approval.
@@ -1463,7 +1534,7 @@ function makeEnvCheckTool(deps: CoreToolDeps) {
       'Self-check the ROS2 environment resolution: which setup is sourced (session override / configured rosSetup / auto-detected), whether paths exist, and what packages/nodes are visible. Also reports the loaded dsh-ros2 bundle versions against the ones now on disk, so a running process that predates a plugin update is visible instead of surfacing later as an unknown tool. Read-only, no approval.',
     parameters: {},
     output: { schema: resultSchema, render: renderResult },
-    async execute() {
+    async execute(_args, exec) {
       // Resolve the setup with the SAME inputs the run seam uses: `makeRun`
       // injects the configured `rosSetup` into every call, so resolving with
       // bare options here reported an auto-detected prefix while the command
@@ -1520,6 +1591,12 @@ function makeEnvCheckTool(deps: CoreToolDeps) {
         missing: bundles.missing,
         undeclared: bundles.undeclared,
       }
+
+      // Issue #22, item 2: what the bundles registered is only half the answer;
+      // what the session can actually invoke is the other half.
+      const catalogue = await reconcileSkillCatalogue(
+        deps, exec, bundles.surface.flatMap((entry) => entry.skills))
+      out.skillCatalogue = catalogue
       if (setup.note) out.note = setup.note
 
       const result = okResult('ros2_env_check', 'ros2 env probe', out as JsonValue)
@@ -1550,6 +1627,15 @@ function makeEnvCheckTool(deps: CoreToolDeps) {
           `stderr 末尾：${tail(res.stderr).join(' | ') || '(空)'}`)
       } else if (pkgs === 0) {
         warnings.push('未检测到可见 ROS2 包——环境可能未 source 或 rosSetup 路径无效；可用 ros2_workspace use <workspace> 切换')
+      }
+      // A registered skill the session cannot reach is the #22 symptom itself —
+      // but only when discovery finished. An incomplete catalogue is reported in
+      // the data, never as a warning: absence of evidence is not evidence.
+      const missingSkills = Array.isArray(catalogue.missing) ? (catalogue.missing as string[]) : []
+      if (catalogue.available === true && catalogue.complete === true && missingSkills.length > 0) {
+        warnings.push(
+          `以下技能已由 dsh-ros2 bundle 注册，但当前会话的技能目录看不到：${missingSkills.join('、')}。` +
+          '这正是「实际注册数与会话技能目录不一致」的表现；若磁盘代码已更新，重启 harness 后重试。')
       }
       if (bundles.loaded.length === 0) {
         warnings.push('未记录到任何已加载的 dsh-ros2 bundle——bundle 未挂载，或版本早于本诊断功能（重启 harness 后可自证）。')
