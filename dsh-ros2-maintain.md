@@ -1,8 +1,8 @@
 # dsh-ros2 日常维护文档（Maintenance Log）
 
 > 仓库：`StvLi/dsh-ros2` · 本地代码：`/home/stvli/Desktop/embody_agent_ws/dsh-ros2`（git remote `git@github.com:StvLi/dsh-ros2.git`）
-> 维护日期：2026-09-21（最近一轮） · 维护者：DSH scheduled-run agent（StvLi 仓）
-> 维护轮次：第一轮 2026-09-03（§0–§7）；第二轮 2026-09-04（§8）；第三轮 2026-09-05（§9，安全修复）；第四轮 2026-09-05（§10，无 open issue → 安全检查 → 两项维护卫生修复）；第五轮 2026-09-06（§11，无 open issue → 安全检查 → 落地 `ros2_install` 注入修复）；第六轮 2026-09-11（§12，无 open issue → 安全检查 → 落地 `safety_monitor` / `zero_pose_semantics` 注入修复 + vitest 4 升级 + CI 最小权限）；第七轮 2026-09-13（§13，open issue #19 → journey skills + 组合不变量）；第八轮 2026-09-14（§14，3 个 open issue → #21 修复并真机复核、#22 落地但保留 open、#19 完成验收测量）；**第九轮 2026-09-21（§15，本轮）：open issue #22 → 补齐"会话技能目录对账"（其唯一未实现项）+ 修复 `ros2_env_check` 的"报告 ≠ 执行"缺陷（第八轮存疑项的真因）+ 安全复测**。
+> 维护日期：2026-09-22（最近一轮） · 维护者：DSH scheduled-run agent（StvLi 仓）
+> 维护轮次：第一轮 2026-09-03（§0–§7）；第二轮 2026-09-04（§8）；第三轮 2026-09-05（§9，安全修复）；第四轮 2026-09-05（§10，无 open issue → 安全检查 → 两项维护卫生修复）；第五轮 2026-09-06（§11，无 open issue → 安全检查 → 落地 `ros2_install` 注入修复）；第六轮 2026-09-11（§12，无 open issue → 安全检查 → 落地 `safety_monitor` / `zero_pose_semantics` 注入修复 + vitest 4 升级 + CI 最小权限）；第七轮 2026-09-13（§13，open issue #19 → journey skills + 组合不变量）；第八轮 2026-09-14（§14，3 个 open issue → #21 修复并真机复核、#22 落地但保留 open、#19 完成验收测量）；第九轮 2026-09-21（§15）：open issue #22 → 补齐"会话技能目录对账"（其唯一未实现项）+ 修复 `ros2_env_check` 的"报告 ≠ 执行"缺陷（第八轮存疑项的真因）+ 安全复测；**第十轮 2026-09-22（§16，本轮）：补齐第九轮"在途无 PR"的缺口（PR #27，CI 首跑即抓出"本地绿、CI 红"）→ 在运行中进程里验收并关闭 issue #22 → 定位并修复线上故障真因（`rosSetup` 只校验第一段）→ 3 个 PR 全部合入 main**。
 
 本文件记录 dsh-ros2 插件的一次完整日常维护循环：**查 issue → 评估建议 → 分支开发 → 验证 → 推送 → 交付维护文档**。每次维护在下方追加一节。
 
@@ -1287,3 +1287,245 @@ bundles : loaded 6 / expected 6 / missing [] / undeclared [] / unreported []
      而不是手工 `systemctl restart`（本轮仍有意未触发，以免中断维护会话本身）。
   5. 维持"提交前 typecheck + test + build 全绿 + 行为变更补测试 + push 后 CI 绿"的验收线；
      `pnpm audit` 必须带 `--registry=https://registry.npmjs.org`，否则会误报"失败"而非"干净"。
+
+---
+
+## 16. 维护记录（2026-09-22 04:14 CST / UTC 2026-09-21 20:14 · 第十轮：补齐"在途无 PR"缺口 → CI 抓出"本地绿、CI 红" → 定位并修复线上故障真因 → 验收并关闭 #22）
+
+> 本轮结论：**1 个 open issue（#22）→ 在运行中进程里逐条验收后关闭（completed）**。
+> 两件"上一轮留下的"事在本轮闭合：
+> ① 第九轮的 9 个提交**已推送却从未开 PR**，因此**从未跑过 CI**——本轮开 PR #27 后**首跑即失败**（6 条 `TS2307`），
+> 暴露了一个只在**干净 clone** 上出现的真缺陷（本地全绿只是因为工作区留着上一轮的 `lib/`）。
+> ② 第九轮 §15.7 第 3 条（"只校验 `rosSetup` 第一段"）当时是"建议后续"，本轮确认它**就是线上部署
+> "每一次 ros2 调用都失败"的直接成因**，因此升格为必修并落地：**插件现在能自愈这个坏配置**。
+> 本轮 3 个 PR（#27 / #28 / #29）**全部 CI 绿并合入 `main`**（`11edc1d`），5 个提交，用例 277 → **285**。
+
+### 16.0 仓库快照（本轮起始/结束）
+
+| 项 | 起始 | 结束 |
+| --- | --- | --- |
+| 当前分支 | `feat/bundle-surface-reconciliation`（工作树干净，与 `origin` 一致；**9 个提交未合并、且没有 PR**） | **`main` = `11edc1d`**（本地与 `origin/main` 一致） |
+| `main` | `f161096`（第八轮 merge） | `11edc1d`（#27 → `e1e8e38`、#28 → `8e5c443`、#29 → `11edc1d`，三个 merge） |
+| 该 `feat` 分支 | 9 个提交，已推送，**无 PR ⇒ CI 从未运行** | **已合并**（PR #27） |
+| open issue / open PR | **1 / 0** | **0 / 0**（#22 close；#27/#28/#29 均已合并） |
+| `gh` 鉴权 | 第九轮：两个账号 token 均 invalid（只能推分支、开不了 PR） | **已恢复**：`StvLi`（active）+ `littleZ05`，keyring 存储；本轮全程用 `gh` 操作 |
+| issue/PR 总数 | #1–#26 除 #22 外全部 closed | #1–#29 全部 closed |
+| 包数量 / 本地环境 | 9 包 · Node `v24.16.0` · pnpm `11.22.0` · vitest 4.1.11 | 同 |
+| vitest 用例 | 277（276 过 + 1 skip） | **285**（284 过 + 1 skip） |
+| 运行中的 dsh | 启动于 **2026-09-21 17:58:15 CST**（晚于第九轮最后提交 `17:51:03 CST` ⇒ **已加载第九轮代码**） | 同进程（本轮代码落盘待重启，见 §16.5） |
+
+### 16.1 Issue 检查（step 1）
+
+`gh issue list --state open` → **1 个 open issue**：`#22`（`dx: surface loaded vs installed bundle versions…`，1 条评论）；`gh pr list --state open` → **0**。
+
+**本轮的第一手发现（比 issue 本身更重要）**：第九轮的在途分支有 9 个提交、已推送，**却从未开 PR**。而 CI 只
+在 `push: main` 与 `pull_request` 上触发（`.github/workflows/ci.yml`），所以那 9 个提交**一次都没被 CI 看过**。
+本轮第一步就是补开 **PR #27**，CI 首跑**失败**（见 §16.4 证明 1）——这说明"没开 PR"不是流程小事，而是
+**把 9 个未验证的提交当成了已验收成果**。
+
+`gh` 鉴权恢复（第九轮"下次维护建议"第 2 条）是本轮能做这件事的前提：`gh auth status` 显示 `StvLi` 为 active；
+因此本轮的**开 PR、看 CI、合并、评论并关闭 issue** 全部自动完成，不再留人工尾巴。
+
+### 16.2 建议评估（step 2）——逐条判断合理性与必要性
+
+**① `#22` 的三条建议：全部合理，全部已实现；"未实现项"为零 ⇒ 本轮关闭。**
+
+| # | 建议 | 状态 | 本轮验收证据（**运行中进程**，非离线） |
+| --- | --- | --- | --- |
+| 1 | 暴露已加载 bundle 集合/版本 | ✅ 第九轮落地（**每 bundle 一行**，非一行汇总） | `data.bundles.loaded` 6/6、`stale: false`、逐包 `loaded == installed` |
+| 2 | 只读诊断入口（loaded vs installed 漂移） | ✅ 第九轮落地（扩展 `ros2_env_check`，不新增工具） | `bundles.drift` / `stale` / `unresolved` 均有值 |
+| 3 | "会话技能目录 vs 实际注册数"对账 | ✅ 第九轮落地 | `skillCatalogue: available true / complete true / missing []`，`visibleCount 13`（9 个注册技能全可见 + 4 个项目/用户技能） |
+
+其中第 1 条里"**自检本身也要重启一次才生效**"是**固有限制**（旧进程里根本不存在这段代码），不是待办：
+本轮反而把它当**正向信号**使用——**字段缺席本身就等于"该进程早于功能上线"**。已写入 `docs/versioning.md`
+（"已加载版本 vs 磁盘版本"一节），并在 §16.4 用运行中进程实测到它的正面价值。
+⇒ 故 #22 以 **completed 关闭**，并留下逐条验收评论（含上表数据）。
+**唯一仍建议人工处理的**是 §16.7 第 2 条（仓库外的部署配置死段）——新代码已能自愈，但配置本身该修。
+
+**② 第九轮 §15.7 第 3 条（只校验第一段）：从"建议"升格为"必修"。**
+
+第九轮把它列为"残留限制·建议后续：只校验显式前缀里的第一个 `source` 路径"。本轮在真机上确认它不是
+"不够严谨"，而是**线上故障的直接成因**：
+
+```text
+rosSetup: source /home/stvli/lite_delivery_aio/install/setup.bash && source /tmp/vlm_ws/install/setup.bash &&
+```
+
+`/tmp/vlm_ws` 已不存在 ⇒ 第一段存在使旧实现判定"配置正常"（`explicit: true`、无 note），
+而**每一次**调用都失败在第二段。必要性的判断依据因此从"设计上更完备"变为"**当前部署正在坏**"。
+
+**③ 同现场的第二个真缺陷：诊断自己说反话。**
+
+探针失败的告警写死"这通常说明探针命令在该进程环境里失败，**而非 rosSetup 路径无效**"——同一行的 stderr
+恰恰就是 `/tmp/vlm_ws/install/setup.bash: No such file or directory`。**合理且必要**：这类"诊断说错话"的
+缺陷会直接把排查引向错误方向（第九轮就曾被它误导）。已改为**引用环境解析的结论**。
+
+**④ 本轮新增（现场发现）：`&&ros2` 回显。**
+
+前缀以 `&&` 结尾且无尾空格时，`runCommand` 拼出 `… setup.bash &&ros2 'node' 'list'`。shell 解析与
+`&& ros2` **完全等价**，所以**不是功能缺陷**；但它是**每条失败信息**里回显的形式，本轮排查时确实先让人
+怀疑"命令拼错了"。判为**诊断缺陷，值得修**（修在构建 shell 字符串处，配置的忠实回显不变）。
+
+**⑤ 本轮明确"不做"的**：`#22` 第 1 条的固有限制（不可能修）；`/tmp/vlm_ws` 的文档/代码残留
+（§16.7 第 3/4 条：一个在仓库外的配置里，一个应单开一轮改为可配置）。
+
+### 16.3 开发管理（git · step 3）
+
+| PR | 分支名 | 提交 | 类型 | 说明 |
+| --- | --- | --- | --- | --- |
+| **#27** | `feat/bundle-surface-reconciliation`（**续用**第九轮在途分支） | `47626d4` | `fix(ci)` | 根 `typecheck` / `test` 改为先按**拓扑序**构建整个家族——`tests/mount.spec.ts` 按真实包名导入 6 个 bundle，干净 clone 上 `lib/` 不存在时必失败 |
+| **#28** | `fix/ros-setup-chain`（新开，off `47626d4`） | `f893988` | `fix(common)` | `resolveSetup` 逐段校验 `&&` 链；部分缺失只剔除该段并点名；全缺失才回退 |
+| | | `3fcfd3f` | `fix(core)` | 探针失败时不再否认 rosSetup；`setup.missingSources` + `ros2_workspace show` 暴露结论 |
+| | | `98fa86f` | `docs` | CHANGELOG + `docs/feedback-env-recovery.md`（新增"整链校验"一节）+ README 计数 |
+| **#29** | `fix/setup-prefix-join`（新开，off `8e5c443`） | `ca4652d` | `fix(common)` | 前缀与命令之间插入分隔符（消除 `&&ros2` 回显） |
+| | | `8de9d21` | `docs` | CHANGELOG（含"为什么是诊断缺陷而非功能缺陷"）+ README 计数 285 |
+
+- **为什么 #27 是在途分支上补一个 `fix(ci)`，而不是另开分支**：那 9 个提交是第九轮同一议题的成果且已推送，
+  CI 失败**源于它们**（`mount.spec.ts` 正是其中新增的文件）；补丁是"让该分支可合并"的一部分。另开分支会把
+  "红的分支"永久留在历史里，也会让第九轮的成果继续无法进入 `main`。
+- **提交类型的诚实性**：`fix(common)` / `fix(core)` / `docs` 按**文件**切分（`packages/common/**`、
+  `packages/core/**`、`CHANGELOG+README+docs/**`），依次检出都能 `typecheck` 全绿；`fix(core)` 依赖
+  `fix(common)` 新增的 `missingSources` 字段，**顺序在前**，不存在"看着是 fix、其实依赖后面才有的东西"。
+- 分支/提交均已推送；三个 PR 经 CI（Node 22 + 24）全绿后合入 `main`。
+- 收尾状态：`main` = `11edc1d`，工作树干净，本地 `main` 与 `origin/main` 一致。
+
+### 16.4 本地验收（全绿）＋ 三个可复现证明
+
+```bash
+cd /home/stvli/Desktop/embody_agent_ws/dsh-ros2
+rm -rf packages/*/lib          # 复刻 CI 的"干净 clone"起点
+CI=true pnpm run typecheck     # 9 包 tsc --noEmit 全部 Done（exit 0，8.3s）
+CI=true pnpm run test          # 285 例（284 过 + 1 pty-skip）+ sidecar 10 场景 + zero_pose 6 项 + robot_profile 29 项（8.0s）
+CI=true pnpm run build         # 9 包 tsc 全部 Done（exit 0）
+```
+
+**用例分布（实测）**：common **51** + core **131**（130 过 + 1 skip）+ moveit 16 + profile 14 + safety 10 +
+vision 30 + state 8 + dsh-ros2 25 = **285**。第九轮收尾 277 → **+8**（common +6：整链校验 5 + 前缀拼接 1；
+core +2：诊断措辞与数据出口）。
+
+**证明 1 ｜ CI 的失败可以在本地逐字复现（`47626d4` 的动机）**
+
+```text
+# 删除全部 lib/ 后执行 CI 的同一步（旧脚本只先构建 dsh-ros2-common）：
+packages/dsh-ros2 typecheck: tests/mount.spec.ts(4,28): error TS2307: Cannot find module 'dsh-ros2' …
+… 共 6 条（dsh-ros2 / -core / -moveit / -profile / -safety / -vision）
+[ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL]  → exit 2      # 与 CI 日志逐字一致
+# 修复后同一命令：exit 0
+```
+
+**证明 2 ｜ 线上故障可复现、且已被新代码自愈（`f893988` 的价值）**
+
+用**字面量**的部署配置走**已构建的 `lib/`**（`node` 直接调用，可离线复现）：
+
+| 观测项 | 修复前 | 修复后 |
+| --- | --- | --- |
+| `runCommand` 结果 | `ok: false`、exit `1`、stdout 空 | `ok: true`、exit `0`、`__PKGS=450` |
+| stderr | `bash: line 1: /tmp/vlm_ws/install/setup.bash: No such file or directory` | （空） |
+| `envNote` | 无 | 点名 `/tmp/vlm_ws/install/setup.bash` 不存在、已剔除该段、保留 1 段（首个 source = `lite_delivery_aio`） |
+
+运行中会话的**对照证据**同样干净：同一份坏配置下 `ros2_node_list` 返回
+`COMMAND_FAILED`（`bash: line 1: /tmp/vlm_ws/…`）；把会话覆盖指向 `lite_delivery_aio`（`ros2_workspace use`）后
+立即返回 `["/robot_state_publisher"]`、`ros2_env_check` 报 `visiblePackages: 450`、`probe.exitCode: 0`
+——即**环境本身健康，唯一的问题就是那段死链**。
+
+**证明 3 ｜ 新测试是 load-bearing 的（`ca4652d` 的价值）**
+
+按"撤掉实现，测试必须失败"验证：`git stash push -- packages/common/src/runner.ts` 后重跑，新测试立即失败：
+
+```text
+× inserts the separator when the prefix ends at && and still runs the command
+AssertionError: expected 'Command failed: bash -lc source /tmp/…' to contain 'source /tmp/dsh-runner-join-…'
+Tests  1 failed | 50 skipped (51)
+```
+
+恢复实现后同一测试通过。**CI 结果**：PR #27 首跑 `failure`（33s）→ 修复后 `pass`（1m14s）；
+#28 `pass`（Node 22 1m12s / Node 24 47s）；#29 `pass`（22 1m5s / 24 1m2s）；`main` 的两次 push 亦 `success`。
+
+### 16.5 dsh-phoenix 持续更新 / 测试链路（step 4）
+
+| 面 | 观测 | 判定 |
+| --- | --- | --- |
+| 挂载与版本 | journal：`[dsh-phoenix] loaded (graceful restart + client reconnect + lifecycle)`（17:58:18）；`dsh-phoenix@0.2.6` | ✅ 在位 |
+| 持久检查点 | `DSH_PHOENIX_STATE_FILE=/home/stvli/tmp/dsh-phoenix-state.json` → `generation 18`、`lifecycleState "running"`、`pendingResume false`、`resumeAttempt 0` | ✅ 状态机已跑过 18 代 |
+| 进程托管 | `systemctl --user is-active dsh-web.service` → `active`；`Type=simple`、`Restart=on-failure`、`ExecMainStartTimestamp=2026-09-21 17:58:15 CST` | ✅ |
+| 客户端重连 | `curl http://127.0.0.1:3080/__dsh_health` → `{"token":"1789984696301-…"}`（per-boot token） | ✅ 心跳端点在线 |
+| 延后策略（源码实测） | `deferPollMs 3000` / `deferSoftMs 300000`（5 分钟软告警）/ `deferHardMs 900000`（15 分钟硬期限）/ `deferPolicy auto` | ✅ 空闲优先，有安全阀 |
+| 触发面 | 只对 **`cordis_run`（动态插件激活）** 触发；`dsh_phoenix_restart` / `dsh_phoenix_state` 两个工具在 `创造模式 (phoenix)` preset（`~/.dsh/.agent-presets/cordis-phoenix/`）里，**本维护会话的 preset 不含它们** | ⇒ 本会话走**文档化的 `cordis_run` 触发面** |
+| 客户端 HMR | `ps` 中无 `vite` / `pnpm run dev:web` | ⚠️ 未武装；本轮改动**全在 Host 侧**，不受影响 |
+
+**更新回路已被证明闭环（第九轮留下的观测）**：运行中进程启动于 `17:58:15 CST`，**晚于**第九轮最后一个
+提交 `17:51:03 CST`，而它的 `ros2_env_check` **已经返回**第九轮才有的 `surface` / `skillCatalogue` 段。
+即"改 → 构建 → 重启 → 新代码生效 → 诊断自证"这条回路**确实跑通过**（这也正是 §16.2 ① 那条固有限制的
+正面用法：**字段在不在，就是进程新旧**）。
+
+**本轮如何使用它**：改 → `typecheck/test/build` 全绿 → 提交/推送 → **CI 绿** → 合入 `main` → 重建 `lib/`
+（部署经 `~/.dsh/profiles/web/node_modules/…` 符号链接 realpath 直连仓库 `packages/*/lib`）→
+按触发面请求**非强制**优雅重启（`force=false` 语义：忙碌则延后到空闲安全点），随后不再继续操作，
+把重启留给"本会话空闲"这一安全点。
+
+- **重启后可观测的变化（预期）**：`ros2_env_check` 返回 `setup.missingSources = ["/tmp/vlm_ws/install/setup.bash"]`
+  与对应 `note`；每次 ros2 调用的失败消失（死段被剔除）；`runCommand` 的失败信息不再出现 `&&ros2`。
+- **诚实边界**：本会话仍在运行，因此**无法在同一进程内观测重启后的结果**。§16.8 第 1 条把它列为下次维护的
+  第一复核项；若 phoenix 因本会话持续忙碌而未执行，按上面的触发面再请求一次即可。
+
+### 16.6 安全扫描（step 5）——依赖 + 静态 + 本轮新增面复核，未发现新漏洞
+
+**依赖漏洞**：
+
+- `pnpm audit --prod --audit-level high`（本机默认 registry = `registry.npmmirror.com`）→
+  `ERR_PNPM_AUDIT_ENDPOINT_NOT_EXISTS`。**这不是"干净"，是"没查成"**，不可当作结论。
+- 显式换官方源复测：`pnpm audit --prod --audit-level high --registry=https://registry.npmjs.org/` →
+  **No known vulnerabilities found**。
+  （注：CI 里的同一闸门在 GitHub runner 上**默认源就是官方源**，因此 CI 的闸门是有效的；只有本机需要显式指定。）
+
+**静态扫描**（`packages/*/src`，零命中）：`shell: true` 0；`child_process.exec(` 0（命中的全是 `RegExp.exec`）；
+`eval(` / `new Function(` 0；硬编码密钥（`AIza…` / `sk-…`）0。
+
+**本轮新增面评审**：
+
+| 面 | 结论 |
+| --- | --- |
+| 整链校验如何重建前缀 | **只做删除**：重建用的都是**原有段落的原文**（`trim()` 后拼接），不插入任何新值 ⇒ 不引入新的拼接内容 |
+| `missingSources` 的来源 | 只来自**配置文本**（与 `rosSetup` 同信任级），**不来自模型输入、不来自外部数据** |
+| `note` / `missingSources` 的信息暴露 | 只是把配置里的路径**回显**给本来就能读该配置的模型 ⇒ 无新增信息面 |
+| 探针告警改写 | 纯措辞，不执行任何东西 |
+| `runCommand` 的分隔符 | **常量空格**，不引入变量 ⇒ 无注入面 |
+| 既有防线回归 | 随测试全绿：`signal` 白名单（非法值在**审批之前**以 `INVALID_PARAM` 拒绝）、`isSafeProfileName` 路径穿越（4 组）、`shq()` 单引号包裹（含空格路径）、safety_monitor 走 argv 数组 |
+
+结论：**未发现新漏洞**；本轮改动缩小而非扩大了攻击面（去掉了一条必然失败的外层 `source` 链）。
+
+### 16.7 本轮发现（含仓库外的问题）
+
+1. **【流程·已修·重要】"推送了但没开 PR" = CI 从未运行。** 第九轮的 9 个提交在 CI 上**首跑即失败**。
+   已把教训写进 §16.1/§16.4：**分支推送后立刻开 PR，让 CI 说话**；否则 `main` 之外的一切都是"未验证"。
+2. **【部署配置·仍未修·高优先·仓库外】** `~/.dsh/profiles/web/cordis.patch.yml` 的 5 行 `rosSetup` 至今以
+   `source /tmp/vlm_ws/install/setup.bash &&` 结尾，而 `/tmp/vlm_ws` **已不存在**；同文件第 29 行的注释写着
+   "改用实际构建的交付工作区"——**注释改了、值没改**。本轮**未擅自修改**（仓库外 + 运行中的部署），
+   但新代码已能**自愈**它（剔除死段并点名）。建议人工删掉这 5 处死段，然后优雅重启。
+3. **【代码·未修·建议单开一轮】** `packages/vision/src/tools.ts:316` 把 `/tmp/vlm_ws/install` **硬编码**为
+   `ros2_vision_doctor` 的候选 install 目录。它是历史本机路径、现已不存在（只是让 built 判定少一个候选）。
+   建议改为可配置（vision 包 config）或从 ROS2 环境派生，而不是写死一个已删除的路径。
+4. **【文档·未修】** `docs/compatibility.md:9` 仍把 `/tmp/vlm_ws` 写成"本机"L4 包位置（README/README_CN 里的
+   `/tmp/vlm_ws` 是**构建示例**，可保留）。本机现状类描述应更新。
+5. **【固有限制·如实声明】** `ros2_env_check` 的 `skillCatalogue` / `surface` 等自述字段需要**重启后**才存在；
+   本轮把它当**正向信号**使用（字段缺席 = 该进程早于功能上线）。这不是缺陷，故不再追踪。
+6. **【时间口径】** 本轮跨了本地日界：CST `2026-09-22 04:xx` = UTC `2026-09-21 20:xx`。本节标题用**本地时间**，
+   而 git / CI / journal 的时间戳为 UTC（第九轮的 `17:5x CST` 也随之解释）。
+
+### 16.8 结论与下一步建议
+
+- **交付**：PR **#27**（合并第九轮成果 + 修 CI）、**#28**（整链校验 + 诊断措辞）、**#29**（前缀分隔符）
+  全部 CI 绿并合入 `main`（`11edc1d`）；issue **#22 验收后关闭**；**open issue / open PR 归零**；
+  用例 **277 → 285**；README / README_CN / CHANGELOG 计数同步。
+- **线上价值**：部署配置里的死段不再让**每一次** ros2 调用失败——新代码剔除死段、在 `note` 里点名（自愈），
+  并且**不再把故障归因于"探针的问题"**；失败信息也不再回显成 `&&ros2`。
+- **下次维护建议**：
+  1. **复核重启后的现场**（本轮唯一未闭环的观测）：`ros2_env_check` 应出现
+     `setup.missingSources = ["/tmp/vlm_ws/install/setup.bash"]`，`ros2_node_list` 应直接可用，
+     失败信息不应再出现 `&&ros2`。若 phoenix 因会话忙碌未执行重启，用 `创造模式 (phoenix)` preset 的
+     `dsh_phoenix_restart` 再请求一次（非强制）。
+  2. **改配置**：删掉 `cordis.patch.yml` 里 5 处 `/tmp/vlm_ws` 死段（仓库外，需人工确认）。
+  3. 把 §16.7 第 3 条（vision doctor 硬编码 install 目录）单开一轮：先补测试再改行为。
+  4. `docs/compatibility.md` 的本机路径描述同步现状。
+  5. 维持验收线：**推送前** `typecheck + test + build` 全绿、**推送后立刻开 PR 并等 CI 绿**、
+     `pnpm audit` 必须带 `--registry=https://registry.npmjs.org`（本机）。
