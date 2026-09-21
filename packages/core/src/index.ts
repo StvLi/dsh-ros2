@@ -8,7 +8,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { Config, type CoreConfig } from './config.js'
 import { makeRun, readOwnVersion, registerLoadedBundle, type ApprovalRequest, type JobsApi, type VisionProvider } from 'dsh-ros2-common'
 import { GuiManager } from './gui.js'
-import { createRos2Tools, type CoreToolDeps } from './tools.js'
+import { createRos2Tools, type CoreToolDeps, type SkillCatalogueProbe } from './tools.js'
 import {
   ros2BringupRecoverySkill,
   ros2DiagnosticsSkill,
@@ -30,6 +30,17 @@ const VISION_SERVICE = 'dshRos2.vision'
 /** The package.json this process actually loaded (issue #22: stale detection). */
 const BUNDLE_INFO = readOwnVersion(import.meta.url)
 
+/**
+ * Every skill this bundle ships — one source for both the registration below
+ * and the loaded-bundle surface report, so the two cannot drift apart.
+ */
+const SKILLS = [
+  ros2DiagnosticsSkill,
+  ros2BringupRecoverySkill,
+  ros2LivenessTriageSkill,
+  ros2TfIntegritySkill,
+] as const
+
 /** The slice of the harness `systemPrompt` service this bundle contributes to. */
 interface PromptSection {
   readonly name: string
@@ -42,8 +53,44 @@ interface SystemPromptService {
   getSectionOrder(name: string): number
 }
 
+/**
+ * Adapt the harness `skills` service to the one narrow read the env probe needs
+ * (issue #22, item 2): the catalogue as one agent sees it.
+ *
+ * `snapshot()` is newer than this bundle's pinned `@deepseek-ai/dsh-skill` peer,
+ * so it is feature-detected. Returning `undefined` is a real answer — the probe
+ * then says "reconciliation unavailable" instead of inventing a verdict — and
+ * only the fields the comparison uses are copied, so the tool result owns plain
+ * JSON rather than live catalogue entries.
+ */
+export function makeSkillCatalogueProbe(ctx: Context): SkillCatalogueProbe | undefined {
+  const service = ctx.get('skills') as unknown as {
+    snapshot?: (options?: { scope?: object }) => Promise<{
+      skills?: readonly { name?: unknown }[]
+      complete?: unknown
+    }>
+  } | undefined
+  if (service === undefined || typeof service.snapshot !== 'function') return undefined
+  const snapshot = service.snapshot.bind(service)
+  return async (options) => {
+    const raw = await snapshot(options)
+    const skills = Array.isArray(raw.skills) ? raw.skills : []
+    return {
+      skills: skills
+        .filter((skill): skill is { name: string } => typeof skill?.name === 'string')
+        .map((skill) => ({ name: skill.name })),
+      complete: raw.complete === true,
+    }
+  }
+}
+
 export function apply(ctx: Context, config: CoreConfig): void {
-  ctx.effect(() => registerLoadedBundle({ name: 'dsh-ros2-core', ...BUNDLE_INFO }))
+  // The surface thunk is lazy: it runs at report time, after `tools` below.
+  ctx.effect(() => registerLoadedBundle({
+    name: 'dsh-ros2-core',
+    ...BUNDLE_INFO,
+    surface: () => ({ tools: tools.map((tool) => tool.name), skills: SKILLS.map((skill) => skill.name) }),
+  }))
   ctx.logger.info(`dsh-ros2: loaded bundle dsh-ros2-core@${BUNDLE_INFO.version}`)
 
   const run = makeRun(config)
@@ -68,8 +115,10 @@ export function apply(ctx: Context, config: CoreConfig): void {
     approval,
     jobs,
     workspaceRoot: config.workspaceRoot,
+    rosSetup: config.rosSetup,
     gui,
     vision,
+    skillCatalogue: makeSkillCatalogueProbe(ctx),
   }
   const tools = createRos2Tools(deps)
 
@@ -82,12 +131,7 @@ export function apply(ctx: Context, config: CoreConfig): void {
   // entry point; the other three own a named journey with its own L1 entry
   // tool (bring-up recovery, liveness triage, TF integrity).
   ctx.effect(() => {
-    const disposers = [
-      ctx.skills.register(ros2DiagnosticsSkill),
-      ctx.skills.register(ros2BringupRecoverySkill),
-      ctx.skills.register(ros2LivenessTriageSkill),
-      ctx.skills.register(ros2TfIntegritySkill),
-    ]
+    const disposers = SKILLS.map((skill) => ctx.skills.register(skill))
     return () => disposers.forEach((dispose) => dispose())
   })
 

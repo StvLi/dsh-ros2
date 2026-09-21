@@ -33,10 +33,18 @@ function skillDefs(bundle: Bundle): { ident: string; name: string }[] {
     .map((m) => ({ ident: m[1] as string, name: m[2] as string }))
 }
 
-/** Skill identifiers actually wired with `ctx.skills.register(...)` in index.ts. */
+/**
+ * Skill identifiers actually wired into the bundle. Two accepted forms: the
+ * direct `ctx.skills.register(ident)` call, and the bundle's
+ * `const SKILLS = [...] as const` list (which the loaded-bundle surface report
+ * reads too, so wiring and reporting cannot drift apart — issue #22).
+ */
 function registeredIdents(bundle: Bundle): string[] {
-  return [...sourceFile(bundle, 'index.ts').matchAll(/ctx\.skills\.register\((\w+)\)/g)]
-    .map((m) => m[1] as string)
+  const index = sourceFile(bundle, 'index.ts')
+  const direct = [...index.matchAll(/ctx\.skills\.register\((\w+)\)/g)].map((m) => m[1] as string)
+  const listed = [...index.matchAll(/const \w+ = \[([^\]]*)\] as const/g)]
+    .flatMap((m) => [...(m[1] ?? '').matchAll(/\b(\w+Skill)\b/g)].map((x) => x[1] as string))
+  return [...new Set([...direct, ...listed])]
 }
 
 const toolsByBundle = new Map(BUNDLES.map((bundle) => [bundle, toolNames(bundle)] as const))

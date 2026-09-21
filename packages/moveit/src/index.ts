@@ -22,8 +22,16 @@ export type { MoveitPackageConfig }
 /** The package.json this process actually loaded (issue #22: stale detection). */
 const BUNDLE_INFO = readOwnVersion(import.meta.url)
 
+/** Skills this bundle ships — one source for registration and the surface report. */
+const SKILLS = [robotMotionControlSkill] as const
+
 export function apply(ctx: Context, config: MoveitPackageConfig): void {
-  ctx.effect(() => registerLoadedBundle({ name: 'dsh-ros2-moveit', ...BUNDLE_INFO }))
+  // The surface thunk is lazy: it runs at report time, after `tools` below.
+  ctx.effect(() => registerLoadedBundle({
+    name: 'dsh-ros2-moveit',
+    ...BUNDLE_INFO,
+    surface: () => ({ tools: tools.map((tool) => tool.name), skills: SKILLS.map((skill) => skill.name) }),
+  }))
   ctx.logger.info(`dsh-ros2: loaded bundle dsh-ros2-moveit@${BUNDLE_INFO.version}`)
 
   const run = makeRun(config)
@@ -41,7 +49,7 @@ export function apply(ctx: Context, config: MoveitPackageConfig): void {
   // The motion journey's carrier, registered with the bundle that ships the
   // tools it routes to — a core-only install never sees it.
   ctx.effect(() => {
-    const disposer = ctx.skills.register(robotMotionControlSkill)
-    return () => disposer()
+    const disposers = SKILLS.map((skill) => ctx.skills.register(skill))
+    return () => disposers.forEach((dispose) => dispose())
   })
 }

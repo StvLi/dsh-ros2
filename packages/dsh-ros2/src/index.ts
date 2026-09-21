@@ -7,10 +7,22 @@
  * by `dsh-ros2-core` (mounted here through `cordis.patch.yml`), so it is also
  * present for a lean core install and is never registered twice when the
  * aggregate mounts every bundle.
+ *
+ * This bundle is also the install entry point, so it owns the *mount
+ * reconciliation* of issue #22: its own `package.json` is the manifest that
+ * declares which bundles an install is supposed to mount, and it emits the
+ * settled startup report. An install that mounts bundles individually (no
+ * aggregate) simply gets no reconciliation rather than a fabricated one.
  */
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { readOwnVersion, registerLoadedBundle } from 'dsh-ros2-common'
+import {
+  declareExpectedBundles,
+  declaredBundleNames,
+  readOwnVersion,
+  registerLoadedBundle,
+  scheduleBundleStartupReport,
+} from 'dsh-ros2-common'
 
 export const name = 'dsh-ros2'
 
@@ -23,6 +35,24 @@ const BUNDLE_INFO = readOwnVersion(import.meta.url)
 
 export function apply(ctx: Context): void {
   // aggregate: all capability is provided by the dependency bundles.
-  ctx.effect(() => registerLoadedBundle({ name: 'dsh-ros2', ...BUNDLE_INFO }))
+  // It reports an empty (but explicit) surface, so it is never counted as a
+  // bundle that failed to report one.
+  ctx.effect(() => registerLoadedBundle({
+    name: 'dsh-ros2',
+    ...BUNDLE_INFO,
+    surface: () => ({ tools: [], skills: [] }),
+  }))
   ctx.logger.info(`dsh-ros2: loaded bundle dsh-ros2@${BUNDLE_INFO.version}`)
+
+  // The manifest lists the sibling bundles to mount; this bundle mounts itself.
+  ctx.effect(() => declareExpectedBundles({
+    by: 'dsh-ros2',
+    names: ['dsh-ros2', ...declaredBundleNames(BUNDLE_INFO.packageJsonPath)],
+  }))
+
+  // Emit once the mount sequence settles (see scheduleBundleStartupReport).
+  ctx.effect(() => scheduleBundleStartupReport({
+    info: (message) => ctx.logger.info(message),
+    warn: (message) => ctx.logger.warn(message),
+  }))
 }

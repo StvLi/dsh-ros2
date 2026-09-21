@@ -80,6 +80,14 @@ export interface ToolDeps {
   jobs?: JobsApi
   /** Workspace root used as fallback cwd / interface output root. */
   workspaceRoot?: string
+  /**
+   * The configured rosSetup prefix. Exposed so a tool can resolve the SAME
+   * effective setup the run seam applies (`makeRun` injects this into every
+   * call) instead of resolving with bare options — which reports an
+   * auto-detected prefix while the command actually runs under the configured
+   * one, and makes a failing config look like a healthy environment.
+   */
+  rosSetup?: string
   /** L3 GUI lifecycle manager (ros2_gui_* / ros2_screenshot) — concrete type lives in dsh-ros2-core. */
   gui?: unknown
   /** L3 pluggable multimodal vision (ros2_vision_describe / ros2_gui_observe). */

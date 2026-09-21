@@ -3,8 +3,8 @@ import { execFileSync } from 'node:child_process'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { buildRos2InstallDownloadCommand, createRos2Tools } from '../src/tools.js'
-import { type RunFn, type ToolResult, type RosResult, registerLoadedBundle } from 'dsh-ros2-common'
+import { buildRos2InstallDownloadCommand, createRos2Tools, type CoreToolDeps } from '../src/tools.js'
+import { type RunFn, type ToolResult, type RosResult, declareExpectedBundles, getSessionRosSetup, registerLoadedBundle, setSessionRosSetup } from 'dsh-ros2-common'
 
 // The ros2_install interactive flow drives a real pseudo-terminal through
 // scripts/pty_session.py (python3 + pty). Some headless/container environments
@@ -48,6 +48,18 @@ function tool(name: string, run: RunFn) {
 
 async function call(name: string, run: RunFn, args: Record<string, unknown>): Promise<ToolResult> {
   return (await tool(name, run).execute(args, execStub)) as ToolResult
+}
+
+/** Call one tool with extra deps (e.g. the skill-catalogue probe) and a fixed ros2 probe. */
+async function callWith(
+  name: string,
+  extra: Partial<CoreToolDeps>,
+  args: Record<string, unknown> = {},
+): Promise<ToolResult> {
+  const run = makeRun(() => ({ stdout: '__AMENT=/opt/ros/jazzy\n__PKGS=120\n__NODES=3\n' }))
+  const found = createRos2Tools({ run, ...extra }).find((t) => t.name === name)
+  if (!found) throw new Error(`tool ${name} not found`)
+  return (await found.execute(args, execStub)) as ToolResult
 }
 
 function tool2(name: string, run: RunFn, approval: () => Promise<string>) {
@@ -754,13 +766,52 @@ describe('ros2_env_check', () => {
     expect(out.warnings?.[0]).toContain('未检测到可见 ROS2 包')
   })
 
+  // A probe that never finished used to be indistinguishable from an unsourced
+  // environment, so the tool blamed the environment for its own failure.
+  it('blames the probe, not the environment, when the probe times out', async () => {
+    const run = makeRun(() => ({ ok: false, stdout: '', stderr: 'killed', exitCode: 124, timedOut: true, durationMs: 20000 }))
+    const out = await call('ros2_env_check', run, {})
+    expect(out.ok).toBe(true)
+    const data = out.data as { probe: { timedOut: boolean; durationMs: number; stdoutBytes: number; exitCode: number }; setup: Record<string, unknown> }
+    expect(data.probe).toMatchObject({ timedOut: true, durationMs: 20000, stdoutBytes: 0, exitCode: 124 })
+    expect(out.warnings?.some((w) => w.includes('超时') && w.includes('不代表环境未 source'))).toBe(true)
+    expect(out.warnings?.some((w) => w.includes('未检测到可见 ROS2 包'))).toBe(false)
+    expect(data.setup).toHaveProperty('sourcePath')
+  })
+
+  it('reports an empty or failing probe as unusable rather than as an unsourced environment', async () => {
+    const run = makeRun(() => ({ ok: false, stdout: '', stderr: 'bash: ros2: command not found', exitCode: 127 }))
+    const out = await call('ros2_env_check', run, {})
+    const data = out.data as { probe: { exitCode: number; stderrTail: string } }
+    expect(data.probe.exitCode).toBe(127)
+    expect(data.probe.stderrTail).toContain('command not found')
+    expect(out.warnings?.some((w) => w.includes('未返回可解析的结果') && w.includes('127'))).toBe(true)
+    expect(out.warnings?.some((w) => w.includes('未检测到可见 ROS2 包'))).toBe(false)
+  })
+
+  // The live shape: the probe exits 0 and prints something, but the marker the
+  // tool parses never arrives — previously reported as "环境未 source", which
+  // is a conclusion the evidence does not support.
+  it('does not diagnose sourcing when the probe output carries no package marker', async () => {
+    const run = makeRun(() => ({ stdout: 'something else entirely\n' }))
+    const out = await call('ros2_env_check', run, {})
+    const data = out.data as { probe: { stdoutBytes: number }; amentPrefixPath?: string }
+    expect(data.probe.stdoutBytes).toBeGreaterThan(0)
+    expect(data.amentPrefixPath).toBeUndefined()
+    expect(out.warnings?.some((w) => w.includes('缺少可解析的包计数标记'))).toBe(true)
+    expect(out.warnings?.some((w) => w.includes('未检测到可见 ROS2 包'))).toBe(false)
+  })
+
   // issue #22: a bundle updated on disk while the process keeps the old code
   // used to be invisible until something failed with "unknown tool".
   it('reports a stale process by comparing loaded and on-disk bundle versions', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'dsh-bundle-drift-'))
     const pkgPath = path.join(dir, 'package.json')
     writeFileSync(pkgPath, JSON.stringify({ name: 'dsh-ros2-core', version: '0.1.6' }))
-    const dispose = registerLoadedBundle({ name: 'dsh-ros2-core', version: '0.1.5', packageJsonPath: pkgPath })
+    const dispose = registerLoadedBundle({
+      name: 'dsh-ros2-core', version: '0.1.5', packageJsonPath: pkgPath,
+      surface: () => ({ tools: ['ros2_env_check'], skills: ['ros2-diagnostics'] }),
+    })
     try {
       const run = makeRun(() => ({ stdout: '__AMENT=/opt/ros/jazzy\n__COLCON=\n__PKGS=120\n__NODES=3\n' }))
       const out = await call('ros2_env_check', run, {})
@@ -785,13 +836,33 @@ describe('ros2_env_check', () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'dsh-bundle-ok-'))
     const pkgPath = path.join(dir, 'package.json')
     writeFileSync(pkgPath, JSON.stringify({ name: 'dsh-ros2-profile', version: '0.1.0' }))
-    const dispose = registerLoadedBundle({ name: 'dsh-ros2-profile', version: '0.1.0', packageJsonPath: pkgPath })
+    const dispose = registerLoadedBundle({
+      name: 'dsh-ros2-profile', version: '0.1.0', packageJsonPath: pkgPath,
+      surface: () => ({ tools: ['robot_load', 'robot_topology'], skills: ['robot-retrieval'] }),
+    })
     try {
       const run = makeRun(() => ({ stdout: '__AMENT=/opt/ros/jazzy\n__PKGS=120\n__NODES=3\n' }))
       const out = await call('ros2_env_check', run, {})
-      const data = out.data as { bundles: { stale: boolean; unresolved: string[] } }
+      const data = out.data as {
+        bundles: {
+          stale: boolean
+          unresolved: string[]
+          unreported: string[]
+          totalTools: number
+          totalSkills: number
+          surface: { name: string; tools: number; skills: string[] }[]
+        }
+      }
       expect(data.bundles.stale).toBe(false)
       expect(data.bundles.unresolved).toEqual([])
+      // issue #22: what the process actually registered, so a session catalogue
+      // that disagrees is comparable rather than inferred.
+      expect(data.bundles.unreported).toEqual([])
+      expect(data.bundles.surface).toEqual([
+        { name: 'dsh-ros2-profile', tools: 2, skills: ['robot-retrieval'] },
+      ])
+      expect(data.bundles.totalTools).toBe(2)
+      expect(data.bundles.totalSkills).toBe(1)
       expect(out.warnings ?? []).toEqual([])
     } finally {
       dispose()
@@ -799,9 +870,58 @@ describe('ros2_env_check', () => {
     }
   })
 
+  it('names a bundle that cannot report its surface (stale build) in a warning', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'dsh-bundle-nosurface-'))
+    const pkgPath = path.join(dir, 'package.json')
+    writeFileSync(pkgPath, JSON.stringify({ name: 'dsh-ros2-old', version: '0.1.0' }))
+    // A bundle built before the surface feature registered no thunk at all.
+    const dispose = registerLoadedBundle({ name: 'dsh-ros2-old', version: '0.1.0', packageJsonPath: pkgPath })
+    try {
+      const run = makeRun(() => ({ stdout: '__AMENT=/opt/ros/jazzy\n__PKGS=120\n__NODES=3\n' }))
+      const out = await call('ros2_env_check', run, {})
+      expect(out.ok).toBe(true)
+      const data = out.data as { bundles: { unreported: string[]; surface: unknown[] } }
+      expect(data.bundles.unreported).toEqual(['dsh-ros2-old'])
+      expect(data.bundles.surface).toEqual([])
+      expect(out.warnings?.some((w) => w.includes('未报告自身工具/技能') && w.includes('dsh-ros2-old'))).toBe(true)
+    } finally {
+      dispose()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('reconciles the declared bundle set against what actually mounted', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'dsh-bundle-declared-'))
+    const pkgPath = path.join(dir, 'package.json')
+    writeFileSync(pkgPath, JSON.stringify({ name: 'dsh-ros2', version: '0.1.0' }))
+    const disposeBundle = registerLoadedBundle({
+      name: 'dsh-ros2', version: '0.1.0', packageJsonPath: pkgPath,
+      surface: () => ({ tools: [], skills: [] }),
+    })
+    // The manifest declares core + profile; only the aggregate mounted.
+    const disposeDeclaration = declareExpectedBundles({
+      by: 'dsh-ros2', names: ['dsh-ros2', 'dsh-ros2-core', 'dsh-ros2-profile'],
+    })
+    try {
+      const run = makeRun(() => ({ stdout: '__AMENT=/opt/ros/jazzy\n__PKGS=120\n__NODES=3\n' }))
+      const out = await call('ros2_env_check', run, {})
+      const data = out.data as { bundles: { expected: string[]; declaredBy: string; missing: string[]; undeclared: string[] } }
+      expect(data.bundles.declaredBy).toBe('dsh-ros2')
+      expect(data.bundles.expected).toEqual(['dsh-ros2', 'dsh-ros2-core', 'dsh-ros2-profile'])
+      expect(data.bundles.missing).toEqual(['dsh-ros2-core', 'dsh-ros2-profile'])
+      expect(data.bundles.undeclared).toEqual([])
+      expect(out.warnings?.some((w) => w.includes('声明但未挂载') && w.includes('dsh-ros2-core'))).toBe(true)
+    } finally {
+      disposeDeclaration()
+      disposeBundle()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   it('flags a loaded bundle whose package.json is gone as unresolved', async () => {
     const dispose = registerLoadedBundle({
       name: 'dsh-ros2-gone', version: '9.9.9', packageJsonPath: '/nonexistent/dsh-ros2-gone/package.json',
+      surface: () => ({ tools: ['state_get'], skills: [] }),
     })
     try {
       const run = makeRun(() => ({ stdout: '__AMENT=/opt/ros/jazzy\n__PKGS=120\n__NODES=3\n' }))
@@ -812,6 +932,171 @@ describe('ros2_env_check', () => {
       expect(out.warnings?.some((w) => w.includes('package.json 已不可读'))).toBe(true)
     } finally {
       dispose()
+    }
+  })
+
+  // issue #22, item 2: the bundle surface says what this process registered; only
+  // the catalogue says what a session can actually invoke. Reconciling the two is
+  // what turns "9 registered but 6 listed" from a user report into a diagnosis.
+  it('reconciles registered skills against the catalogue the session sees', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'dsh-skill-catalogue-'))
+    const pkgPath = path.join(dir, 'package.json')
+    writeFileSync(pkgPath, JSON.stringify({ name: 'dsh-ros2-core', version: '0.1.5' }))
+    const dispose = registerLoadedBundle({
+      name: 'dsh-ros2-core', version: '0.1.5', packageJsonPath: pkgPath,
+      surface: () => ({ tools: ['ros2_env_check'], skills: ['ros2-diagnostics', 'ros2-tf-integrity'] }),
+    })
+    let scopeSeen: unknown
+    try {
+      const out = await callWith('ros2_env_check', {
+        skillCatalogue: async (options) => {
+          scopeSeen = options.scope
+          return {
+            // A real catalogue holds more than the bundles register.
+            skills: [{ name: 'ros2-diagnostics' }, { name: 'ros2-tf-integrity' }, { name: 'project-skill' }],
+            complete: true,
+          }
+        },
+      })
+      const data = out.data as { skillCatalogue: Record<string, unknown> }
+      expect(data.skillCatalogue).toEqual({
+        available: true,
+        complete: true,
+        registered: ['ros2-diagnostics', 'ros2-tf-integrity'],
+        visibleCount: 3,
+        missing: [],
+      })
+      // The catalogue is read in the calling agent's scope — that is the set the
+      // agent can invoke, and the only one worth comparing against.
+      expect(scopeSeen).toBe((execStub as { agent: unknown }).agent)
+      expect(out.warnings ?? []).toEqual([])
+    } finally {
+      dispose()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('names a registered skill that the session catalogue cannot see', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'dsh-skill-missing-'))
+    const pkgPath = path.join(dir, 'package.json')
+    writeFileSync(pkgPath, JSON.stringify({ name: 'dsh-ros2-core', version: '0.1.5' }))
+    const dispose = registerLoadedBundle({
+      name: 'dsh-ros2-core', version: '0.1.5', packageJsonPath: pkgPath,
+      surface: () => ({ tools: ['ros2_env_check'], skills: ['ros2-diagnostics', 'ros2-tf-integrity'] }),
+    })
+    try {
+      const out = await callWith('ros2_env_check', {
+        skillCatalogue: async () => ({ skills: [{ name: 'ros2-diagnostics' }], complete: true }),
+      })
+      const data = out.data as { skillCatalogue: { missing: string[]; available: boolean } }
+      expect(data.skillCatalogue.available).toBe(true)
+      expect(data.skillCatalogue.missing).toEqual(['ros2-tf-integrity'])
+      expect(out.warnings?.some((w) => w.includes('技能目录看不到') && w.includes('ros2-tf-integrity'))).toBe(true)
+    } finally {
+      dispose()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  // Discovery that has not finished is not evidence of absence: report it in the
+  // data, never as "these skills are missing".
+  it('does not turn an incomplete catalogue into a missing-skill warning', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'dsh-skill-incomplete-'))
+    const pkgPath = path.join(dir, 'package.json')
+    writeFileSync(pkgPath, JSON.stringify({ name: 'dsh-ros2-core', version: '0.1.5' }))
+    const dispose = registerLoadedBundle({
+      name: 'dsh-ros2-core', version: '0.1.5', packageJsonPath: pkgPath,
+      surface: () => ({ tools: ['ros2_env_check'], skills: ['ros2-diagnostics'] }),
+    })
+    try {
+      const out = await callWith('ros2_env_check', {
+        skillCatalogue: async () => ({ skills: [], complete: false }),
+      })
+      const data = out.data as { skillCatalogue: { complete: boolean; missing: string[] } }
+      expect(data.skillCatalogue).toMatchObject({ available: true, complete: false, missing: ['ros2-diagnostics'] })
+      expect((out.warnings ?? []).some((w) => w.includes('技能目录看不到'))).toBe(false)
+    } finally {
+      dispose()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('reports the reconciliation as unavailable when the harness has no catalogue read', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'dsh-skill-noprobe-'))
+    const pkgPath = path.join(dir, 'package.json')
+    writeFileSync(pkgPath, JSON.stringify({ name: 'dsh-ros2-core', version: '0.1.5' }))
+    const dispose = registerLoadedBundle({
+      name: 'dsh-ros2-core', version: '0.1.5', packageJsonPath: pkgPath,
+      surface: () => ({ tools: ['ros2_env_check'], skills: ['ros2-diagnostics'] }),
+    })
+    try {
+      const out = await callWith('ros2_env_check', {})
+      const data = out.data as { skillCatalogue: { available: boolean; reason: string } }
+      expect(data.skillCatalogue.available).toBe(false)
+      expect(data.skillCatalogue.reason).toContain('snapshot()')
+      expect((out.warnings ?? []).some((w) => w.includes('技能目录看不到'))).toBe(false)
+    } finally {
+      dispose()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('reports a failing catalogue read as unavailable, not as a missing skill', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'dsh-skill-fail-'))
+    const pkgPath = path.join(dir, 'package.json')
+    writeFileSync(pkgPath, JSON.stringify({ name: 'dsh-ros2-core', version: '0.1.5' }))
+    const dispose = registerLoadedBundle({
+      name: 'dsh-ros2-core', version: '0.1.5', packageJsonPath: pkgPath,
+      surface: () => ({ tools: ['ros2_env_check'], skills: ['ros2-diagnostics'] }),
+    })
+    try {
+      const out = await callWith('ros2_env_check', {
+        skillCatalogue: async () => { throw new Error('registry offline') },
+      })
+      const data = out.data as { skillCatalogue: { available: boolean; reason: string } }
+      expect(data.skillCatalogue.available).toBe(false)
+      expect(data.skillCatalogue.reason).toContain('registry offline')
+      expect((out.warnings ?? []).some((w) => w.includes('技能目录看不到'))).toBe(false)
+    } finally {
+      dispose()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  // The probe both REPORTS a setup resolution and RUNS under one; those must be
+  // the same, and the prefix must be applied exactly once. The tool used to
+  // resolve with bare options (→ auto-detect, `explicit: false`) while the run
+  // seam prepended the configured rosSetup around the probe, so a config that
+  // fails outright was reported as a healthy auto-detected environment.
+  it('reports the setup it actually probes under, with the prefix applied once', async () => {
+    const { mkdirSync } = await import('node:fs')
+    const dir = mkdtempSync(path.join(tmpdir(), 'dsh-setup-report-'))
+    mkdirSync(path.join(dir, 'install'), { recursive: true })
+    const configured = path.join(dir, 'install', 'setup.bash')
+    writeFileSync(configured, 'true\n')
+    const commands: string[] = []
+    const run = makeRun((bin, args) => {
+      commands.push(`${bin} ${args.join(' ')}`)
+      return { stdout: '__AMENT=/opt/ros/jazzy\n__PKGS=120\n__NODES=3\n' }
+    })
+    const previous = getSessionRosSetup()
+    setSessionRosSetup(null)
+    try {
+      const found = createRos2Tools({ run, rosSetup: `source ${configured} && ` }).find((t) => t.name === 'ros2_env_check')
+      if (!found) throw new Error('ros2_env_check not found')
+      const out = (await found.execute({}, execStub)) as ToolResult
+      const data = out.data as { setup: { prefix: string; sourcePath: string; explicit: boolean } }
+      // …the report names the configured setup, not an auto-detected one…
+      expect(data.setup.explicit).toBe(true)
+      expect(data.setup.sourcePath).toBe(configured)
+      expect(data.setup.prefix).toBe(`source ${configured} && `)
+      // …and the probe string does not re-embed it: exactly one source chain,
+      // owned by the run seam.
+      expect(commands).toHaveLength(1)
+      expect(commands[0]).not.toContain('source ')
+    } finally {
+      setSessionRosSetup(previous)
+      rmSync(dir, { recursive: true, force: true })
     }
   })
 })
@@ -840,6 +1125,8 @@ describe('ros2_workspace', () => {
       expect(out.ok).toBe(true)
       expect((out.data as { sessionRosSetup: string }).sessionRosSetup).toContain(`${dir}/install/setup.bash`)
     } finally {
+      // The override is module-global state shared with every later test.
+      setSessionRosSetup(null)
       rmSync(dir, { recursive: true, force: true })
     }
   })
@@ -857,6 +1144,8 @@ describe('ros2_workspace', () => {
       const prefix = (out.data as { sessionRosSetup: string }).sessionRosSetup
       expect(prefix).toBe(`source '${dir}/install/setup.bash' && `)
     } finally {
+      // Leave no session override behind for later tests in this process.
+      setSessionRosSetup(null)
       rmSync(dir, { recursive: true, force: true })
     }
   })

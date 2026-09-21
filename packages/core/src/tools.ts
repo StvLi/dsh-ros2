@@ -45,6 +45,7 @@ import {
   resolveSetup,
   shq,
   bundleDriftReport,
+  formatBundleStartupReport,
 } from 'dsh-ros2-common'
 import { spawnJob } from 'dsh-ros2-common'
 
@@ -55,8 +56,30 @@ function scriptPath(name: string): string {
 
 import type { GuiManager } from './gui.js'
 
+/**
+ * Minimal structural view of the harness skill catalogue. Only the fields the
+ * reconciliation reads are named, so this compiles against any harness whose
+ * `skills` service exposes `snapshot()` — and stays honest when one does not.
+ */
+export interface SkillCatalogueEntry {
+  readonly name: string
+}
+
+export interface SkillCatalogueSnapshot {
+  readonly skills: readonly SkillCatalogueEntry[]
+  /** False while discovery is still running: an incomplete view proves nothing. */
+  readonly complete: boolean
+}
+
+/**
+ * Read the skill catalogue as one agent sees it. Supplied only when the harness
+ * exposes `skills.snapshot()`; an older harness leaves it absent, and the
+ * reconciliation then reports itself unavailable instead of inventing a verdict.
+ */
+export type SkillCatalogueProbe = (options: { scope?: object }) => Promise<SkillCatalogueSnapshot>
+
 /** Core deps: gui lifecycle manager (concrete type from ./gui.js). */
-export type CoreToolDeps = ToolDeps & { gui?: GuiManager }
+export type CoreToolDeps = ToolDeps & { gui?: GuiManager; skillCatalogue?: SkillCatalogueProbe }
 
 const INTERFACE_KINDS = ['msg', 'srv', 'action'] as const
 
@@ -1451,6 +1474,55 @@ export function createRos2Tools(deps: ToolDeps) {
 }
 
 /**
+ * Reconcile the skills the mounted bundles registered against the catalogue the
+ * session actually sees (issue #22, item 2).
+ *
+ * The bundle surface says "this process registered these names"; the catalogue
+ * says which of them a session can reach. A name in the first set but not the
+ * second is the exact symptom the issue reported — registered, yet absent from
+ * the session's skill directory — and it is invisible from either side alone.
+ *
+ * Every unanswerable case is reported as unavailable *with its reason*, never as
+ * a finding: a diagnostic that turns "I could not look" into "something is
+ * broken" is worse than no diagnostic.
+ */
+async function reconcileSkillCatalogue(
+  deps: CoreToolDeps,
+  exec: { readonly agent?: unknown },
+  registered: readonly string[],
+): Promise<Record<string, unknown>> {
+  const names = [...new Set(registered)].sort()
+  const probe = deps.skillCatalogue
+  if (probe === undefined) {
+    return { available: false, reason: '该 harness 的 skills 服务没有 snapshot()，无法读取技能目录', registered: names }
+  }
+  if (exec.agent === undefined) {
+    return { available: false, reason: '本次调用没有 agent 上下文，无法确定目录的 scope', registered: names }
+  }
+  try {
+    // `scope` is the agent itself: the catalogue merges the global layer with
+    // the viewing agent's chain, which is exactly the set that agent can invoke.
+    const snapshot = await probe({ scope: exec.agent as object })
+    const visible = snapshot.skills.map((skill) => skill.name)
+    return {
+      available: true,
+      complete: snapshot.complete,
+      registered: names,
+      visibleCount: visible.length,
+      // Only presence is compared. The catalogue legitimately holds more than
+      // the bundles register (project/user skills), so counts are not evidence.
+      missing: names.filter((name) => !visible.includes(name)),
+    }
+  } catch (error) {
+    return {
+      available: false,
+      reason: `读取技能目录失败：${error instanceof Error ? error.message : String(error)}`,
+      registered: names,
+    }
+  }
+}
+
+/**
  * L1: self-check the ROS2 environment resolution — which setup is sourced
  * (session override / config / auto-detected), path existence, and visible
  * packages/nodes. Read-only, no approval.
@@ -1462,9 +1534,17 @@ function makeEnvCheckTool(deps: CoreToolDeps) {
       'Self-check the ROS2 environment resolution: which setup is sourced (session override / configured rosSetup / auto-detected), whether paths exist, and what packages/nodes are visible. Also reports the loaded dsh-ros2 bundle versions against the ones now on disk, so a running process that predates a plugin update is visible instead of surfacing later as an unknown tool. Read-only, no approval.',
     parameters: {},
     output: { schema: resultSchema, render: renderResult },
-    async execute() {
-      const setup = resolveSetup({ workspaceRoot: deps.workspaceRoot })
-      const probe = `${setup.prefix}echo "__AMENT=$AMENT_PREFIX_PATH"; echo "__COLCON=$COLCON_PREFIX_PATH"; echo "__PKGS=$(ros2 pkg list 2>/dev/null | wc -l)"; echo "__NODES=$(ros2 node list 2>/dev/null | wc -l)"`
+    async execute(_args, exec) {
+      // Resolve the setup with the SAME inputs the run seam uses: `makeRun`
+      // injects the configured `rosSetup` into every call, so resolving with
+      // bare options here reported an auto-detected prefix while the command
+      // actually ran under the configured one.
+      const setup = resolveSetup({ workspaceRoot: deps.workspaceRoot, rosSetup: deps.rosSetup })
+      // The probe string carries NO prefix: `deps.run` already applies the one
+      // effective prefix, and baking it in here applied it a second time around
+      // this command — two `source` chains, with the outer one deciding the
+      // outcome while the reported `setup` described the inner one.
+      const probe = 'echo "__AMENT=$AMENT_PREFIX_PATH"; echo "__COLCON=$COLCON_PREFIX_PATH"; echo "__PKGS=$(ros2 pkg list 2>/dev/null | wc -l)"; echo "__NODES=$(ros2 node list 2>/dev/null | wc -l)"'
       const res = await deps.run('bash', ['-lc', probe], { timeoutMs: 20000, workspaceRoot: deps.workspaceRoot })
       const out: Record<string, unknown> = {
         setup: {
@@ -1473,6 +1553,16 @@ function makeEnvCheckTool(deps: CoreToolDeps) {
           explicit: setup.explicit,
           sessionOverride: getSessionRosSetup(),
         },
+        // The probe's own outcome. Without this a probe that never finished was
+        // indistinguishable from an unsourced environment, and the tool blamed
+        // the environment for its own failure.
+        probe: {
+          exitCode: res.exitCode,
+          timedOut: res.timedOut,
+          durationMs: res.durationMs,
+          stdoutBytes: res.stdout.length,
+          stderrTail: tail(res.stderr).join(' | '),
+        },
       }
       const grab = (key: string) => {
         const m = new RegExp(`__${key}=(.*)`).exec(res.stdout)
@@ -1480,34 +1570,72 @@ function makeEnvCheckTool(deps: CoreToolDeps) {
       }
       grab('AMENT'); grab('COLCON'); grab('PKGS'); grab('NODES')
 
-      // Loaded vs installed bundle versions (issue #22). Each mounted bundle
-      // recorded the package.json it was loaded from; re-reading those files
-      // shows whether the disk moved on without the process.
+      // Loaded vs installed bundle versions + the surface each bundle actually
+      // registered in this process (issue #22). Each mounted bundle recorded the
+      // package.json it was loaded from; re-reading those files shows whether
+      // the disk moved on without the process, and the per-bundle tool/skill
+      // surface makes a session catalogue that disagrees directly comparable
+      // instead of inferred.
       const bundles = bundleDriftReport()
       out.bundles = {
         loaded: bundles.loaded,
         drift: bundles.drift,
         stale: bundles.stale,
         unresolved: bundles.unresolved,
+        surface: bundles.surface,
+        unreported: bundles.unreported,
+        totalTools: bundles.totalTools,
+        totalSkills: bundles.totalSkills,
+        expected: bundles.expected,
+        declaredBy: bundles.declaredBy,
+        missing: bundles.missing,
+        undeclared: bundles.undeclared,
       }
+
+      // Issue #22, item 2: what the bundles registered is only half the answer;
+      // what the session can actually invoke is the other half.
+      const catalogue = await reconcileSkillCatalogue(
+        deps, exec, bundles.surface.flatMap((entry) => entry.skills))
+      out.skillCatalogue = catalogue
       if (setup.note) out.note = setup.note
 
       const result = okResult('ros2_env_check', 'ros2 env probe', out as JsonValue)
-      const warnings: string[] = []
+      // One wording for the stale/missing/unreported signals, shared with the
+      // startup probe: a diagnostic that says something different depending on
+      // how you ask is worse than no diagnostic.
+      const warnings: string[] = [...formatBundleStartupReport(bundles).warnings]
       const pkgs = out.visiblePackages as number | undefined
-      if (pkgs === undefined || pkgs === 0) {
+      // A probe that never finished / failed says nothing about whether the
+      // environment is sourced, so it must not be reported as "not sourced".
+      if (res.timedOut) {
+        warnings.push(
+          `ROS2 环境探针在 ${res.durationMs}ms 后超时（上限 20000ms），没有取得任何结果——` +
+          '这不代表环境未 source，而是探针本身没跑完（常见于 `ros2 pkg list` 在该进程环境里挂住）。' +
+          `可先用 ros2_workspace show 或在登录 shell 里手工复核。stderr 末尾：${tail(res.stderr).join(' | ') || '(空)'}`)
+      } else if (res.stdout.trim() === '' || res.exitCode !== 0) {
+        warnings.push(
+          `ROS2 环境探针未返回可解析的结果（退出码 ${res.exitCode}、stdout ${res.stdout.length} 字节），` +
+          '因此下面的可见包/节点数字不可用；这通常说明探针命令在该进程环境里失败，而非 rosSetup 路径无效。' +
+          `stderr 末尾：${tail(res.stderr).join(' | ') || '(空)'}`)
+      } else if (pkgs === undefined) {
+        // The probe exited cleanly but no `__PKGS=` marker came back, so the
+        // result is unusable — still not evidence about sourcing. This is the
+        // shape a live session hit: a demonstrably sourced environment was
+        // reported as "未检测到可见 ROS2 包".
+        warnings.push(
+          `ROS2 环境探针有输出（${res.stdout.length} 字节）但缺少可解析的包计数标记，可见包/节点数字不可用；` +
+          `stderr 末尾：${tail(res.stderr).join(' | ') || '(空)'}`)
+      } else if (pkgs === 0) {
         warnings.push('未检测到可见 ROS2 包——环境可能未 source 或 rosSetup 路径无效；可用 ros2_workspace use <workspace> 切换')
       }
-      const drifted = bundles.drift.filter((d) => d.drifted)
-      if (drifted.length > 0) {
+      // A registered skill the session cannot reach is the #22 symptom itself —
+      // but only when discovery finished. An incomplete catalogue is reported in
+      // the data, never as a warning: absence of evidence is not evidence.
+      const missingSkills = Array.isArray(catalogue.missing) ? (catalogue.missing as string[]) : []
+      if (catalogue.available === true && catalogue.complete === true && missingSkills.length > 0) {
         warnings.push(
-          '检测到磁盘上的 dsh-ros2 bundle 已更新，但运行中的进程仍是旧代码：' +
-          drifted.map((d) => `${d.name} ${d.loaded} → ${d.installed}`).join('、') +
-          '。新工具/技能不会被加载（症状是 unknown tool 或技能目录缺项）；请重启 harness 后重试。')
-      }
-      if (bundles.unresolved.length > 0) {
-        warnings.push(
-          `以下已加载 bundle 的 package.json 已不可读，无法判断是否陈旧：${bundles.unresolved.join('、')}`)
+          `以下技能已由 dsh-ros2 bundle 注册，但当前会话的技能目录看不到：${missingSkills.join('、')}。` +
+          '这正是「实际注册数与会话技能目录不一致」的表现；若磁盘代码已更新，重启 harness 后重试。')
       }
       if (bundles.loaded.length === 0) {
         warnings.push('未记录到任何已加载的 dsh-ros2 bundle——bundle 未挂载，或版本早于本诊断功能（重启 harness 后可自证）。')
@@ -1570,7 +1698,7 @@ function makeWorkspaceTool(deps: CoreToolDeps) {
           note: '会话覆盖已清除——恢复配置的 rosSetup 与自动回退链',
         })
       }
-      const setup = resolveSetup({ workspaceRoot: deps.workspaceRoot })
+      const setup = resolveSetup({ workspaceRoot: deps.workspaceRoot, rosSetup: deps.rosSetup })
       return okResult('ros2_workspace', 'ros2_workspace', {
         action: 'show',
         sessionOverride: getSessionRosSetup() ?? null,

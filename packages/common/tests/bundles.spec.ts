@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -6,10 +6,14 @@ import {
   type LoadedBundle,
   bundleDriftReport,
   compareBundles,
+  declareExpectedBundles,
+  declaredBundleNames,
+  formatBundleStartupReport,
   listLoadedBundles,
   readOwnVersion,
   readVersionAt,
   registerLoadedBundle,
+  scheduleBundleStartupReport,
 } from '../src/bundles.js'
 
 const dirs: string[] = []
@@ -132,5 +136,208 @@ describe('bundleDriftReport', () => {
       disposeA()
       disposeB()
     }
+  })
+})
+
+describe('declaredBundleNames', () => {
+  it('keeps the mountable bundles, drops libraries, sorts', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'dsh-bundles-manifest-'))
+    dirs.push(dir)
+    const packageJsonPath = path.join(dir, 'package.json')
+    writeFileSync(packageJsonPath, JSON.stringify({
+      name: 'dsh-ros2',
+      dependencies: {
+        'dsh-ros2-common': 'workspace:^0.1.0',
+        'dsh-ros2-sidecar': 'workspace:^0.1.0',
+        'dsh-ros2-vision': 'workspace:^0.1.0',
+        'dsh-ros2-core': 'workspace:^0.1.0',
+        '@deepseek-ai/schemastery': '^3.18.1',
+      },
+    }))
+    // common/sidecar are libraries, not mountable bundles; foreign deps are ignored.
+    expect(declaredBundleNames(packageJsonPath)).toEqual(['dsh-ros2-core', 'dsh-ros2-vision'])
+  })
+
+  it('returns [] for a missing or dependency-less manifest', () => {
+    expect(declaredBundleNames('/nonexistent/package.json')).toEqual([])
+    const { packageJsonPath } = tempPackage('dsh-ros2-x', '0.1.0')
+    expect(declaredBundleNames(packageJsonPath)).toEqual([])
+  })
+})
+
+describe('bundle surface (issue #22)', () => {
+  it('evaluates the thunk at report time, so a bundle may register before building its tools', () => {
+    const pkg = tempPackage('dsh-ros2-late', '0.1.0')
+    let built = false
+    const dispose = registerLoadedBundle({
+      name: 'dsh-ros2-late',
+      version: '0.1.0',
+      packageJsonPath: pkg.packageJsonPath,
+      surface: () => ({ tools: built ? ['late_tool'] : [], skills: built ? ['late-skill'] : [] }),
+    })
+    try {
+      expect(bundleDriftReport().totalTools).toBe(0)
+      built = true
+      const report = bundleDriftReport()
+      expect(report.surface).toEqual([{ name: 'dsh-ros2-late', tools: 1, skills: ['late-skill'] }])
+      expect(report.totalTools).toBe(1)
+      expect(report.totalSkills).toBe(1)
+      expect(report.unreported).toEqual([])
+    } finally {
+      dispose()
+    }
+  })
+
+  it('lists a bundle with no thunk, or a throwing one, as unreported instead of counting it as empty', () => {
+    const none = tempPackage('dsh-ros2-none', '0.1.0')
+    const boom = tempPackage('dsh-ros2-boom', '0.1.0')
+    const disposeA = registerLoadedBundle(bundle('dsh-ros2-none', '0.1.0', none.packageJsonPath))
+    const disposeB = registerLoadedBundle({
+      name: 'dsh-ros2-boom',
+      version: '0.1.0',
+      packageJsonPath: boom.packageJsonPath,
+      surface: () => {
+        throw new Error('boom')
+      },
+    })
+    try {
+      const report = bundleDriftReport()
+      expect(report.unreported).toEqual(['dsh-ros2-boom', 'dsh-ros2-none'])
+      expect(report.surface).toEqual([])
+      expect(report.totalTools).toBe(0)
+    } finally {
+      disposeA()
+      disposeB()
+    }
+  })
+})
+
+describe('declared vs mounted reconciliation', () => {
+  it('reports what the manifest declares but never mounted, and what mounted undeclared', () => {
+    const core = tempPackage('dsh-ros2-core', '0.1.0')
+    const state = tempPackage('dsh-ros2-state', '0.1.0')
+    const disposeCore = registerLoadedBundle({
+      name: 'dsh-ros2-core', version: '0.1.0', packageJsonPath: core.packageJsonPath,
+      surface: () => ({ tools: [], skills: [] }),
+    })
+    const disposeState = registerLoadedBundle({
+      name: 'dsh-ros2-state', version: '0.1.0', packageJsonPath: state.packageJsonPath,
+      surface: () => ({ tools: [], skills: [] }),
+    })
+    const undeclare = declareExpectedBundles({ by: 'dsh-ros2', names: ['dsh-ros2', 'dsh-ros2-core'] })
+    try {
+      const report = bundleDriftReport()
+      expect(report.declaredBy).toBe('dsh-ros2')
+      expect(report.expected).toEqual(['dsh-ros2', 'dsh-ros2-core'])
+      expect(report.missing).toEqual(['dsh-ros2'])
+      expect(report.undeclared).toEqual(['dsh-ros2-state'])
+    } finally {
+      undeclare()
+      disposeCore()
+      disposeState()
+    }
+    // Without a declaration there is no reconciliation to fabricate.
+    const bare = bundleDriftReport()
+    expect(bare.expected).toEqual([])
+    expect(bare.declaredBy).toBeNull()
+    expect(bare.missing).toEqual([])
+    expect(bare.undeclared).toEqual([])
+  })
+})
+
+describe('formatBundleStartupReport', () => {
+  it('renders the loaded set, the tool/skill totals and the declared/mounted ratio', () => {
+    const core = tempPackage('dsh-ros2-core', '0.1.5')
+    const dispose = registerLoadedBundle({
+      name: 'dsh-ros2-core', version: '0.1.5', packageJsonPath: core.packageJsonPath,
+      surface: () => ({ tools: ['t1', 't2'], skills: ['s1'] }),
+    })
+    const undeclare = declareExpectedBundles({ by: 'dsh-ros2', names: ['dsh-ros2-core', 'dsh-ros2-vision'] })
+    try {
+      const { line, warnings } = formatBundleStartupReport(bundleDriftReport())
+      expect(line).toContain('dsh-ros2-core@0.1.5')
+      expect(line).toContain('1/2 declared bundles')
+      expect(line).toContain('2 tools, 1 skills')
+      expect(warnings.some((w) => w.includes('声明但未挂载') && w.includes('dsh-ros2-vision'))).toBe(true)
+    } finally {
+      undeclare()
+      dispose()
+    }
+  })
+
+  it('never warns about an undeclared bundle — an optional bundle is a legitimate install', () => {
+    const state = tempPackage('dsh-ros2-state', '0.1.0')
+    const dispose = registerLoadedBundle({
+      name: 'dsh-ros2-state', version: '0.1.0', packageJsonPath: state.packageJsonPath,
+      surface: () => ({ tools: [], skills: [] }),
+    })
+    const undeclare = declareExpectedBundles({ by: 'dsh-ros2', names: ['dsh-ros2-core'] })
+    try {
+      const report = bundleDriftReport()
+      expect(report.undeclared).toEqual(['dsh-ros2-state'])
+      const { line, warnings } = formatBundleStartupReport(report)
+      expect(line).toContain('undeclared: dsh-ros2-state')
+      expect(warnings.some((w) => w.includes('未在安装清单'))).toBe(false)
+    } finally {
+      undeclare()
+      dispose()
+    }
+  })
+})
+
+describe('scheduleBundleStartupReport', () => {
+  it('emits exactly one line, after the mount set stops changing', async () => {
+    vi.useFakeTimers()
+    const core = tempPackage('dsh-ros2-core', '0.1.0')
+    const dispose = registerLoadedBundle({
+      name: 'dsh-ros2-core', version: '0.1.0', packageJsonPath: core.packageJsonPath,
+      surface: () => ({ tools: [], skills: [] }),
+    })
+    const info: string[] = []
+    const warn: string[] = []
+    const stop = scheduleBundleStartupReport(
+      { info: (m) => info.push(m), warn: (m) => warn.push(m) },
+      { intervalMs: 10, maxWaitMs: 100 },
+    )
+    try {
+      await vi.advanceTimersByTimeAsync(10)
+      expect(info).toEqual([]) // first tick only records the set
+      await vi.advanceTimersByTimeAsync(10)
+      expect(info).toHaveLength(1)
+      expect(info[0]).toContain('dsh-ros2-core@0.1.0')
+      expect(warn).toEqual([])
+      await vi.advanceTimersByTimeAsync(200)
+      expect(info).toHaveLength(1) // the probe stops after reporting
+    } finally {
+      stop()
+      dispose()
+      vi.useRealTimers()
+    }
+  })
+
+  it('falls back to maxWaitMs and warns when a bundle never reports its surface', async () => {
+    vi.useFakeTimers()
+    const quiet = tempPackage('dsh-ros2-quiet', '0.1.0')
+    const dispose = registerLoadedBundle(bundle('dsh-ros2-quiet', '0.1.0', quiet.packageJsonPath))
+    const warn: string[] = []
+    const stop = scheduleBundleStartupReport({ info: () => {}, warn: (m) => warn.push(m) }, { intervalMs: 10, maxWaitMs: 30 })
+    try {
+      await vi.advanceTimersByTimeAsync(60)
+      expect(warn.some((w) => w.includes('未报告自身工具/技能') && w.includes('dsh-ros2-quiet'))).toBe(true)
+    } finally {
+      stop()
+      dispose()
+      vi.useRealTimers()
+    }
+  })
+
+  it('stops cleanly when disposed before it settles', async () => {
+    vi.useFakeTimers()
+    const info: string[] = []
+    const stop = scheduleBundleStartupReport({ info: (m) => info.push(m), warn: () => {} }, { intervalMs: 10, maxWaitMs: 100 })
+    stop()
+    await vi.advanceTimersByTimeAsync(500)
+    expect(info).toEqual([])
+    vi.useRealTimers()
   })
 })

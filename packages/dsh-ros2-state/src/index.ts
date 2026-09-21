@@ -21,7 +21,12 @@ export type { StateConfig }
 const BUNDLE_INFO = readOwnVersion(import.meta.url)
 
 export function apply(ctx: Context, config: StateConfig): void {
-  ctx.effect(() => registerLoadedBundle({ name: 'dsh-ros2-state', ...BUNDLE_INFO }))
+  // The surface thunk is lazy: it runs at report time, after `tools` below.
+  ctx.effect(() => registerLoadedBundle({
+    name: 'dsh-ros2-state',
+    ...BUNDLE_INFO,
+    surface: () => ({ tools: tools.map((tool) => tool.name), skills: [] }),
+  }))
   ctx.logger.info(`dsh-ros2: loaded bundle dsh-ros2-state@${BUNDLE_INFO.version}`)
 
   const client = new UdsStateClient(config.state.socketPath, config.state.timeoutMs, config.state.tcp)

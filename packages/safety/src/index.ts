@@ -22,8 +22,16 @@ export type { SafetyPackageConfig }
 /** The package.json this process actually loaded (issue #22: stale detection). */
 const BUNDLE_INFO = readOwnVersion(import.meta.url)
 
+/** Skills this bundle ships — one source for registration and the surface report. */
+const SKILLS = [robotSafetyProcedureSkill] as const
+
 export function apply(ctx: Context, config: SafetyPackageConfig): void {
-  ctx.effect(() => registerLoadedBundle({ name: 'dsh-ros2-safety', ...BUNDLE_INFO }))
+  // The surface thunk is lazy: it runs at report time, after `tools` below.
+  ctx.effect(() => registerLoadedBundle({
+    name: 'dsh-ros2-safety',
+    ...BUNDLE_INFO,
+    surface: () => ({ tools: tools.map((tool) => tool.name), skills: SKILLS.map((skill) => skill.name) }),
+  }))
   ctx.logger.info(`dsh-ros2: loaded bundle dsh-ros2-safety@${BUNDLE_INFO.version}`)
 
   const safetyStrict: 'warn' | 'reject' = config.safetyStrict === 'reject' ? 'reject' : 'warn'
@@ -50,7 +58,7 @@ export function apply(ctx: Context, config: SafetyPackageConfig): void {
   // The safety journey's carrier, registered with the bundle that ships the
   // tools it routes to — a diagnostics-only install never sees it.
   ctx.effect(() => {
-    const disposer = ctx.skills.register(robotSafetyProcedureSkill)
-    return () => disposer()
+    const disposers = SKILLS.map((skill) => ctx.skills.register(skill))
+    return () => disposers.forEach((dispose) => dispose())
   })
 }

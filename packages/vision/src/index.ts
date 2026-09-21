@@ -25,8 +25,16 @@ export const VISION_SERVICE = 'dshRos2.vision'
 /** The package.json this process actually loaded (issue #22: stale detection). */
 const BUNDLE_INFO = readOwnVersion(import.meta.url)
 
+/** Skills this bundle ships — one source for registration and the surface report. */
+const SKILLS = [robotStateVisionSkill] as const
+
 export async function apply(ctx: Context, config: VisionPackageConfig): Promise<void> {
-  ctx.effect(() => registerLoadedBundle({ name: 'dsh-ros2-vision', ...BUNDLE_INFO }))
+  // The surface thunk is lazy: it runs at report time, after `tools` below.
+  ctx.effect(() => registerLoadedBundle({
+    name: 'dsh-ros2-vision',
+    ...BUNDLE_INFO,
+    surface: () => ({ tools: tools.map((tool) => tool.name), skills: SKILLS.map((skill) => skill.name) }),
+  }))
   ctx.logger.info(`dsh-ros2: loaded bundle dsh-ros2-vision@${BUNDLE_INFO.version}`)
 
   const run = makeRun(config)
@@ -83,7 +91,7 @@ export async function apply(ctx: Context, config: VisionPackageConfig): Promise<
   })
 
   ctx.effect(() => {
-    const disposer = ctx.skills.register(robotStateVisionSkill)
-    return () => disposer()
+    const disposers = SKILLS.map((skill) => ctx.skills.register(skill))
+    return () => disposers.forEach((dispose) => dispose())
   })
 }
