@@ -244,7 +244,14 @@ export async function runCommand(bin: string, args: string[], opts: RunOptions =
     env,
   }
   const setup = resolveSetup(opts)
-  const cmd = setup.prefix ? `${setup.prefix}${command}` : command
+  // A configured prefix may end at `&&` with no trailing space — the live
+  // deployment's did. The shell reads `&&ros2` exactly like `&& ros2`, but the
+  // command echoed by every failure message did not: it read as a malformed
+  // command (`… &&ros2 'node' 'list'`) and cost a reader time while diagnosing
+  // an unrelated breakage. Separate them where the shell string is built, so
+  // the reported prefix stays faithful to the configuration.
+  const joined = setup.prefix && !/\s$/.test(setup.prefix) ? `${setup.prefix} ` : setup.prefix
+  const cmd = joined ? `${joined}${command}` : command
   const envNote = setup.note
   try {
     const { stdout, stderr } = setup.prefix
