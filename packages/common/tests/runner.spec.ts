@@ -99,6 +99,74 @@ describe('resolveSetup fallback chain + session override', () => {
       rmSync(dir, { recursive: true, force: true })
     }
   })
+
+  // ── whole-chain validation ─────────────────────────────────────────────
+  // The live shape (2026-09-21, a deployment whose rosSetup was
+  // `source <delivery ws> && source /tmp/vlm_ws/…`: the tail's directory had
+  // been deleted, so EVERY ros2 tool failed while the head — and therefore the
+  // old first-segment-only check — still looked healthy.
+
+  it('names a missing TAIL segment and keeps the healthy head it was meant to build', async () => {
+    const { resolveSetup } = await import('../src/runner.js')
+    const head = tempSetup('chain-head')
+    const setup = resolveSetup({ rosSetup: `source ${head} && source /nonexistent/dsh-chain/setup.bash && ` })
+    expect(setup.explicit).toBe(true)
+    expect(setup.missingSources).toEqual(['/nonexistent/dsh-chain/setup.bash'])
+    // the intended environment is kept, not swapped for an auto-detected one…
+    expect(setup.prefix).toBe(`source ${head} && `)
+    expect(setup.sourcePath).toBe(head)
+    // …and the misconfiguration is named instead of being left to stderr
+    expect(setup.note).toContain('/nonexistent/dsh-chain/setup.bash')
+  })
+
+  it('drops only the missing segment of a longer chain and preserves the rest verbatim', async () => {
+    const { resolveSetup } = await import('../src/runner.js')
+    const a = tempSetup('chain-a')
+    const b = tempSetup('chain-b')
+    const setup = resolveSetup({
+      rosSetup: `export DSH_X=1 && source ${a} && source /nope/setup.bash && source '${b}' && `,
+    })
+    expect(setup.missingSources).toEqual(['/nope/setup.bash'])
+    expect(setup.prefix).toBe(`export DSH_X=1 && source ${a} && source '${b}' && `)
+    expect(setup.sourcePath).toBe(a)
+  })
+
+  it('leaves a fully healthy chain byte-identical (no behaviour change)', async () => {
+    const { resolveSetup } = await import('../src/runner.js')
+    const a = tempSetup('ok-a')
+    const b = tempSetup('ok-b')
+    const chain = `source ${a} && source '${b}' && `
+    const setup = resolveSetup({ rosSetup: chain })
+    expect(setup.prefix).toBe(chain)
+    expect(setup.sourcePath).toBe(a)
+    expect(setup.missingSources).toEqual([])
+    expect(setup.note).toBe('')
+  })
+
+  it('falls back to auto-detect when every configured segment is missing, naming all of them', async () => {
+    const { resolveSetup } = await import('../src/runner.js')
+    const setup = resolveSetup({
+      rosSetup: 'source /nonexistent/a/setup.bash && source /nonexistent/b/setup.bash && ',
+      workspaceRoot: '',
+    })
+    expect(setup.missingSources).toEqual(['/nonexistent/a/setup.bash', '/nonexistent/b/setup.bash'])
+    expect(setup.note).toContain('/nonexistent/a/setup.bash')
+    expect(setup.note).toContain('/nonexistent/b/setup.bash')
+    expect(setup.prefix).not.toContain('nonexistent')
+  })
+
+  it('validates the session override chain, not only the configured rosSetup', async () => {
+    const { resolveSetup, setSessionRosSetup } = await import('../src/runner.js')
+    const head = tempSetup('override-chain')
+    try {
+      setSessionRosSetup(`source ${head} && source /nonexistent/override/setup.bash && `)
+      const setup = resolveSetup({ rosSetup: '' })
+      expect(setup.prefix).toBe(`source ${head} && `)
+      expect(setup.missingSources).toEqual(['/nonexistent/override/setup.bash'])
+    } finally {
+      setSessionRosSetup(null)
+    }
+  })
 })
 
 describe('buildSafetyMonitorCommand', () => {
