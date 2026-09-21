@@ -78,9 +78,10 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 
 ### Changed
 
-- **工作区 vitest 用例 277 → 284 例**（本轮 +7：common +5 整链校验、core +2 诊断措辞与数据出口）。
-  分布：common 50 + core 131(130 过 +1 skip) + moveit 16 + profile 14 + safety 10 + vision 30 +
-  state 8 + dsh-ros2 25 = **284**。README / README_CN 开发章节同步校正为 284 例。
+- **工作区 vitest 用例 277 → 285 例**（本轮 +8：common +6（整链校验 5 + 前缀拼接 1）、
+  core +2（诊断措辞与数据出口））。
+  分布：common 51 + core 131(130 过 +1 skip) + moveit 16 + profile 14 + safety 10 + vision 30 +
+  state 8 + dsh-ros2 25 = **285**。README / README_CN 开发章节同步校正为 285 例。
 - **`rosSetup` 改为整条 `&&` 链逐段校验**（旧实现只校验**第一段**）：链条 `source A && source B &&`
   在 `B` 已删除时，旧行为判定"配置正常"却让**每一次**调用都失败在 `B` 上（现场案例：`/tmp/vlm_ws`
   被删）。现在逐段 `existsSync`，并按情形处理：
@@ -127,6 +128,12 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 
 ### Fixed
 
+- **`runCommand` 把 setup 前缀与命令直接拼接**：前缀以 `&&` 结尾且无尾空格时（线上部署配置正是如此，
+  见上面的"整链校验"），真正执行与**回显**的字符串是 `… source /tmp/vlm_ws/install/setup.bash &&ros2 'node' 'list'`。
+  shell 对 `&&ros2` 与 `&& ros2` 的解析**完全一致**，因此这**不是**功能缺陷；但每一条失败信息里回显的都是
+  这个样子，本轮诊断真故障时它确实先把人引向"命令拼错了"。修复在**构建 shell 字符串处**插入分隔符，
+  `data.setup.prefix` 仍逐字节等于配置（配置的忠实回显不因此改变）。
+  回归测试已验证有效性：**撤掉修复后新测试立即失败**（`expected 'Command failed: bash -lc source … &&bash…'`）。
 - **`ros2_env_check` 在探针失败时无条件否认 rosSetup 有问题**：告警文案写死"这通常说明探针命令在该进程
   环境里失败，**而非 rosSetup 路径无效**"——在"链尾被删"的现场，同一行的 stderr 恰恰就是
   `bash: line 1: /tmp/vlm_ws/install/setup.bash: No such file or directory`，诊断在自相矛盾。
