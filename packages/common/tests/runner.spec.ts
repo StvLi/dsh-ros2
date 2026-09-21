@@ -186,3 +186,37 @@ describe('buildSafetyMonitorCommand', () => {
     expect(cmd).not.toContain("--profile '/tmp/a'; touch")
   })
 })
+
+describe('runCommand setup prefix joining', () => {
+  // A prefix that ends at `&&` with no trailing space (the live deployment's
+  // ran `… &&ros2 'node' 'list'` in every error) still executes identically —
+  // but it read as a malformed command in the diagnostic, so the seam inserts
+  // the separator while the reported prefix stays faithful to the config.
+  it('inserts the separator when the prefix ends at && and still runs the command', async () => {
+    const { runCommand } = await import('../src/runner.js')
+    const { mkdirSync, writeFileSync, rmSync } = require('node:fs')
+    const dir = `/tmp/dsh-runner-join-${process.pid}`
+    mkdirSync(`${dir}/install`, { recursive: true })
+    writeFileSync(`${dir}/install/setup.bash`, 'true\n')
+    const src = `${dir}/install/setup.bash`
+    try {
+      const ok = await runCommand('bash', ['-lc', 'echo marker'], { rosSetup: `source ${src} &&` })
+      expect(ok.ok).toBe(true)
+      expect(ok.stdout.trim()).toBe('marker')
+      expect(ok.envNote).toBeUndefined()
+
+      // Failure path: the message echoes the shell string Node ran.
+      const bad = await runCommand('bash', ['-lc', 'exit 3'], { rosSetup: `source ${src} &&` })
+      expect(bad.ok).toBe(false)
+      expect(bad.error).toContain(`source ${src} && bash`)
+      expect(bad.error).not.toContain('&&bash')
+
+      // A prefix that already ends in whitespace is left alone.
+      const spaced = await runCommand('bash', ['-lc', 'echo marker'], { rosSetup: `source ${src} && ` })
+      expect(spaced.ok).toBe(true)
+      expect(spaced.stdout.trim()).toBe('marker')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
