@@ -1463,6 +1463,21 @@ Tests  1 failed | 50 skipped (51)
 按触发面请求**非强制**优雅重启（`force=false` 语义：忙碌则延后到空闲安全点），随后不再继续操作，
 把重启留给"本会话空闲"这一安全点。
 
+**触发已确认（journal + 检查点实测，非推断）**：
+
+```text
+04:18:06  [cordis:rosmnt-1] cordis_run activation: the round-10 dsh-ros2 fix is built and merged
+                           (main a0a1370); requesting that dsh-phoenix defer a graceful restart …
+04:18:06  [dsh-phoenix] cordis tool: cordis_run
+04:18:09  [dsh-phoenix] restart requested (gen 19): plugin-change
+检查点    → generation 19 / lifecycleState "deferred" / deferDeadline 1790022789189（= 04:18:09 + 15min = 04:33:09 CST）
+```
+
+即 phoenix **看到了**这次激活、**登记了第 19 代重启请求**，并因维护会话仍在运行而进入 `deferred`；
+维护会话结束时，下一个 3s 轮询点即执行优雅重启（软告警 5 分钟、硬期限 15 分钟、policy `auto`）。
+这就是"**用 dsh-phoenix 做插件持续更新**"的**末端动作**：改动已合入 `main` 并构建进 `lib/`，
+重启只是把它从磁盘搬进进程——同时由 `/__dsh_health` 的 boot token 让浏览器自己刷新。
+
 - **重启后可观测的变化（预期）**：`ros2_env_check` 返回 `setup.missingSources = ["/tmp/vlm_ws/install/setup.bash"]`
   与对应 `note`；每次 ros2 调用的失败消失（死段被剔除）；`runCommand` 的失败信息不再出现 `&&ros2`。
 - **诚实边界**：本会话仍在运行，因此**无法在同一进程内观测重启后的结果**。§16.8 第 1 条把它列为下次维护的
