@@ -78,6 +78,10 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 
 ### Changed
 
+- **`docs/compatibility.md` 的本机现状描述**：L4 ROS2 包一行原写"本机 `/tmp/vlm_ws`"——该工作区已删除，
+  这句已是**假的现状**；改为"colcon 构建在**你自己的** workspace，由 `rosSetup` source，doctor 的安装根
+  由该链派生"。同一文档新增一条环境注意：**colcon workspace 不要建在 `/tmp`**（会被清理），
+  这正是一个 workspace 消失后把 `rosSetup` 变成死链的根因。
 - **工作区 vitest 用例 277 → 292 例**（第十轮 +8：common +6（整链校验 5 + 前缀拼接 1）、
   core +2（诊断措辞与数据出口）；第十一轮 +7：common +3（`setupSourcePaths`）、
   vision +4（doctor 安装根派生））。
