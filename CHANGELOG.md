@@ -78,10 +78,11 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 
 ### Changed
 
-- **工作区 vitest 用例 277 → 285 例**（本轮 +8：common +6（整链校验 5 + 前缀拼接 1）、
-  core +2（诊断措辞与数据出口））。
-  分布：common 51 + core 131(130 过 +1 skip) + moveit 16 + profile 14 + safety 10 + vision 30 +
-  state 8 + dsh-ros2 25 = **285**。README / README_CN 开发章节同步校正为 285 例。
+- **工作区 vitest 用例 277 → 292 例**（第十轮 +8：common +6（整链校验 5 + 前缀拼接 1）、
+  core +2（诊断措辞与数据出口）；第十一轮 +7：common +3（`setupSourcePaths`）、
+  vision +4（doctor 安装根派生））。
+  分布：common 54 + core 131(130 过 +1 skip) + moveit 16 + profile 14 + safety 10 + vision 34 +
+  state 8 + dsh-ros2 25 = **292**。README / README_CN 开发章节同步校正为 292 例。
 - **`rosSetup` 改为整条 `&&` 链逐段校验**（旧实现只校验**第一段**）：链条 `source A && source B &&`
   在 `B` 已删除时，旧行为判定"配置正常"却让**每一次**调用都失败在 `B` 上（现场案例：`/tmp/vlm_ws`
   被删）。现在逐段 `existsSync`，并按情形处理：
@@ -128,6 +129,14 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 
 ### Fixed
 
+- **`ros2_vision_doctor` 探测一个写死的、早已不存在的安装根**：候选目录里硬编码了 `/tmp/vlm_ws/install`
+  （一台历史本机的 colcon 工作区，目录已被删除），于是**每一份**报告都会列出一个不可能存在的构建位置。
+  现在安装根**从运行缝真正 source 的环境派生**：`workspaceRoot/install` 加上 `rosSetup` 全链中每个
+  colcon 工作区的 `…/install`（新增 `dsh-ros2-common` 的 `setupSourcePaths()` 读取**所有** `source` 段，
+  而非只看第一段）。这样两点同时成立：目录已消失的工作区**不会被当成构建位置广告出去**；`built` 也
+  **不可能声称一个运行期 source 不到的东西**——doctor 与命令缝回答的是同一个已解析前缀。`/opt/ros/<distro>`
+  刻意**不**当作安装根（它是发行版前缀，不是 colcon 安装空间）。回归测试（vision +4）断言"已删除的工作区
+  被剔除""旧字面量不再出现"，并验证**撤掉实现后新测试立即失败**。
 - **`runCommand` 把 setup 前缀与命令直接拼接**：前缀以 `&&` 结尾且无尾空格时（线上部署配置正是如此，
   见上面的"整链校验"），真正执行与**回显**的字符串是 `… source /tmp/vlm_ws/install/setup.bash &&ros2 'node' 'list'`。
   shell 对 `&&ros2` 与 `&& ros2` 的解析**完全一致**，因此这**不是**功能缺陷；但每一条失败信息里回显的都是
