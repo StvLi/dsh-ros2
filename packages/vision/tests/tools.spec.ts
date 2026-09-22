@@ -177,3 +177,65 @@ describe('ros2_vision_doctor', () => {
     expect(out.warnings?.some((w) => w.includes('明文'))).toBe(true)
   })
 })
+
+describe('ros2_vision_doctor install roots (no hardcoded machine path)', () => {
+  // The doctor used to probe a literal `/tmp/vlm_ws/install` — a historical
+  // local workspace whose directory had been deleted — so every report named a
+  // build location that could not exist. Roots are now derived from the
+  // environment the command seam actually sources.
+  function tempWorkspace(sub: string): string {
+    const { mkdirSync, writeFileSync } = require('node:fs')
+    const dir = `/tmp/dsh-vision-${sub}-${process.pid}`
+    mkdirSync(`${dir}/install`, { recursive: true })
+    writeFileSync(`${dir}/install/setup.bash`, 'true\n')
+    return dir
+  }
+
+  it('derives roots from the workspace root and every workspace of the setup chain', async () => {
+    const { visionInstallDirs } = await import('../src/tools.js')
+    const a = tempWorkspace('a')
+    const b = tempWorkspace('b')
+    const dirs = visionInstallDirs({
+      workspaceRoot: '/ws/root',
+      rosSetup: `source ${a}/install/setup.bash && source ${b}/install/setup.bash && `,
+    })
+    expect(dirs).toContain('/ws/root/install')
+    expect(dirs).toContain(`${a}/install`)
+    expect(dirs).toContain(`${b}/install`)
+  })
+
+  it('drops a deleted workspace instead of advertising it, and never emits the old literal', async () => {
+    const { visionInstallDirs } = await import('../src/tools.js')
+    const alive = tempWorkspace('alive')
+    // Second segment is the real 2026-09-22 deployment shape: gone from disk.
+    const dirs = visionInstallDirs({
+      workspaceRoot: '',
+      rosSetup: `source ${alive}/install/setup.bash && source /tmp/vlm_ws/install/setup.bash && `,
+    })
+    expect(dirs).toContain(`${alive}/install`)
+    expect(dirs).not.toContain('/tmp/vlm_ws/install')
+  })
+
+  it('does not treat a ROS distro prefix as a colcon install root', async () => {
+    const { visionInstallDirs } = await import('../src/tools.js')
+    expect(visionInstallDirs({ workspaceRoot: '', rosSetup: 'source /opt/ros/jazzy/setup.bash && ' }))
+      .not.toContain('/opt/ros/jazzy/install')
+  })
+
+  it('surfaces the derived roots in the doctor report', async () => {
+    const { createRos2Tools } = await import('../src/tools.js')
+    const ws = tempWorkspace('reported')
+    const run = makeRun(() => ({ stdout: '' }))
+    const t = createRos2Tools({
+      run,
+      workspaceRoot: '/tmp/ws',
+      rosSetup: `source ${ws}/install/setup.bash && `,
+      visionMeta: { provider: 'mock', apiKey: '', apiKeyFromEnv: null, apiKeyPlaintext: false, model: '', baseUrl: '' },
+    }).find((x) => x.name === 'ros2_vision_doctor')
+    if (!t) throw new Error('ros2_vision_doctor not registered')
+    const out = (await t.execute({}, execStub)) as ToolResult
+    const data = out.data as { workspace: { installDirs: string[] } }
+    expect(data.workspace.installDirs).toContain(`${ws}/install`)
+    expect(data.workspace.installDirs).not.toContain('/tmp/vlm_ws/install')
+  })
+})

@@ -34,6 +34,8 @@ import {
   renderResult,
   resolveProfilePath,
   loadRobotProfile,
+  resolveSetup,
+  setupSourcePaths,
   type ProfileSafetyView,
   type VisionProvider,
   type JobSnapshot,
@@ -298,6 +300,35 @@ function makeVisionAnalyzeTool(deps: VisionToolDeps) {
   })
 }
 
+/** The L4 helper packages whose build state the doctor reports. */
+const L4_PACKAGES = ['dsh_ros2_vlm', 'dsh_ros2_rviz_offscreen', 'dsh_ros2_safety']
+
+/**
+ * Candidate install roots for the L4 helper packages.
+ *
+ * Derived from the environment the run seam actually sources — the workspace
+ * root, plus every colcon workspace named by the RESOLVED setup chain
+ * (`…/install/setup.bash` → `…/install`) — rather than a hardcoded machine
+ * path. Two consequences that matter:
+ *  - a workspace that no longer exists cannot be advertised as a build
+ *    location (the previous literal `/tmp/vlm_ws/install` outlived its
+ *    directory and showed up in every report);
+ *  - `built` can never claim something the runtime cannot source, because the
+ *    doctor and the command seam answer from the same resolved prefix.
+ * `/opt/ros/<distro>/setup.bash` is intentionally not treated as an install
+ * root: it is a distro prefix, not a colcon install space.
+ */
+export function visionInstallDirs(opts: { workspaceRoot?: string; rosSetup?: string }): string[] {
+  const workspaceRoot = opts.workspaceRoot ?? ''
+  const dirs: string[] = workspaceRoot ? [path.join(workspaceRoot, 'install')] : []
+  const prefix = resolveSetup({ workspaceRoot, rosSetup: opts.rosSetup }).prefix
+  for (const src of setupSourcePaths(prefix)) {
+    const installDir = path.dirname(src)
+    if (path.basename(installDir) === 'install') dirs.push(installDir)
+  }
+  return [...new Set(dirs)]
+}
+
 /**
  * L1: vision pipeline doctor — one-shot report of whether the heavy VLM
  * pipeline is ready, and a clear degradation path when it is not.
@@ -311,12 +342,9 @@ function makeVisionDoctorTool(deps: VisionToolDeps) {
     output: { schema: resultSchema, render: renderResult },
     async execute() {
       const workspaceRoot = deps.workspaceRoot ?? ''
-      const installDirs = [
-        path.join(workspaceRoot, 'install'),
-        '/tmp/vlm_ws/install',
-      ].filter((d) => d.length > 0)
+      const installDirs = visionInstallDirs({ workspaceRoot, rosSetup: deps.rosSetup })
       const built: Record<string, boolean> = {}
-      for (const pkg of ['dsh_ros2_vlm', 'dsh_ros2_rviz_offscreen', 'dsh_ros2_safety']) {
+      for (const pkg of L4_PACKAGES) {
         built[pkg] = installDirs.some((d) => existsSync(path.join(d, pkg)))
       }
 
