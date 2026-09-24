@@ -1727,8 +1727,20 @@ phoenix 的调度是 `stop; sleep 8; start`（04:33:10 → 04:33:18，8 秒间�
 
 **④ 本轮的末端动作**：改动已合入 `main` 并重建 `lib/`（`packages/vision/lib/secrets.js` 含
 `resolveApiKeyOrigin`、`lib/index.js` 含 `rosSetup: config.rosSetup`），随后按本 preset 的**文档化触发面**
-（`cordis_run`：动态插件激活）请求一次**非强制**优雅重启，由 phoenix 在会话空闲的安全点执行
-（`deferPolicy auto`；本轮不传 `force`）。
+（`cordis_run`：动态插件激活）请求一次**非强制**优雅重启（`deferPolicy auto`；不传 `force`）。
+**已确认（journal + 检查点实测，非推断）**：
+
+```text
+15:28:44  [dsh-phoenix] cordis tool: cordis_run
+15:28:47  [dsh-phoenix] restart requested (gen 20): plugin-change
+15:28:51  [dsh-phoenix] restart already in-flight; coalesced plugin-change
+检查点    → generation 20 / lifecycleState "deferred" / deferDeadline 1790235827937（= 15:28:47 + 15min = 15:43:47 CST）
+```
+
+即 phoenix **看到了**这次激活、登记为**第 20 代**重启请求，并因维护会话仍在运行而进入 `deferred`；
+会话结束时，下一个 3s 轮询点即执行优雅重启——与 ① 中第 19 代走完的五个环节完全同构。
+本轮**未**为该信号新增任何行为：激活用的包是**惰性的**（`apply()` 空实现，不注册工具/事件/服务/UI；
+sandbox 也不暴露 `ctx.logger`，故连日志都没有），它唯一的作用就是"让 `cordis_run` 发生"。
 
 - **重启后可观测的变化（预期）**：`ros2_vision_doctor` 的 `workspace.installDirs` 不再是 `[]`，
   而应含 `lite_delivery_aio/install`；`apiKey.plaintext` 对当前"`${VLM_API_KEY}` 注入"的 key 应为 **`false`**
