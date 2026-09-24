@@ -32,14 +32,43 @@ jobs:
       - run: pnpm run typecheck
       - run: pnpm run test
       - run: pnpm run build
-      # Every bundle tarball must be installable and contain its patch layer;
-      # dsh-ros2-common must carry the shared robot_profile.py script.
+      # Publish-surface gate. Two assertions, over EVERY non-private package —
+      # not a hand-maintained subset: `dsh-ros2-sidecar` and `dsh-ros2-state`
+      # were previously never packed here, which is why sidecar's six
+      # `__pycache__/*.pyc` files shipped unnoticed.
+      #
+      #   present — every tarball carries its entry point (`lib/index.js`), the
+      #             patch layer for the bundles that have one, and
+      #             `dsh-ros2-common` carries the shared robot_profile.py.
+      #   absent  — no tarball ships compiled Python. A `.pyc` is a binary blob
+      #             a reviewer cannot diff as source, it embeds the packager's
+      #             absolute build path, and it can execute in place of the
+      #             `.py` beside it. `dsh-ros2-safety` already excluded it;
+      #             common/core/sidecar did not.
       - run: |
-          for p in core profile moveit safety vision dsh-ros2; do
-            tgz=$(cd packages/$p && pnpm pack --pack-destination /tmp | tail -1)
-            tar -tzf "$tgz" | grep -qE "cordis.patch.yml|lib/index.js"
+          set -euo pipefail
+          for dir in packages/*/; do
+            p=$(basename "$dir")
+            [ -f "$dir/package.json" ] || continue
+            if [ "$(node -p "require('./$dir/package.json').private === true")" = "true" ]; then
+              continue
+            fi
+            tgz=$(cd "$dir" && pnpm pack --pack-destination /tmp | tail -1)
+            listing=$(tar -tzf "$tgz")
+
+            echo "$listing" | grep -q "^package/lib/index.js$"
+            # common is a plain library and sidecar ships no cordis bundle.
+            if [ "$p" != "common" ] && [ "$p" != "sidecar" ]; then
+              echo "$listing" | grep -q "cordis.patch.yml"
+            fi
+            if [ "$p" = "common" ]; then
+              echo "$listing" | grep -q "scripts/robot_profile.py"
+            fi
+
+            if echo "$listing" | grep -qE "(^|/)__pycache__/|\.pyc$"; then
+              echo "::error::$p tarball ships compiled Python:"
+              echo "$listing" | grep -E "(^|/)__pycache__/|\.pyc$"
+              exit 1
+            fi
             echo "$p tarball OK ($tgz)"
           done
-          tgz=$(cd packages/common && pnpm pack --pack-destination /tmp | tail -1)
-          tar -tzf "$tgz" | grep -q "scripts/robot_profile.py"
-          echo "common tarball OK ($tgz)"
