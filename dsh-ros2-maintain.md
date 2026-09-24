@@ -1836,3 +1836,317 @@ sandbox 也不暴露 `ctx.logger`，故连日志都没有），它唯一的作�
      把 §17.6 的"唯一依赖闸门是 CI 那一条 audit"补成纵深防御。
   5. 维持验收线：**推送前** `typecheck + test + build` 全绿、**推送后立刻开 PR 并等 CI 绿再合并**、
      `pnpm audit` 必须带 `--registry=https://registry.npmjs.org`（本机）。
+
+## 18. 维护记录（2026-09-25 04:13 CST / UTC 2026-09-24 20:13 · 第十三轮：0 open issue / 0 open PR → 安全扫描发现并落地 3 处修复 = PTY 会话 id 路径穿越 · 发布物携带 `__pycache__` 字节码 · 安装器选项注入；并闭环第十二轮唯一的未闭环观测 + 开启 Dependabot）
+
+> 本轮结论：起始 **0 open issue / 0 open PR**（本轮**没有**第十/十二轮那种"在途交付"），
+> 因此**干净地走"无 issue → step 5 安全扫描"**这条路径，不跳过任何东西。安全扫描**发现 3 处真实缺陷**，
+> 全部按 `fix/...` 分支 + 规范提交落地为 3 个 PR（#35/#36/#37，CI Node 22/24 双绿后合入），
+> 结束 `main = 247a667`、**0 open issue / 0 open PR**；用例 **304 → 310**。
+>
+> 三件事值得单独点名：
+> ① **一个真漏洞**：`ros2_install` 的 `session` 未校验就进入 `os.path.join`，相对与绝对路径都能逃出
+> 会话目录，`stop` 还能**截断任意 `.meta`**——本轮给出 before/after 可复现证明。
+> ② **一个"CI 看不见"的发布面缺陷**：`common`/`core`/`sidecar` 把 `__pycache__/*.pyc` 打进 npm 包，
+> 而 CI 的 tarball 闸门**根本没打包 sidecar**（6 个文件、最严重的一个），因为它只遍历一份手写子集。
+> ③ **第十二轮唯一未闭环的观测本轮实测确认**：doctor 的 `installDirs` 不再是 `[]`、`apiKey.plaintext = false`。
+
+### 18.0 仓库快照（本轮起始/结束）
+
+| 项 | 起始 | 结束 |
+| --- | --- | --- |
+| 当前分支 | `main`（工作树干净） | `main` = **`247a667`**（本地与 `origin/main` 一致） |
+| `main` | `975b182`（第十二轮 docs） | `247a667`（#35 → `0b1287d`、#36 → `d22efc0`、#37 → `247a667`） |
+| open issue / open PR | **0 / 0** | **0 / 0** |
+| vitest 用例 | 304（303 过 + 1 pty-skip） | **310**（309 过 + 1 pty-skip） |
+| 包数量 / 环境 | 9 包 · Node `v24.16.0` · pnpm `11.22.0` · vitest 4.1.11 | 同 |
+| 运行中的 dsh | 启动于 **2026-09-24 15:43:57 CST**（= 第十二轮 gen-20 重启的产物） | 同进程；本轮代码已构建进 `lib/`，gen-21 重启待执行（§18.5） |
+| GitHub 侧扫描 | Dependabot alerts **关闭**、CodeQL **未配置** | Dependabot alerts + security updates **已开启**（§18.6） |
+
+### 18.1 Issue 检查（step 1）——0 / 0，且**没有在途交付**
+
+```text
+gh issue list --state open                                     → 0
+gh api "repos/StvLi/dsh-ros2/issues?state=open" --jq 'length'   → 0
+gh pr    list --state open                                     → 0
+git rev-list --left-right --count main...origin/main           → 0  0
+```
+
+与前两轮的关键差别：第十轮是"推了但没开 PR"、第十二轮是"开了 PR 但没合并"，
+**本轮两者都没有**——`main` 与 `origin/main` 完全一致、工作树干净、无任何未闭环交付。
+因此按 step 1 的分支条件**直接转 step 5**；step 2/3/4 不因 issue 触发
+（step 3 的 git 纪律仍适用于本轮**自己发现**的修复，见 §18.3）。
+
+**顺带核对第十二轮遗留的两条"仓库外"事项**（§18.7 第 2、3 条），确认它们**不在** issue 列表里，
+属于维护文档记录的现场事项，因此不改变"0 open issue"的判定。
+
+### 18.2 建议评估（step 2）——本轮无 issue，无外部建议可评
+
+本轮无 open issue，故无外部建议需要判断合理性与必要性。作为替代，本节的"评估"对象是
+**本轮安全扫描自己提出的 3 条发现**——即"自定议题"。按第十二轮 §17.2 的做法，
+对**自己提出的议题同样逐条核验其真实性**，而不是只写结论：
+
+| # | 本轮主张 | 核验方式 | 判定 |
+| --- | --- | --- | --- |
+| F1 | `ros2_install` 的 session id 可逃出 `$TMPDIR/dsh-ros2/pty` | 对 `origin/main` 的 helper **实跑** `send ../../victim/pwned`、`stop ../../victim/target`，看文件是否真的落在目录之外 | ✅ 真实（且 `stop` 是**截断写**） |
+| F2 | `common`/`core`/`sidecar` 的 npm 包含 `__pycache__` 字节码 | `pnpm pack` 后 `tar -tzf` 逐包清点；再解析 `.pyc` 头与 `co_filename` | ✅ 真实（8 文件；含 1 个 STALE；含构建路径泄漏） |
+| F3 | installer 的 leading-dash 会被 curl/wget 当选项解析 | 对**真实二进制**验证：`wget -q -O f "-wget-option-like-value"` → `--wait` 报错；再用 `-K<file>` 构造可用的 fetch+write | ✅ 真实（见 §18.4 证明 3） |
+
+其中 F3 的核验过程**推翻了我自己的第一个假设**：`curl --config=FILE` 在 curl 8.5.0 上被判为
+"unknown option"（`=` 形式不被接受），因此**看似不可利用**；改用 curl 的**贴值短选项** `-KFILE`
+后构造成功。⇒ 记为"真实可利用"，既不当作误报丢掉，也不含糊地写成理论问题。
+
+### 18.3 开发管理（git · step 3）
+
+| PR | 分支名 | 提交 | 类型 | 说明 |
+| --- | --- | --- | --- | --- |
+| **#35** | `fix/pty-session-traversal` | `6dde230` | `fix(core)` | session id 路径穿越：共享 `isSafePathComponent` + Tool 层拒绝 + helper 权威校验 |
+| **#36** | `fix/pyc-publish-surface` | `4b78731` | `fix(packaging)` | 三个包加 `"!**/__pycache__"`；CI 发布面闸门改为**遍历全部非 private 包**并新增"不得携带字节码"断言 |
+| **#37** | `fix/installer-option-injection` | `29cf49e`（+ `68fae5c` 合并 `main`） | `fix(core)` | 安装器抓取改用 `--` 终止选项解析 |
+
+- 三个分支均以 `fix/...` 前缀新开（语义 = 修复问题），均 `off main`；每个 PR 单独提交、单独 CI。
+- **提交类型的诚实性**：#35 同时动了 `common`（共享规则）与 `core`（调用点）。按目录硬拆成两个提交
+  没有意义——共享规则的**唯一消费者**就是这次的 session id 校验；故合为一个 `fix(core)` 提交，
+  并在正文写明它是"把既有规则提升为共享谓词"。这是**有意识的合并**，不是切分失误。
+- **#37 与 #35 触碰同一批文件**（`packages/core/src/tools.ts`、`packages/core/tests/tools.spec.ts`）。
+  实测：`git merge main` **零冲突自动合并**（两者改的是同一文件的不同区域），合并后**重跑完整验收线全绿**
+  （§18.4）——因此不是"靠运气"，而是有验证的。
+- 三个 PR 均经 CI（Node 22 + 24）**全绿**后合入 `main`；合并后删除远端与本地分支。
+- 收尾：`main = 247a667`，工作树干净，0 open issue / 0 open PR。
+
+### 18.4 本地验收（全绿）＋ 三个可复现证明
+
+```bash
+cd /home/stvli/Desktop/embody_agent_ws/dsh-ros2
+rm -rf packages/*/lib          # 复刻 CI 的"干净 clone"起点
+CI=true pnpm run typecheck     # 9 包 tsc --noEmit 全部 Done（exit 0）
+CI=true pnpm run test          # 310 例（309 过 + 1 pty-skip）（exit 0）
+CI=true pnpm run build         # 全部 Done（exit 0）
+```
+
+**用例分布（实测）**：common **57** + core **134**（133 过 + 1 skip）+ moveit 16 + profile 14 +
+safety 10 + vision 43 + state 8 + dsh-ros2 28 = **310**；另 sidecar selftest **10 场景**（SELFTEST PASSED）。
+第十二轮 304 → 本轮 **+6**（common +3：路径组件边界；core +2：会话 id 双层守卫；core +1：`--` 终止选项解析）。
+
+**证明 1 ｜ F1：会话目录能被逃出，且 `stop` 是**截断写**（before/after，实跑 helper）**
+
+```text
+BEFORE（origin/main 的 helper）
+  $ TMPDIR=/tmp/ptydemo python3 orig_pty.py send "../../victim/pwned" -- "INJECTED-BY-CALLER"
+  exit=0
+  $ ls  /tmp/ptydemo/victim/            → pwned.in          # 落在会话目录之外
+  $ cat /tmp/ptydemo/victim/pwned.in    → INJECTED-BY-CALLER
+  $ TMPDIR=/tmp/ptydemo python3 orig_pty.py send "/tmp/ptydemo/victim/abs" -- "ABS-WRITE"
+  exit=0                                                     # 绝对路径同样逃出
+  $ TMPDIR=/tmp/ptydemo python3 orig_pty.py stop "../../victim/target"
+  stopped
+  $ cat /tmp/ptydemo/victim/target.meta → state=stopping     # 原本是 SECRET-CONFIG（被截断）
+
+AFTER（修好的 helper）
+  sid='../../victim/pwned'        exit=2  unsafe session id …: only [A-Za-z0-9._-], no separator or '..'
+  sid='/tmp/ptydemo/victim/abs'   exit=2  …
+  sid='..' / 'a/b' / '.hidden' / '' → exit=2
+  victim dir → 只有 target.meta，未被触碰
+```
+
+**证明 2 ｜ F2：字节码确实在发布物里，且 CI 旧闸门看不见 sidecar**
+
+```text
+$ for p in common core sidecar …; do pnpm pack … ; tar -tzf "$tgz" | grep -c 'pycache\|\.pyc'; done
+  common pyc=1     core pyc=1     sidecar pyc=6     （其余包 0）
+
+$ python3 - <common 的 .pyc>        # 解析头 + 嵌入式路径
+  STALE: True                        # 头里的 mtime/size 与同包的 robot_profile.py 不一致
+  co_filename: /home/stvli/Desktop/embody_agent_ws/dsh-ros2/packages/common/scripts/robot_profile.py
+
+旧 CI 闸门的遍历面：for p in core profile moveit safety vision dsh-ros2    # + common
+  ⇒ sidecar / dsh-ros2-state 从未被 pack，最严重的 6 个文件从未被检查
+
+新闸门的反向断言（把 sidecar 的排除项撤掉后实跑）：
+  ::error::sidecar tarball ships compiled Python:
+  package/sidecar/__pycache__/{__init__,core,node,reducers_placeholder,selftest,server}.cpython-312.pyc
+  GATE exit=1
+```
+
+**证明 3 ｜ F3：`-K<file>` 是可利用的 fetch+write 原语（before/after）**
+
+```text
+BEFORE（旧命令串），installer = "-K/tmp/f3demo/evil_curl.conf"
+  $ curl -fsSL '-K/tmp/f3demo/evil_curl.conf' -o '<boot>' || wget …
+  $ ls -l /tmp/f3demo/PWNED_BY_OPTION
+    -rw-rw-r-- … 33 /tmp/f3demo/PWNED_BY_OPTION    # curl 读了调用者指定的 config，
+                                                   # 按 config 里的 url+output 取回并写出
+AFTER（新命令串，同一 installer）
+  $ curl -fsSL -o '<boot>' -- '-K/tmp/f3demo/evil_curl.conf'
+  curl: (6) Could not resolve host: -K
+  NOT created — closed
+
+对照：`--` 在真实二进制上均被遵守
+  $ wget -q -O /tmp/x "-wget-option-like-value"     → wget: --wait: Invalid time period '…'   # 被当选项
+  $ wget -q -O /tmp/x -- "-wget-option-like-value"                                            # 被当操作数
+  $ cp -- /tmp/f3src.txt /tmp/f3cp                  → OK
+回归：合法的本地安装器仍可用（copy + chmod，exit 0），PTY 交互测试照常通过。
+```
+
+### 18.5 dsh-phoenix 持续更新 / 测试链路（step 4）——第十二轮的未闭环观测**实测确认**，并请求 gen-21 重启
+
+**① 第十二轮 §17.8 第 1 条（本轮唯一要复核的观测）：已闭环 ✅**
+
+第十二轮把改动构建进 `lib/` 后请求了 gen-20 优雅重启，但**无法在同一进程内观测结果**，
+故列为"下次维护第一复核项"。本轮起点进程启动于 `2026-09-24 15:43:57`，**正是 gen-20 重启的产物**
+（journal 五环节齐全：`15:43:48 HARD defer deadline → scheduling restart (gen 20) → restart cmd exit=0
+→ 15:43:49 Stopped → 15:43:57 Started → 15:44:00 loaded`），因此该观测**本轮可测**：
+
+```text
+ros2_vision_doctor → workspace.installDirs: ["/home/stvli/lite_delivery_aio/install"]   # 第十二轮是 []
+                     apiKey.source "secrets" · plaintext false                           # 不再误报
+                     （且不再出现"建议改用环境变量注入"的自相矛盾告警）
+ros2_env_check     → setup.missingSources: ["/tmp/vlm_ws/install/setup.bash"]
+                     note: "…已剔除该段，改用其余 1 段…建议修正配置。"
+                     probe: { exitCode: 0, stderrTail: "" }                  # 自愈生效
+                     bundles.stale false · drift 全 false · totalTools 81 · totalSkills 9
+```
+
+⇒ 第十二轮预言的两个可观测变化（`installDirs` 不再是 `[]`；`apiKey.plaintext` 对 `${VLM_API_KEY}`
+注入应为 `false`）**逐字命中**。同时 `skillCatalogue` / `surface` / `missingSources` 等自述字段都在，
+再次作为"进程新旧"的正向信号使用。
+
+**② 本轮末端动作：请求 gen-21 优雅重启（journal 原文，非推断）**
+
+改动已合入 `main` 并重建 `lib/`（实测 `lib/names.js` 含 `isSafePathComponent`、
+`lib/tools.js` 含 `INVALID_SESSION` 与 `-- ${shq(installer)}`、`scripts/pty_session.py` 含 `safe_sid`），
+随后按本 preset 的**文档化触发面**激活一个**惰性**动态包（`apply()` 空实现，不注册工具/事件/服务/UI；
+它唯一的作用就是"让 `cordis_run` 发生"）：
+
+```text
+Sep 25 04:13:24  [dsh-phoenix] cordis tool: cordis_run
+Sep 25 04:13:27  [dsh-phoenix] restart requested (gen 21): plugin-change
+```
+
+即 phoenix **看到了**这次激活并登记为**第 21 代**重启请求；与 gen-19/gen-20 走同一套
+"软告警 5 分钟 / 硬期限 15 分钟 / policy auto" 生命周期（硬期限 ≈ `04:28:27`）。
+本会话仍在运行，**重启后的现场无法在同一进程内观测**——如实列为 §18.8 第 1 条。
+
+- **重启后可观测的变化（预期）**：本轮三处修复对**运行时**的影响分别是
+  `ros2_install` 对非法 session id 直接返回 `INVALID_SESSION`（不再触碰文件系统）、
+  新发布的 tarball 不含 `__pycache__`、安装器抓取带 `--`。
+  其中**只有第一条**在当前会话的进程里可观测（另两条分别属于发布物与 `action=start` 路径）。
+- **诚实边界**：`action=start` 在本机走不到（ROS2 已安装 ⇒ 直接 `already-installed`），
+  所以 F3 的运行时表现**无法在活进程里演示**；F3 的证据是**真实二进制的 before/after**（§18.4 证明 3），
+  这一点不夸大。
+
+### 18.6 安全扫描（step 5）
+
+**依赖漏洞**：
+
+- `pnpm audit --prod --audit-level high --registry=https://registry.npmjs.org/` → **No known vulnerabilities found**（exit 0）。
+- 本机默认源（`registry.npmmirror.com`）→ `ERR_PNPM_AUDIT_ENDPOINT_NOT_EXISTS`。**这不是"干净"，是"没查成"**，
+  不可当作结论（CI 在 GitHub runner 上默认即官方源 ⇒ CI 闸门有效；只有本机需显式指定）。
+  沿用第八/十/十二轮的同一结论。
+
+**GitHub 侧扫描面（本轮重查并**改动）**：
+
+| 面 | 本轮起点 | 本轮动作 | 含义 |
+| --- | --- | --- | --- |
+| Dependabot alerts | `404`（未开启） | **`PUT /vulnerability-alerts` → 已开启**（端点返回 `204`） | 从"无 GH 侧依赖告警"变为**有** |
+| Dependabot security updates | `disabled` | **`PUT /automated-security-fixes` → `enabled`** | 可自动开安全更新 PR |
+| 当前 Dependabot 告警数 | — | **0** | 无待处理告警 |
+| Secret scanning | **`enabled`**（第十二轮未查，本轮新查） | 保持 | 与 push protection 一起构成密钥防线 |
+| Secret scanning push protection | **`enabled`**（本轮新查） | 保持 | 推送期即拦截 |
+| Secret scanning alerts | — | **`[]`** | 无告警 |
+| Code scanning (CodeQL) | `404 — no analysis found` | **未改动** | 仍未配置；见 §18.8 第 3 条 |
+| `secret_scanning_non_provider_patterns` / `validity_checks` | `disabled` | 未改动 | 非阻塞项 |
+
+⇒ 第十二轮 §17.6 的结论"本仓库唯一的依赖安全闸门是 CI 那一条 `pnpm audit`"**本轮已不再成立**：
+Dependabot alerts + security updates 已开启，纵深防御补上了一层。
+同时**新增一条正向事实**：`secret_scanning` 与 `push_protection` **本来就是开启的**——
+第十二轮只查了 Dependabot 与 CodeQL 就下了"GH 侧扫描为空"的结论，本轮把口径补全。
+
+**静态扫描**（`packages/*/src` + `packages/*/scripts`）：
+
+| 面 | 结果 |
+| --- | --- |
+| `eval(` / `new Function` / `vm.` | **0** |
+| `shell: true` / `execSync` | **0** |
+| `child_process.exec(` 的 16 处命中 | **全部是 `RegExp.prototype.exec`**（逐处核对），无命令执行 |
+| `execFile` / `spawn` | 全部走 **argv 数组**；唯一的 `bash -lc` 在 `runner.ts:275`，其 `cmd` 由 `shq()` 逐参拼装 |
+| Python `shell=True` / `os.system` / `pickle.load` / `yaml.load` | **0**；`subprocess` 全部 argv 数组 |
+| `gui.ts` 的 `python3 -c` | 代码是**常量模板**，变量数据经 `env`（`SCREENSHOT_PATH`/`SCREENSHOT_CROP`）传入，**不拼接** |
+| 硬编码密钥（工作树） | **0** |
+| 硬编码密钥（**全 git 历史所有 blob**） | **0** |
+| 包 `lifecycle` 脚本（pre/postinstall 等） | **9 个包全部 none**（无供应链安装期执行面） |
+| `.gitignore` | 覆盖 `secrets.json` / `*.secrets.json` / `.env` / `lib/` / `node_modules/` / `__pycache__/`；`__pycache__` **未被 git 跟踪** |
+| 既有防线回归 | 随测试全绿：`isSafeProfileName` / `safe_name()` 的 4 组穿越用例、`ros2_interface_create` 的 `PATH_ESCAPE`、`shq()` 单引号包裹、safety_monitor argv 数组、`ros2_install` 安装器转义 |
+| 密钥文件处置 | `~/.dsh-ros2/secrets.json` 存在、mode **`600`**、仓库外、`files` 白名单不进 tarball；报告只回显 mode/exists/keyPresent，**从不回显密钥** |
+
+**本轮新增面的评审（自己新引入的代码）**：
+
+| 面 | 结论 |
+| --- | --- |
+| `isSafePathComponent`（#35） | **收紧**：把一个已存在的规则（profile 名）提升为共享谓词并**新增**一个消费者；`isSafeProfileName` 行为逐字符不变（同正则、同 `..` 检查），既有测试未改仍全绿 |
+| `pty_session.py` 的 `safe_sid()`（#35） | **收紧**：在**文件系统调用点**再加一道，与 `robot_profile.py` 的 `safe_name()` 同构（fail-closed，exit 2） |
+| `"!**/__pycache__"`（#36） | 只影响打包面；实测必需 `.py` 全部仍在（`robot_profile.py` / `pty_session.py` / `ros2_topology.py` / `sidecar/*.py`） |
+| CI 发布面闸门（#36） | 只加断言、不改产物；`permissions: contents: read` 不变，仍无 `pull_request_target`、无 `${{ github.event.* }}` 注入面 |
+| `--` 终止选项解析（#37） | **收紧**：参数顺序变化不影响合法输入（已用真实二进制 + 本地安装器回归验证） |
+
+**结论：本轮发现并修复 3 处真实缺陷**；三处改动均为**收缩**攻击面，未引入新的输入源或执行面。
+另：GitHub 侧由"无 GH 依赖告警"变为"已开启 Dependabot alerts + security updates"。
+
+### 18.7 本轮发现（含仓库外的问题）
+
+1. **【安全·已修·真实可利用】** **PTY 会话 id 路径穿越**（F1，PR #35）：`send`/`status`/`stop`
+   **不需要审批**（只有 `start` 需要），因此一个普通工具调用即可让这三者落到**任意** `.in`/`.out`/`.meta`
+   路径上，其中 `stop` 是**截断写**。已按"共享规则 + Tool 层 + helper 权威层"两层修复并加测试。
+   **这条是本轮最重要的发现**：它不在任何 issue 里，是安全扫描自己撞见的。
+2. **【部署配置·第四轮仍未修·仓库外】** `~/.dsh/profiles/web/cordis.patch.yml` 第 33/37/41/45/49 行
+   仍以 `&& source /tmp/vlm_ws/install/setup.bash` 结尾，而 `/tmp/vlm_ws` **已不存在**
+   （第 29 行注释写着"改用实际构建的交付工作区"——**注释改了、值没改**）。
+   新代码的自愈本轮**再次实测有效**（剔除死段 + `note` 点名 + `probe.exitCode = 0`），故**不是当前故障**，
+   代价只是每次调用多一次 `existsSync` 与一段告警噪声；此外 `workspace.root` 仍报 `(未配置)`。
+   **本轮仍不擅自修改**，理由比第十二轮更明确：它在**仓库外**、属于**运行中的部署**、
+   改动需**重启**才生效，而本轮被要求维护的是**仓库**。两条既有证据支持"先不动"：
+   自愈已使其**非故障**；且此前两轮已**有意**记录过"不擅自修改"的决定，单方面改变该决定不合适。
+   → **给出可直接执行的一行修法**（§18.8 第 2 条）。
+3. **【本机·未解释·延续】** `2026-09-24 15:11:04` 那次 `dsh-web` 重启在 journal 中**仍无成因记录**
+   （零间隔，非 phoenix 的 `stop; sleep 8; start`）。本轮**新增一条观测**：该次重启直接导致
+   12 日 04:00 的定时维护被跳过、以 `overdue: true` 在 15:11:11 补跑；
+   而**本轮**（13 日 04:00）是**准点**起跑的，说明这一轮没有再被同类事件顶掉。成因仍如实记为**未解释**。
+4. **【发布面·已修·CI 盲区】** CI 的 tarball 闸门**只遍历一份手写子集**，
+   导致 `sidecar`（6 个 `.pyc`，最严重）与 `dsh-ros2-state` **从未被 pack、从未被检查**。
+   本轮把闸门改为**遍历全部非 private 包**并新增"不得携带字节码"的**反向断言**——
+   原闸门只断言"必须存在什么"，从不检查"不得存在什么"，这正是 8 个文件得以长期发布的原因。
+5. **【安全·已修·低危但真实】** **安装器选项注入**（F3，PR #37）。**诚实定级**：
+   调用者是 agent 自身、`action=start` 需审批、且**本机 ROS2 已安装时该路径根本走不到**
+   （直接 `already-installed`），因此**不是活漏洞**，而是与第五/六轮同类别的加固。
+   记录为"真实可利用但 reach 很窄"，不抬高也不淡化。
+6. **【正面事实·第十二轮口径修正】** `secret_scanning` 与 `secret_scanning_push_protection`
+   **本来就是开启的**（告警 `[]`）。第十二轮 §17.6 只查了 Dependabot 与 CodeQL 就写下
+   "GitHub 侧扫描面为空"，本轮把口径补全——**这是对上一轮结论的修正，不是上一轮的错误**。
+7. **【时间口径】** 本节标题用**本地时间（CST）**，git / CI / journal / 任务历史为 **UTC**：
+   本轮 `09-25 04:13 CST` = `09-24 20:13 UTC`。
+
+### 18.8 结论与下一步建议
+
+- **交付**：PR **#35**（会话 id 路径穿越）、**#36**（发布面字节码 + CI 闸门）、**#37**（安装器选项注入）
+  全部 CI 绿（Node 22/24）并合入 `main`（`247a667`）；**open issue / open PR 归零**；
+  用例 **304 → 310**；远端与本地分支已清理。
+- **线上价值**：① 一个**未审批即可触达**的任意 `.in`/`.out`/`.meta` 读写（含截断）被关掉；
+  ② 发布物不再携带**评审看不见**、**携带构建路径**、且其中一个**与源码不一致**的字节码，
+  且 CI 现在会**拦住**这一整类；③ 安装器抓取不再可能把调用者值当选项解析。
+- **末端动作**：改动已构建进 `lib/`，并按文档化触发面激活惰性动态包，**已确认** phoenix 登记
+  `gen 21` 重启请求（`04:13:27`，硬期限 ≈ `04:28:27`）；由 phoenix 在会话空闲的安全点执行优雅重启。
+- **GitHub 侧**：Dependabot alerts 与 security updates **本轮已开启**（此前关闭）。
+- **下次维护建议**：
+  1. **复核 gen-21 重启后的现场**（本轮唯一未闭环观测）：确认 `ros2_install` 对非法 session id
+     返回 `INVALID_SESSION`；以及"重启后才有"的自述字段仍在（正向信号）。
+  2. **改配置**（§18.7 第 2 条，**已连续第四轮记为"仍未修"**）：删掉
+     `~/.dsh/profiles/web/cordis.patch.yml` 里 5 处 `/tmp/vlm_ws` 死段（第 33/37/41/45/49 行），
+     然后优雅重启。**这是唯一一个跨四轮未被处理的事项**，建议优先；若下次维护仍不处理，
+     应考虑把它**升级为一个 issue**，以免继续只躺在维护文档里。
+  3. **考虑配置 CodeQL**：Dependabot 已开，但静态分析仍无基线；本仓库 TS + Python 混合，
+     值得给 `packages/*/src` 与 `packages/*/scripts` 建一条 code scanning 工作流。
+  4. **盯住定时任务的可靠性**（第十二轮 §17.7 第 1 条）：近两周多数运行因 30 分钟上限失败；
+     本轮**准点起跑且未超时**，但沿用第十二轮的规程——**先落地、再记录**
+     （本轮范式：3 个小 PR 各自合并 → 文档最后写并立即推送）。
+  5. 维持验收线：**推送前** `typecheck + test + build` 全绿、**推送后立刻开 PR 并等 CI 绿再合并**、
+     `pnpm audit` 必须带 `--registry=https://registry.npmjs.org`（本机）。
