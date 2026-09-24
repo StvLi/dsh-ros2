@@ -75,6 +75,12 @@ export async function apply(ctx: Context, config: VisionPackageConfig): Promise<
     approval,
     jobs,
     workspaceRoot: config.workspaceRoot,
+    // The doctor derives its install roots from the SAME resolved setup the run
+    // seam applies. Without this forward the tool resolves with bare options,
+    // reports an auto-detected `/opt/ros/<distro>` chain, and every L4 package
+    // reads as "not built" no matter what the configured chain actually
+    // sources — the exact trap `ToolDeps.rosSetup` documents.
+    rosSetup: config.rosSetup,
     vision,
     visionMeta,
   }
