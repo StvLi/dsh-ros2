@@ -6,7 +6,7 @@
 | Node.js | `^22.19.0 \|\| >=24.0.0` | 与 DSH 一致 |
 | pnpm | `>= 10` | 开发/构建 |
 | ROS2 | **Jazzy**（实测）；Humble 预期可用 | 依赖 `ros2`/`colcon`/`rosdep` 在 PATH；环境全局注入 ROS 变量（无需 source） |
-| L4 ROS2 包 | `dsh_ros2_vlm`（colcon 构建；本机 `/tmp/vlm_ws`，经插件 `rosSetup` source） | `vlm_node`/`vlm_bridge_node`/`vision_bringup`；含 Python 依赖 `cv2`、`numpy` |
+| L4 ROS2 包 | `dsh_ros2_vlm`（colcon 构建在**你自己的** workspace，经插件 `rosSetup` source） | `vlm_node`/`vlm_bridge_node`/`vision_bringup`；含 Python 依赖 `cv2`、`numpy`。`ros2_vision_doctor` 的候选 install 根由 `rosSetup` 链派生，不写死任何本机路径 |
 | L4 离屏渲染 | `dsh_ros2_rviz_offscreen`（C++，链接 rviz_common/OGRE）+ **Xvfb**（虚拟 X 提供 GLX） | 无物理屏、无窗口层级；`xvfb` 需安装 |
 | 显示服务 | **X11**（L3 GUI/截图必需） | Pillow ImageGrab 走 X11；Wayland 需配置 `screenshotCommand`（如 grim） |
 | 截图依赖 | python3 + Pillow（`pip install pillow`） | 本机已装；可用 `screenshotCommand`（scrot/import）替代 |
@@ -21,5 +21,9 @@
 - FastDDS SHM stderr 噪音默认丢弃（`includeStderr=true` 可打开）
 - `~/.ros/log` 不可写时设 `rosLogDir`（如 `$TMPDIR`）；该覆盖同样作用于 GUI 启动进程，
   `runCommand` 与 L4 ROS2 节点亦内置自动回退（`/tmp/ros-log-<uid>`）
+- L4 包的 colcon workspace **必须放在会持久存在的位置**：若建在 `/tmp`（或任何会被清理的目录），
+  配置里的 `rosSetup` 就会指向一个已消失的工作区。自第十轮起插件会**剔除该类死段并在 `note` 里点名**
+  （`ros2_env_check` 的 `setup.missingSources`），但配置本身仍需人工修正；`ros2_workspace use` 可做
+  **会话级**临时覆盖，不改配置。
 - RViz2 需要可用的 GLX 上下文：在无 GLX 的显示（如 Xvfb/远程转发）上启动后不会出窗口，
   属环境限制；L4 离屏渲染在 Xvfb + Mesa llvmpipe（软件 GL 4.5）上工作正常

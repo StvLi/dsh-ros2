@@ -152,6 +152,23 @@ function splitSourceChain(prefix: string): string[] {
 }
 
 /**
+ * Every `source` path of a setup chain, in order, de-quoted.
+ *
+ * A chain may name more than one workspace (`source A && source B && `), so a
+ * caller that needs the workspaces behind the prefix has to read all of them —
+ * `extractSourcePath` is deliberately the single-path helper. Segments that
+ * carry no `source` (e.g. `export FOO=1`) contribute nothing.
+ */
+export function setupSourcePaths(prefix: string): string[] {
+  const paths: string[] = []
+  for (const segment of splitSourceChain(prefix)) {
+    const src = extractSourcePath(segment)
+    if (src) paths.push(src)
+  }
+  return paths
+}
+
+/**
  * Resolve the effective setup prefix (session override -> config -> auto).
  *
  * EVERY `source` segment is existence-checked, not just the first one: a chain

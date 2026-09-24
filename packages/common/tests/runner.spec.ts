@@ -220,3 +220,27 @@ describe('runCommand setup prefix joining', () => {
     }
   })
 })
+
+describe('setupSourcePaths', () => {
+  // A chain can name several workspaces; callers that need the workspaces
+  // behind the prefix (e.g. the vision doctor's install roots) must see ALL of
+  // them, not just the first — reading only the head is what let a deleted
+  // tail workspace stay "healthy" before the whole-chain validation landed.
+  it('returns every source path of a multi-workspace chain, in order', async () => {
+    const { setupSourcePaths } = await import('../src/runner.js')
+    const prefix = 'source /ws/a/install/setup.bash && source /ws/b/install/setup.bash && '
+    expect(setupSourcePaths(prefix)).toEqual(['/ws/a/install/setup.bash', '/ws/b/install/setup.bash'])
+  })
+
+  it('de-quotes quoted paths (including spaces) and ignores non-source segments', async () => {
+    const { setupSourcePaths } = await import('../src/runner.js')
+    const prefix = `export FOO=1 && source '/tmp/my ws/install/setup.bash' && source "/ws/b/install/setup.bash" && `
+    expect(setupSourcePaths(prefix)).toEqual(['/tmp/my ws/install/setup.bash', '/ws/b/install/setup.bash'])
+  })
+
+  it('returns an empty list when the prefix sources nothing', async () => {
+    const { setupSourcePaths } = await import('../src/runner.js')
+    expect(setupSourcePaths('')).toEqual([])
+    expect(setupSourcePaths('export ROS_DOMAIN_ID=1 && ')).toEqual([])
+  })
+})
