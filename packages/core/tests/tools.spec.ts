@@ -322,10 +322,38 @@ describe('ros2_install', () => {
     const bootDir = '/tmp/dsh-ros2'
     const boot = '/tmp/dsh-ros2/fishros-install'
     // A URL with shell metacharacters must be wrapped as a single shq() shell
-    // word so it cannot break out of `curl -fsSL <installer>`.
+    // word so it cannot break out of the fetch.
     const cmd = buildRos2InstallDownloadCommand('http://x/a;touch /tmp/dsh-ros2-pwned', bootDir, boot)
-    expect(cmd).toContain(`curl -fsSL 'http://x/a;touch /tmp/dsh-ros2-pwned'`)
+    expect(cmd).toContain(`-- 'http://x/a;touch /tmp/dsh-ros2-pwned'`)
     expect(cmd).not.toContain(`curl -fsSL http://x/a;touch`)
+  })
+
+  /**
+   * `shq()` stops the SHELL from reinterpreting the installer, but the shell
+   * strips the quotes before curl/wget/cp see the value — so a leading `-` was
+   * still an OPTION. Verified against the real binaries:
+   *
+   *   $ wget -q -O /tmp/x "-wget-option-like-value"
+   *   wget: --wait: Invalid time period 'get-option-like-value'     # parsed!
+   *   $ wget -q -O /tmp/x -- "-wget-option-like-value"              # operand
+   *
+   * `--` terminates option parsing; no legitimate mirror URL or path starts
+   * with `-`, so nothing legitimate is lost.
+   */
+  it('buildRos2InstallDownloadCommand terminates option parsing with --', () => {
+    const bootDir = '/tmp/dsh-ros2'
+    const boot = '/tmp/dsh-ros2/fishros-install'
+    const cmd = buildRos2InstallDownloadCommand('--config=/tmp/evil', bootDir, boot)
+    expect(cmd).toContain(`-o '${boot}' -- '--config=/tmp/evil'`)
+    expect(cmd).toContain(`-O '${boot}' -- '--config=/tmp/evil'`)
+    // the operand never sits directly after a flag an option would follow
+    expect(cmd).not.toMatch(/-fsSL\s+'--config/)
+    expect(cmd).not.toMatch(/-q\s+'--config/)
+
+    // The local-copy branch gets the same treatment: `file://-rf` yields src `-rf`.
+    expect(buildRos2InstallDownloadCommand('/tmp/install.sh', bootDir, boot))
+      .toContain(`cp -- '/tmp/install.sh' '${boot}'`)
+    expect(buildRos2InstallDownloadCommand('file://-rf', bootDir, boot)).toContain(`cp -- '-rf'`)
   })
 })
 
