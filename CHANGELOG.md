@@ -82,11 +82,11 @@ All notable changes to **dsh-ros2** are documented here. Format follows
   这句已是**假的现状**；改为"colcon 构建在**你自己的** workspace，由 `rosSetup` source，doctor 的安装根
   由该链派生"。同一文档新增一条环境注意：**colcon workspace 不要建在 `/tmp`**（会被清理），
   这正是一个 workspace 消失后把 `rosSetup` 变成死链的根因。
-- **工作区 vitest 用例 277 → 295 例**（第十轮 +8：common +6（整链校验 5 + 前缀拼接 1）、
+- **工作区 vitest 用例 277 → 304 例**（第十轮 +8：common +6（整链校验 5 + 前缀拼接 1）、
   core +2（诊断措辞与数据出口）；第十一轮 +7：common +3（`setupSourcePaths`）、
-  vision +4（doctor 安装根派生）；第十二轮 +3：运行缝接线不变量）。
-  分布：common 54 + core 131(130 过 +1 skip) + moveit 16 + profile 14 + safety 10 + vision 34 +
-  state 8 + dsh-ros2 28 = **295**。README / README_CN 开发章节同步校正为 295 例。
+  vision +4（doctor 安装根派生）；第十二轮 +12：运行缝接线不变量 +3、API Key 来源语义 +9）。
+  分布：common 54 + core 131(130 过 +1 skip) + moveit 16 + profile 14 + safety 10 + vision 43 +
+  state 8 + dsh-ros2 28 = **304**。README / README_CN 开发章节同步校正为 304 例。
 - **`rosSetup` 改为整条 `&&` 链逐段校验**（旧实现只校验**第一段**）：链条 `source A && source B &&`
   在 `B` 已删除时，旧行为判定"配置正常"却让**每一次**调用都失败在 `B` 上（现场案例：`/tmp/vlm_ws`
   被删）。现在逐段 `existsSync`，并按情形处理：
@@ -133,6 +133,21 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 
 ### Fixed
 
+- **`ros2_vision_doctor` 的 API Key 报告按"形状"判断，于是自己说反话**：`apiKeyPlaintext` 只看 key 是否
+  `startsWith('sk-')`，`source` 则从**已经被折叠成单个字符串**的 key 重新推断。两个后果都在本机现场成立：
+  ①进程用 `${VLM_API_KEY}` 注入（报告里 `source: env`、`fromEnv: VLM_API_KEY`），却同时给出
+  `plaintext: true` 并警告"建议改用环境变量注入（${VLM_API_KEY}）"——**建议的正是它已经在用的做法**；
+  ②`apply` 阶段已把密钥文件里的 key 折进 `meta.apiKey`，`resolveApiKey` 再也分不清三个来源，于是
+  **来自 0600 密钥文件的 key 被报成 `config`**（若配置了 `${VAR}` 而该变量为空，则被报成 `env`），
+  把用户引去检查 profile 配置，而 key 其实在仓库外的密钥文件里；`source: 'secrets'` 仅剩
+  "挂载之后才用 `ros2_vision_set_key` 写入"这一种情形才可能出现。
+  修复＝**在三个来源还没合并时就把来源定下来**：`secrets.ts` 新增 `resolveApiKeyOrigin()`，`apply` 调用一次，
+  经 `VisionMeta.apiKeySource` 下传，doctor 优先采用它。`plaintext` 从此只表示"**字面量写在插件配置里**"
+  ——那份会被复制/分享/入库的文件；告警文案同步写明这一点（不再把环境变量注入说成问题）。
+  新增 9 例测试：`secrets.spec.ts` 用**旧表达式并排求值**证明"用哪个 key"未变、只是来源报得准；
+  `vision/tests/index.spec.ts` 用真实 Cordis `Context` 挂载 vision bundle，分别以**环境变量 / 配置字面量 /
+  临时密钥文件**（`DSH_ROS2_SECRETS`）三种来源读活报告。撤掉修复后 3 例立即失败
+  （`expected true to be false`、两处 `expected 'config' to be 'secrets'`）。
 - **`ros2_vision_doctor` 的安装根派生在运行期拿不到配置的 `rosSetup`（接线缺口）**：上一轮把候选安装根改为
   **从 `deps.rosSetup` 派生**，但 `packages/vision/src/index.ts` 组装 `VisionToolDeps` 时**没有把这个字段转交进去**
   （core 在第十轮已转交，vision 漏了）。后果不是"少一个候选"，而是**派生永远看不到配置的链**：tool 回退到自动探测的

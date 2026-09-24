@@ -174,7 +174,10 @@ describe('ros2_vision_doctor', () => {
     expect(data.imageTopicCount).toBe(1)
     expect(data.apiKey.plaintext).toBe(true)
     expect(data.apiKey.source).toBe('config')
-    expect(out.warnings?.some((w) => w.includes('明文'))).toBe(true)
+    // The warning now names the actual problem (a literal in the plugin config,
+    // the file people copy/share) instead of the old shape-based check that
+    // also fired for env-injected keys and then advised using an env var.
+    expect(out.warnings?.some((w) => w.includes('字面量'))).toBe(true)
   })
 })
 

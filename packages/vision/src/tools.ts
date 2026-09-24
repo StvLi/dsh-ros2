@@ -50,6 +50,7 @@ import {
   secretsFileInfo,
   writeVlmApiKey,
   type ApiKeyResolution,
+  type ApiKeySource,
 } from './secrets.js'
 
 /** Path to a helper script shipped with THIS package (scripts/). */
@@ -63,6 +64,14 @@ export interface VisionMeta {
   apiKey: string
   apiKeyFromEnv: string | null
   apiKeyPlaintext: boolean
+  /**
+   * Where the key actually came from, decided at apply time while the three
+   * sources are still distinguishable. Without it the report falls back to
+   * re-deriving the origin from the key string, which mislabels a secrets-file
+   * key as `config` (or as `env` when a `${VAR}` reference is configured but
+   * the variable is empty).
+   */
+  apiKeySource?: ApiKeySource
   model: string
   baseUrl: string
 }
@@ -377,7 +386,10 @@ function makeVisionDoctorTool(deps: VisionToolDeps) {
       const apiKeyStatus = meta
         ? {
             provider: meta.provider,
-            source: keyRes.source,
+            // Prefer the apply-time origin: `resolveApiKey` folds the secrets
+            // file into the key string before this runs, so it can no longer
+            // tell the three sources apart.
+            source: meta.apiKeySource ?? keyRes.source,
             keyConfigured: keyRes.source !== 'missing',
             fromEnv: meta.apiKeyFromEnv,
             plaintext: meta.apiKeyPlaintext,
@@ -414,7 +426,7 @@ function makeVisionDoctorTool(deps: VisionToolDeps) {
         ]
       }
       if (meta?.apiKeyPlaintext) {
-        result.warnings = [...(result.warnings ?? []), '检测到明文 API Key（sk-...）——建议改用环境变量注入（${VLM_API_KEY}）或 ros2_vision_set_key 存储，并自查 profile 配置']
+        result.warnings = [...(result.warnings ?? []), 'API Key 以字面量写在插件配置里（该配置会被复制/分享/入库）——建议改为 ${VLM_API_KEY} 环境变量注入，或用 ros2_vision_set_key 存到 ~/.dsh-ros2/secrets.json（0600，仓库外）']
       }
       return result
     },

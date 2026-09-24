@@ -490,7 +490,7 @@ Node 需 `^22.19 || >=24`。
 ```bash
 pnpm install
 pnpm run typecheck   # tsc --noEmit
-pnpm run test        # vitest（295 例；另有 10 个 sidecar Python 场景 + 6 个 zero-pose 自检 + 29 项档案名/路径/TF 解析自检）
+pnpm run test        # vitest（304 例；另有 10 个 sidecar Python 场景 + 6 个 zero-pose 自检 + 29 项档案名/路径/TF 解析自检）
 pnpm run build       # tsc -> lib/ + lib/types/
 ```
 
