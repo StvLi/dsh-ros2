@@ -623,13 +623,20 @@ function makeJobStatusTool(deps: CoreToolDeps) {
  * so a shell metacharacter in the installer (e.g. `;`/`&`/`$(...)`) or a blank
  * path can NOT break out of the command string — it stays a literal curl/cp
  * argument. Exported for direct unit testing of the quoting.
+ *
+ * `shq()` stops the SHELL from reinterpreting the value, but the shell strips
+ * the quotes before curl/wget/cp ever see it, so a value that starts with `-`
+ * was still parsed as an OPTION: `installer = "--config=/tmp/x"` made curl read
+ * that file as its config (which can name both a URL and an output path). `--`
+ * terminates option parsing, so the operand is always an operand. It costs
+ * nothing legitimate: no mirror URL or path begins with `-`.
  */
 export function buildRos2InstallDownloadCommand(installer: string, bootDir: string, boot: string): string {
   if (installer.startsWith('file://') || installer.startsWith('/')) {
     const src = installer.startsWith('file://') ? installer.slice('file://'.length) : installer
-    return `mkdir -p ${shq(bootDir)} && cp ${shq(src)} ${shq(boot)} && chmod +x ${shq(boot)}`
+    return `mkdir -p ${shq(bootDir)} && cp -- ${shq(src)} ${shq(boot)} && chmod +x ${shq(boot)}`
   }
-  return `mkdir -p ${shq(bootDir)} && (curl -fsSL ${shq(installer)} -o ${shq(boot)} || wget -q ${shq(installer)} -O ${shq(boot)}) && test -s ${shq(boot)} && chmod +x ${shq(boot)}`
+  return `mkdir -p ${shq(bootDir)} && (curl -fsSL -o ${shq(boot)} -- ${shq(installer)} || wget -q -O ${shq(boot)} -- ${shq(installer)}) && test -s ${shq(boot)} && chmod +x ${shq(boot)}`
 }
 
 function makeRos2InstallTool(deps: CoreToolDeps) {
