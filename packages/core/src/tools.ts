@@ -44,6 +44,7 @@ import {
   getSessionRosSetup,
   resolveSetup,
   shq,
+  isSafePathComponent,
   bundleDriftReport,
   formatBundleStartupReport,
 } from 'dsh-ros2-common'
@@ -728,6 +729,16 @@ function makeRos2InstallTool(deps: CoreToolDeps) {
 
       if (!session) {
         return toolError('ros2_install', command, 'SESSION_REQUIRED', 'send/status/stop 需要 session（start 返回的会话 id）')
+      }
+      // A session id becomes `$TMPDIR/dsh-ros2/pty/<sid>.{in,out,meta}`, so it
+      // must be ONE safe path component: an unvalidated `../..` (or an absolute
+      // path, which `os.path.join` returns verbatim) escaped the session
+      // directory and let send/status/stop append to, truncate or read any
+      // path ending in those three suffixes. Rejected here so the helper is
+      // never spawned; `pty_session.py` re-checks at the filesystem call.
+      if (!isSafePathComponent(session)) {
+        return toolError('ros2_install', command, 'INVALID_SESSION',
+          `非法会话 id ${session}：只允许字母/数字/._-，且不得含路径分隔符或 ..`)
       }
       const helper = ptyHelperPath()
       const dir = ptyDir()

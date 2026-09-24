@@ -22,6 +22,7 @@ Commands:
 import argparse
 import os
 import pty
+import re
 import select
 import signal
 import sys
@@ -30,8 +31,31 @@ import time
 PID = str(os.getpid())
 DIR = os.path.join(os.environ.get("TMPDIR", "/tmp"), "dsh-ros2", "pty")
 
+# A session id becomes `DIR/<sid>.{in,out,meta}`, so it must be ONE safe path
+# component: no separator, no `.`/`..`, no control character. Mirrors
+# isSafePathComponent in dsh-ros2-common (packages/common/src/names.ts) and
+# safe_name() below in robot_profile.py.
+_SID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+
+
+class UnsafeSid(ValueError):
+    """A session id that is not one safe path component."""
+
+
+def safe_sid(sid) -> bool:
+    """Whether `sid` may name files under DIR (no path escape)."""
+    return bool(isinstance(sid, str) and _SID_RE.match(sid) and ".." not in sid)
+
 
 def paths(sid):
+    # Authoritative guard: `sid` reaches the filesystem HERE, so the check
+    # lives beside the join instead of trusting the caller. Without it an
+    # absolute sid (os.path.join returns it verbatim) or a `../..` chain
+    # escaped DIR and made send/status/stop touch an arbitrary `.in`/`.out`/
+    # `.meta` path.
+    if not safe_sid(sid):
+        raise UnsafeSid(
+            "unsafe session id %r: one path component of [A-Za-z0-9._-] required" % (sid,))
     return (os.path.join(DIR, sid + ".out"), os.path.join(DIR, sid + ".in"),
             os.path.join(DIR, sid + ".meta"))
 
@@ -236,6 +260,12 @@ def main():
     ap.add_argument("--all", action="store_true")
     args = ap.parse_args()
     DIR = args.dir
+    # Fail fast and loudly, before forking: `start` runs in a child that ends
+    # with os._exit(0), so an UnsafeSid raised there would vanish silently.
+    if not safe_sid(args.sid):
+        print("unsafe session id %r: only [A-Za-z0-9._-], no separator or '..'"
+              % (args.sid,), file=sys.stderr)
+        sys.exit(2)
     if args.action == "start":
         rest = args.rest
         if rest and rest[0] == "--":

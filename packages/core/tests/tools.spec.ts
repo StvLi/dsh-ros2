@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { buildRos2InstallDownloadCommand, createRos2Tools, type CoreToolDeps } from '../src/tools.js'
 import { type RunFn, type ToolResult, type RosResult, declareExpectedBundles, getSessionRosSetup, registerLoadedBundle, setSessionRosSetup } from 'dsh-ros2-common'
 
@@ -353,6 +354,78 @@ describe('ros2_install', () => {
     expect(buildRos2InstallDownloadCommand('/tmp/install.sh', bootDir, boot))
       .toContain(`cp -- '/tmp/install.sh' '${boot}'`)
     expect(buildRos2InstallDownloadCommand('file://-rf', bootDir, boot)).toContain(`cp -- '-rf'`)
+  })
+})
+
+/**
+ * The PTY session id becomes `$TMPDIR/dsh-ros2/pty/<sid>.{in,out,meta}`. Before
+ * the round-13 fix it reached `os.path.join` unvalidated, so a `../..` chain —
+ * or an absolute path, which `os.path.join` returns verbatim — escaped the
+ * session directory: `send` appended to, `status` read, and `stop` TRUNCATED
+ * any path ending in one of those three suffixes.
+ *
+ * Both layers are pinned: the Tool layer must refuse before it spawns the
+ * helper, and the shipped helper must refuse at the filesystem call even when
+ * invoked directly (it is the authoritative check — the Tool layer is not its
+ * only possible caller).
+ */
+describe('ros2_install session-id path escape', () => {
+  const UNSAFE_SIDS = ['../../etc/cron.d/x', '/tmp/absolute', 'a/b', 'a\\b', '..', '.hidden']
+  const helperPath = fileURLToPath(new URL('../scripts/pty_session.py', import.meta.url))
+
+  it('the Tool refuses an unsafe session id without ever spawning the helper', async () => {
+    const tmp = mkdtempSync(path.join(tmpdir(), 'dsh-pty-tool-'))
+    const savedTmpdir = process.env.TMPDIR
+    process.env.TMPDIR = tmp
+    try {
+      for (const session of UNSAFE_SIDS) {
+        const out = await call('ros2_install', makeRun(() => ({ stdout: 'ros2 0.33.2\n' })), {
+          action: 'send', session, input: 'x',
+        })
+        expect(out.ok, session).toBe(false)
+        expect(out.error?.code, session).toBe('INVALID_SESSION')
+      }
+      // Refused before the spawn, so the session directory was never created.
+      expect(existsSync(path.join(tmp, 'dsh-ros2', 'pty'))).toBe(false)
+    } finally {
+      if (savedTmpdir === undefined) delete process.env.TMPDIR
+      else process.env.TMPDIR = savedTmpdir
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  // No skipIf here on purpose: `send` only appends to the session's `.in` file
+  // and never allocates a pty, so unlike the interactive `start` flow this runs
+  // in every environment — the authoritative guard stays covered in CI too.
+  it('the shipped helper fails closed, and a safe id still lands inside the session dir', () => {
+    const tmp = mkdtempSync(path.join(tmpdir(), 'dsh-pty-helper-'))
+    const victim = path.join(tmp, 'victim')
+    mkdirSync(victim, { recursive: true })
+    mkdirSync(path.join(tmp, 'dsh-ros2', 'pty'), { recursive: true })
+    const env = { ...process.env, TMPDIR: tmp }
+
+    const runsHelper = (sid: string): boolean => {
+      try {
+        execFileSync('python3', [helperPath, 'send', sid, '--', 'INJECTED'], { env, stdio: 'pipe', timeout: 10000 })
+        return true
+      } catch {
+        return false
+      }
+    }
+
+    try {
+      for (const sid of ['../../victim/pwned', path.join(victim, 'abs'), '..', 'a/b']) {
+        expect(runsHelper(sid), sid).toBe(false)
+      }
+      expect(readdirSync(victim)).toEqual([]) // nothing escaped, nothing truncated
+
+      // Positive control: the generated id shape still works and stays inside DIR.
+      expect(runsHelper('ros2install-1')).toBe(true)
+      expect(readFileSync(path.join(tmp, 'dsh-ros2', 'pty', 'ros2install-1.in'), 'utf8')).toBe('INJECTED\n')
+      expect(readdirSync(victim)).toEqual([])
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
+    }
   })
 })
 
