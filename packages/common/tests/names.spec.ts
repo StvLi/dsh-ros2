@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isSafeProfileName } from '../src/names.js'
+import { isSafePathComponent, isSafeProfileName } from '../src/names.js'
 import { resolveProfilePath, loadRobotProfile, type RunFn, type ToolDeps } from '../src/toolkit.js'
 
 /**
@@ -25,6 +25,34 @@ describe('isSafeProfileName', () => {
   it('rejects names longer than the 64-char path-component budget', () => {
     expect(isSafeProfileName('a'.repeat(64))).toBe(true)
     expect(isSafeProfileName('a'.repeat(65))).toBe(false)
+  })
+})
+
+/**
+ * The same rule guards a PTY session id, which becomes
+ * `$TMPDIR/dsh-ros2/pty/<sid>.{in,out,meta}`. Before the round-13 fix the id
+ * reached `os.path.join` unvalidated, so a `../..` chain — or an absolute path,
+ * which `os.path.join` returns verbatim — escaped the session directory.
+ */
+describe('isSafePathComponent (session ids, and any other path component)', () => {
+  it('accepts the ids the tool actually generates', () => {
+    for (const id of ['ros2install-1750000000000', 'ros2install-1', 'a', 'A.b_c-9']) {
+      expect(isSafePathComponent(id), id).toBe(true)
+    }
+  })
+
+  it('rejects every escape shape a caller can send', () => {
+    for (const id of [
+      '../../etc/cron.d/x', '..', '.', '.hidden', 'a/b', 'a\\b', '/tmp/absolute',
+      'a/../../b', '', 'a\x00b', 'a b', 'a:b', 'a;b', '$(id)', 'a'.repeat(65),
+    ]) {
+      expect(isSafePathComponent(id), JSON.stringify(id)).toBe(false)
+    }
+  })
+
+  it('accepts the 64-char budget and rejects one byte more', () => {
+    expect(isSafePathComponent('a'.repeat(64))).toBe(true)
+    expect(isSafePathComponent('a'.repeat(65))).toBe(false)
   })
 })
 
