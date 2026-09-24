@@ -9,7 +9,7 @@ import { Config, type VisionPackageConfig } from './config.js'
 import { makeRun, readOwnVersion, registerLoadedBundle, type ApprovalRequest, type JobsApi, type VisionProvider } from 'dsh-ros2-common'
 import { createVisionProvider } from './vision.js'
 import { createRos2Tools, type VisionMeta, type VisionToolDeps } from './tools.js'
-import { readVlmApiKey } from './secrets.js'
+import { readVlmApiKey, resolveApiKeyOrigin } from './secrets.js'
 import { robotStateVisionSkill } from './skill.js'
 
 export const name = 'dsh-ros2-vision'
@@ -50,14 +50,26 @@ export async function apply(ctx: Context, config: VisionPackageConfig): Promise<
   const apiKeyFromEnv = envRef && envRef[1] !== undefined ? envRef[1] : null
   const envKey = apiKeyFromEnv ? (process.env[apiKeyFromEnv] ?? '') : ''
   const secretsKey = (await readVlmApiKey()) ?? ''
-  const resolvedApiKey = (config.vision.apiKey ?? '').trim() !== '' && !apiKeyFromEnv
-    ? (config.vision.apiKey ?? '')
-    : (envKey || secretsKey)
+  // The origin is decided HERE, while the three sources are still separate —
+  // afterwards the key is one string and the secrets file is indistinguishable
+  // from a config literal (see `resolveApiKeyOrigin`).
+  const origin = resolveApiKeyOrigin({
+    configKey: config.vision.apiKey ?? '',
+    envRef: apiKeyFromEnv,
+    envKey,
+    secretsKey,
+  })
+  const resolvedApiKey = origin.key
   const visionMeta: VisionMeta = {
     provider: config.vision.provider,
     apiKey: resolvedApiKey,
-    apiKeyFromEnv,
-    apiKeyPlaintext: resolvedApiKey.startsWith('sk-') || resolvedApiKey.startsWith('ghp_'),
+    apiKeyFromEnv: origin.fromEnv,
+    // "plaintext" means the literal key sits in the plugin config — the file
+    // people copy, share and commit. A key injected via `${VAR}` or stored by
+    // `ros2_vision_set_key` (0600, outside the repo) is NOT that, and warning
+    // about it would advise the very thing already in use.
+    apiKeyPlaintext: origin.source === 'config',
+    apiKeySource: origin.source,
     model: config.vision.model,
     baseUrl: config.vision.baseUrl,
   }

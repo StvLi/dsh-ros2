@@ -90,6 +90,37 @@ export interface ApiKeyResolution {
   source: ApiKeySource
 }
 
+export interface ApiKeyOrigin {
+  key: string
+  source: ApiKeySource
+  /** The `${VAR}` name, and only when the value really came from that variable. */
+  fromEnv: string | null
+}
+
+/**
+ * Decide the key's ORIGIN once, at apply time, where all three sources are
+ * still separate.
+ *
+ * `resolveApiKey` below cannot do this: by the time it runs, the apply-time
+ * chain has already folded the secrets-file key into `meta.apiKey`, so a key
+ * read from `~/.dsh-ros2/secrets.json` is reported as `config` — or as `env`
+ * when a `${VAR}` reference is configured but the variable is empty. That
+ * misdirection points the user at their profile config while the key actually
+ * lives in the 0600 secrets file (or vice versa).
+ */
+export function resolveApiKeyOrigin(input: {
+  configKey: string
+  envRef: string | null
+  envKey: string
+  secretsKey: string
+}): ApiKeyOrigin {
+  const configKey = input.configKey.trim()
+  if (configKey !== '' && !input.envRef) return { key: configKey, source: 'config', fromEnv: null }
+  if (input.envKey) return { key: input.envKey, source: 'env', fromEnv: input.envRef }
+  if (input.secretsKey) return { key: input.secretsKey, source: 'secrets', fromEnv: null }
+  return { key: '', source: 'missing', fromEnv: input.envRef }
+}
+
 /**
  * Resolution chain: config `apiKey` → `${ENV}` reference (both already folded
  * into `meta.apiKey`) → secrets file. Structural input avoids an import cycle

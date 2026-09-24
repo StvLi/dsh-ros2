@@ -8,6 +8,7 @@ import {
   writeVlmApiKey,
   secretsFileInfo,
   resolveApiKey,
+  resolveApiKeyOrigin,
   secretsFilePath,
 } from '../src/secrets.js'
 import { createRos2Tools } from '../src/tools.js'
@@ -172,5 +173,55 @@ describe('ros2_vision_describe key gating', () => {
     const out = (await t.execute({ imagePath: '/tmp/f.jpg' }, execStub)) as ToolResult
     expect(out.ok).toBe(true)
     expect(String((out.data as { description?: string })?.description ?? '')).toContain('mock')
+  })
+})
+
+describe('resolveApiKeyOrigin — the origin is decided while the sources are still separate', () => {
+  // `resolveApiKey` re-derives the origin from `meta.apiKey`, which the
+  // apply-time chain has ALREADY folded the secrets-file key into. It therefore
+  // reports a secrets-file key as `config`, or as `env` when a `${VAR}`
+  // reference is configured but the variable is empty — sending the user to
+  // check their profile config when the key is in fact in the 0600 file.
+  it('names the secrets file when a ${VAR} reference is configured but the variable is empty', () => {
+    expect(resolveApiKeyOrigin({ configKey: '${VLM_API_KEY}', envRef: 'VLM_API_KEY', envKey: '', secretsKey: 'sk-from-secrets' }))
+      .toEqual({ key: 'sk-from-secrets', source: 'secrets', fromEnv: null })
+  })
+
+  it('names the secrets file when only the secrets file provides the key', () => {
+    expect(resolveApiKeyOrigin({ configKey: '', envRef: null, envKey: '', secretsKey: 'sk-from-secrets' }))
+      .toEqual({ key: 'sk-from-secrets', source: 'secrets', fromEnv: null })
+  })
+
+  it('names the environment only when the variable actually supplied the value', () => {
+    expect(resolveApiKeyOrigin({ configKey: '${VLM_API_KEY}', envRef: 'VLM_API_KEY', envKey: 'sk-from-env', secretsKey: 'sk-from-secrets' }))
+      .toEqual({ key: 'sk-from-env', source: 'env', fromEnv: 'VLM_API_KEY' })
+  })
+
+  it('names config for a literal key, and missing when nothing is set', () => {
+    expect(resolveApiKeyOrigin({ configKey: ' sk-literal ', envRef: null, envKey: '', secretsKey: '' }))
+      .toEqual({ key: 'sk-literal', source: 'config', fromEnv: null })
+    expect(resolveApiKeyOrigin({ configKey: '', envRef: null, envKey: '', secretsKey: '' }))
+      .toEqual({ key: '', source: 'missing', fromEnv: null })
+  })
+
+  it('keeps the resolved key identical to the previous expression', () => {
+    // The refactor must not change WHICH key is used, only how its origin is
+    // reported. This is the old expression, evaluated side by side. Inputs are
+    // whitespace-free on purpose: the old code tested `.trim() !== ''` but then
+    // used the untrimmed value, and the resolver deliberately trims instead.
+    const legacy = (configKey: string, envRef: string | null, envKey: string, secretsKey: string): string =>
+      configKey.trim() !== '' && !envRef ? configKey : (envKey || secretsKey)
+    const cases: Array<[string, string | null, string, string]> = [
+      ['sk-literal', null, '', ''],
+      ['sk-literal', null, 'sk-env', 'sk-secrets'],
+      ['${VLM_API_KEY}', 'VLM_API_KEY', 'sk-env', 'sk-secrets'],
+      ['${VLM_API_KEY}', 'VLM_API_KEY', '', 'sk-secrets'],
+      ['', null, '', 'sk-secrets'],
+      ['', null, '', ''],
+    ]
+    for (const [configKey, envRef, envKey, secretsKey] of cases) {
+      const origin = resolveApiKeyOrigin({ configKey, envRef, envKey, secretsKey })
+      expect(origin.key, `key for ${JSON.stringify({ configKey, envRef, envKey, secretsKey })}`).toBe(legacy(configKey, envRef, envKey, secretsKey))
+    }
   })
 })
