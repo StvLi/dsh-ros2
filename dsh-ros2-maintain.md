@@ -1544,3 +1544,283 @@ Tests  1 failed | 50 skipped (51)
   4. `docs/compatibility.md` 的本机路径描述同步现状。
   5. 维持验收线：**推送前** `typecheck + test + build` 全绿、**推送后立刻开 PR 并等 CI 绿**、
      `pnpm audit` 必须带 `--registry=https://registry.npmjs.org`（本机）。
+
+---
+
+## 17. 维护记录（2026-09-24 15:11 CST / UTC 2026-09-24 07:11 · 第十二轮：收尾超时遗留的在途 PR #32 → 实测第十轮的重启请求已按硬期限落地 → 修复"配置没送到 doctor"的接线缺口 + API Key 来源语义）
+
+> 本轮结论：起始 **0 open issue / 1 open PR**（#32 是**上一轮定时运行超时被杀的遗留**），
+> 收尾为 **PR #32 验收合并** + **PR #33 / #34 两个修复**（全部 CI 绿并合入 `main` = `de7bdba`），
+> 结束 **open issue / open PR = 0 / 0**；用例 **292 → 304**。
+>
+> 三件"上一轮留下的事"在本轮闭合：
+> ① **上一轮的定时运行 `failed: run timed out after 30 minutes`** —— 这正是 PR #32"已开未合、文档未写"的原因
+> （不是疏忽，是会话被 30 分钟上限杀掉；见 §17.7 第 1 条）。本轮先收尾它，再谈新工作。
+> ② **第十轮请求的 phoenix 重启已按硬期限执行**（`2026-09-22 04:33:09`），第十轮 §16.5 唯一未闭环的观测
+> （"重启后才可见的自愈字段"）本轮**实测确认**。
+> ③ 由 ② 的现场证据**反查出两个运行期真缺陷**：doctor 的安装根派生**在运行期根本拿不到配置**
+> （`installDirs` 恒为 `[]`），以及它的 API Key **来源报告说反话**。两者都不在 issue 里，是本轮自己撞见的。
+
+### 17.0 仓库快照（本轮起始/结束）
+
+| 项 | 起始 | 结束 |
+| --- | --- | --- |
+| 当前分支 | `fix/vision-doctor-install-dirs`（4 个提交，**PR #32 open、CI 双绿**，距 `main` 4 提交） | **`main` = `de7bdba`**（本地与 `origin/main` 一致，工作树干净） |
+| `main` | `9abc6c6`（第十轮 docs） | `de7bdba`（#32 → `37a588b`、#33 → `d6e0392`、#34 → `de7bdba`） |
+| open issue / open PR | **0 / 1** | **0 / 0** |
+| vitest 用例 | 292（291 过 + 1 pty-skip） | **304**（303 过 + 1 pty-skip） |
+| 包数量 / 本地环境 | 9 包 · Node `v24.16.0` · pnpm `11.22.0` · vitest 4.1.11 | 同 |
+| 运行中的 dsh | 启动于 **2026-09-24 15:11:04 CST**（本会话 15:11:11 以 `overdue: true` 起跑） | 同进程（本轮代码已构建进 `lib/`，待重启，见 §17.5） |
+| 定时任务近况 | 近两周多数运行失败（超时 30min / `events is not iterable`） | 同（**本轮最重要的发现**，见 §17.7 第 1 条） |
+
+### 17.1 Issue 检查（step 1）——0 open issue，但有 1 个"在途 PR"
+
+`gh issue list --state open` → **0**；`gh pr list --state open` → **1**：**#32**
+（`fix(vision): derive ros2_vision_doctor install roots from the resolved setup chain`，`MERGEABLE`/`CLEAN`，CI Node 22/24 双 `pass`）。
+
+**本轮的第一手发现：这不是"没有 issue 就跳 step 5"，而是有一份未闭环的交付。** 三条证据指向同一件事：
+
+1. 工作树停在 `fix/vision-doctor-install-dirs`，4 个提交已推送、PR 已开、**CI 已绿——却从未合并**；
+2. `dsh-ros2-maintain.md` 最后一节仍是第十轮（§16），**第十一轮的维护记录根本不存在**；
+3. 定时任务历史给出成因：`run-6a1c0ed8`（`2026-09-22T20:00:00Z` = `09-23 04:00 CST`）状态 **`failed`**
+   —— `"run drive failed: run timed out after 30 minutes"`，其 sessionId 正是留下 PR #32 的那次运行。
+
+⇒ 所以本轮**不按"无 issue → 直接安全扫描"走**，而是先把在途成果验完、合并、并补记第十一轮（§17.2），
+再进入本轮新工作（§17.3 起）。这一条与第十轮 §16.1 的教训是同一枚硬币的两面：
+第十轮是"推了但没开 PR ⇒ CI 从未运行"，本轮是"开了 PR 但没合并 ⇒ 成果停在 `main` 之外"。
+
+### 17.2 建议评估（step 2）——PR #32 的设计主张逐条核验
+
+PR #32 没有对应的 issue，它实现的是第十轮 §16.7 第 3 条 / §16.8 第 3 条（vision doctor 硬编码安装根）。
+对一个"自定议题"的 PR，本轮不只看它绿不绿，而是**逐条验证它自己声称的性质**：
+
+| # | PR #32 的主张 | 本轮核验 | 判定 |
+| --- | --- | --- | --- |
+| 1 | 安装根应由**环境派生**，而非"再加一个配置列表" | 配置列表能做到"对 `rosSetup` 并不 source 的工作区报 `built: true`"，即**可以撒谎**；派生则让"已删除的工作区不可能被广告为构建位置" | ✅ 成立，且第 3 条测试（多工作区链）正是钉这个 |
+| 2 | `/opt/ros/<distro>` **不是** colcon 安装根 | `path.dirname('/opt/ros/jazzy/setup.bash')` = `/opt/ros/jazzy`，`basename` = `jazzy` ≠ `install` ⇒ 被排除；独立测试钉住 | ✅ 成立 |
+| 3 | "撤掉实现后 **3/4** 新测试失败（第 4 个是边界守卫，两种实现都过）" | **精确复现**：保留导出、只把安装根计算回退成旧的 `[workspaceRoot/install, '/tmp/vlm_ws/install']` ⇒ **3 失败**；整体回退到 `origin/main`（导出本身消失）⇒ **4 失败**。PR 的措辞（3/4）**准确**，未夸大 | ✅ 主张诚实 |
+| 4 | 该修复"让 doctor 与命令缝回答同一个已解析前缀" | ❌ **运行期不成立**——见 §17.3，这正是本轮新发现的缺陷 | ❌ 已由 PR #33 补齐 |
+
+**④是本轮最有价值的一条**：PR #32 把"从 `deps.rosSetup` 派生"写成了它的核心卖点（代码注释里也这么写），
+但**运行期从来没人把 `rosSetup` 放进 `deps`**。这不是 PR 的谎，而是它的**单元测试与插件接线之间有一道缝**——
+测试直接调 `createRos2Tools({ rosSetup })`，而 `index.ts` 组装 `deps` 时漏了这一项。
+"测试绿"与"运行期成立"之间的差距，正是本轮要补的东西。
+
+### 17.3 开发管理（git · step 3）
+
+| PR | 分支名 | 提交 | 类型 | 说明 |
+| --- | --- | --- | --- | --- |
+| **#32** | `fix/vision-doctor-install-dirs`（**上一轮在途**） | `c2037a9` `d0a3684` `daae842` `cd34308` | `fix(common)` / `fix(vision)` / `docs` ×2 | 新增 `setupSourcePaths()`；doctor 安装根改为从已解析链派生；CHANGELOG/README/`docs/compatibility.md` 同步。**本轮验收后合并** |
+| **#33** | `fix/vision-doctor-rossetup-wiring`（新开，off `37a588b`） | `b3d6b5f` | `fix(vision)` | 一行转交 `rosSetup: config.rosSetup`；新增 `packages/dsh-ros2/tests/run-seam-wiring.spec.ts`（静态类不变量 + 行为级挂载测试） |
+| | | `9017004` | `docs` | CHANGELOG + README/README_CN 计数 295 |
+| **#34** | `fix/vision-apikey-origin`（新开，off `d6e0392`） | `2add724` | `fix(vision)` | 新增 `resolveApiKeyOrigin()`，来源在 `apply` 阶段定下；`plaintext` 改为"字面量写在插件配置里"；9 例新测试 |
+| | | `a2b4c81` | `docs` | CHANGELOG + README/README_CN 计数 304 |
+
+- **为什么 #32 先合并、再另开 #33 修它暴露的问题**（而不是把修复压进 #32）：
+  #32 的四条主张里三条已被本轮独立验证成立，它**自身不引入运行期回归**——
+  修复前后 `installDirs` 在运行期都是 `[]`（旧代码是 `['/tmp/vlm_ws/install']`，该目录已删除，同样全 `false`）。
+  也就是说 #32 做的是"**删掉一个谎言**"，#33 才让派生**真正看见环境**。把两件事拆开，历史才读得出
+  "哪一步是删谎、哪一步是接线"，而不是含混成一次改动。
+- **提交类型的诚实性**：每个 PR 内按**文件域**切 `fix(...)` 与 `docs`（`packages/vision/**` vs
+  `CHANGELOG+README+docs/**`），每个提交单独检出都能 `typecheck` 全绿；顺序上 `fix` 在前、`docs` 在后，
+  不存在"看着是 docs、其实依赖后面才有的代码"。
+- 全部分支/提交已推送；三个 PR 均经 CI（Node 22 + 24）**全绿**后合入 `main`，分支已删除。
+- 收尾状态：`main` = `de7bdba`，工作树干净，0 open issue / 0 open PR。
+
+### 17.4 本地验收（全绿）＋ 四个可复现证明
+
+```bash
+cd /home/stvli/Desktop/embody_agent_ws/dsh-ros2
+rm -rf packages/*/lib          # 复刻 CI 的"干净 clone"起点
+CI=true pnpm run typecheck     # 9 包 tsc --noEmit 全部 Done（exit 0）
+CI=true pnpm run test          # 304 例（303 过 + 1 pty-skip）（exit 0）
+CI=true pnpm run build         # 全部 Done（exit 0）
+```
+
+**用例分布（实测）**：common **54** + core **131**（130 过 + 1 skip）+ moveit 16 + profile 14 + safety 10 +
+vision **43** + state 8 + dsh-ros2 **28** = **304**。第十一轮收尾 292 → 本轮 +12
+（vision +9：`resolveApiKeyOrigin` 5 + doctor 来源 4；dsh-ros2 +3：运行缝不变量）。
+
+**证明 1 ｜ 接线缺口在"活的进程"里直接可见（PR #33 的动机，非推断）**
+
+同一个时刻、同一个进程，两个自述工具给出两个不同的世界：
+
+```text
+ros2_vision_doctor → workspace: { root: "(未配置)", installDirs: [], built: {…全部 false} }
+ros2_env_check     → setup: { prefix: "source /home/stvli/lite_delivery_aio/install/setup.bash && ", explicit: true }
+```
+
+doctor 报 `installDirs: []` 不是"环境里没有安装根"，而是**它解析时用的是裸参数**（回退到自动探测的
+`/opt/ros/jazzy/setup.bash`，而 `/opt/ros/<distro>` 按设计不是安装根 ⇒ 被排除 ⇒ 空表）。
+
+**证明 2 ｜ 撤掉那一行，3 个新测试立即失败（且报错与线上同形）**
+
+```text
+× every bundle whose tools read deps.rosSetup forwards the configured value
+  AssertionError: … expected [ 'vision' ] to deeply equal []
+× reports the install root of the workspace the seam sources
+  AssertionError: expected [] to include '/tmp/dsh-runseam-doctor-81251/install'
+× reports every workspace of a multi-workspace chain, not just the head
+  AssertionError: expected [] to include '/tmp/dsh-runseam-chain-a-81251/install'
+Tests  3 failed (3)
+```
+
+`expected [] to include …` 与证明 1 里活进程的 `installDirs: []` **逐字同形**——即新测试复现的正是线上症状。
+
+**证明 3 ｜ API Key 来源语义撤掉后，3 个新测试立即失败（PR #34 的动机）**
+
+```text
+× reports an env-injected key as env and does NOT warn about plaintext
+  AssertionError: expected true to be false        # ← 就是线上那条 plaintext: true 的误报
+× reports a key read from the secrets file as secrets, not config
+  AssertionError: expected 'config' to be 'secrets'
+× prefers the secrets file when a ${VAR} reference is configured but the variable is empty
+  AssertionError: expected 'config' to be 'secrets'
+Tests  3 failed | 1 passed (4)
+```
+
+并且"用哪个 key"**未被改动**：`secrets.spec.ts` 把**旧表达式与新解析器并排求值**，在 6 组输入上逐一相等。
+
+**证明 4 ｜ PR #32 的"3/4"主张被精确复现**
+
+保留 `visionInstallDirs` 导出、仅回退其安装根计算 ⇒ `Tests 3 failed | 13 passed (16)`；
+整体回退到 `origin/main`（导出消失）⇒ `Tests 4 failed | 12 passed (16)`。PR 声称的 3/4 **与实现方式一一对应**，不是含糊表述。
+
+### 17.5 dsh-phoenix 持续更新 / 测试链路（step 4）——第十轮的请求已闭环，且本轮由它反查出缺陷
+
+**① 第十轮那次重启：已按硬期限执行（journal 原文，非推断）**
+
+```text
+09-22 04:18:09  [dsh-phoenix] restart requested (gen 19): plugin-change
+09-22 04:23:09  [dsh-phoenix] soft defer deadline reached; agent still busy — restart will be forced at the hard deadline (policy=auto)
+09-22 04:33:09  [dsh-phoenix] HARD defer deadline reached; forcing restart (policy=auto): plugin-change
+09-22 04:33:09  [dsh-phoenix] scheduling restart … systemctl --user stop dsh-web; sleep 8; systemctl --user start dsh-web
+09-22 04:33:09  [dsh-phoenix] restart cmd exit=0
+09-22 04:33:10  systemd: Stopped dsh-web.service
+09-22 04:33:18  systemd: Started dsh-web.service
+09-22 04:33:21  [dsh-phoenix] loaded (graceful restart + client reconnect + lifecycle)
+```
+
+⇒ 第十轮 §16.5 的"软告警 5 分钟 / 硬期限 15 分钟 / policy auto"**不是文档描述，而是可核对的执行记录**：
+请求、两次期限、强制、重启、重新加载，五个环节齐全。
+
+**② 第十轮 §16.8 第 1 条（唯一未闭环观测）：本轮实测确认**
+
+运行中的进程（启动于 `09-24 15:11:04`，晚于第十轮代码）返回：
+
+```text
+ros2_env_check → setup.missingSources: ["/tmp/vlm_ws/install/setup.bash"]
+                 note: "配置的 rosSetup 链中有 source 路径不存在：…；已剔除该段，改用其余 1 段（首个 source：lite_delivery_aio）。建议修正配置。"
+                 probe: { exitCode: 0, stderrTail: "" }
+```
+
+⇒ **自愈生效**：死段被剔除、被点名、`exitCode` 归零。第十轮预言的三个可观测变化中，"`missingSources` 出现 + 每次调用不再失败"两条**已闭环**；
+第三条（失败信息不再出现 `&&ros2`）属同一批构建，随下次重启复核（无害，仅影响措辞）。
+
+**③ 本轮起点的那次重启：不如实归因于 phoenix**
+
+`09-24 15:11:04` 还有一次 `dsh-web` 重启，但 journal 里**没有对应的 phoenix 行**，且形态不同——
+phoenix 的调度是 `stop; sleep 8; start`（04:33:10 → 04:33:18，8 秒间隔），而这次是
+`15:11:03 Stopping … → 15:11:04 Stopped → 15:11:04 Started`（**零间隔**）。⇒ 判定为**外部/人工的干净重启**，
+不是 phoenix 所为。其后果是：定时任务随即以 `overdue: true` 在 `15:11:11` 起跑（本会话）。
+**成因在 journal 里没有记录**，如实记为未解释项（§17.7 第 3 条）。
+
+**④ 本轮的末端动作**：改动已合入 `main` 并重建 `lib/`（`packages/vision/lib/secrets.js` 含
+`resolveApiKeyOrigin`、`lib/index.js` 含 `rosSetup: config.rosSetup`），随后按本 preset 的**文档化触发面**
+（`cordis_run`：动态插件激活）请求一次**非强制**优雅重启，由 phoenix 在会话空闲的安全点执行
+（`deferPolicy auto`；本轮不传 `force`）。
+
+- **重启后可观测的变化（预期）**：`ros2_vision_doctor` 的 `workspace.installDirs` 不再是 `[]`，
+  而应含 `lite_delivery_aio/install`；`apiKey.plaintext` 对当前"`${VLM_API_KEY}` 注入"的 key 应为 **`false`**
+  且不再出现"建议改用环境变量注入"的自相矛盾告警。
+- **诚实边界**：本会话仍在运行，**无法在同一进程内观测重启后的结果**；§17.8 第 1 条把它列为下次维护的第一复核项。
+
+### 17.6 安全扫描（step 5）——依赖 + 静态 + 本轮新增面，未发现新漏洞；并改正一处"自相矛盾的安全建议"
+
+**依赖漏洞**：
+
+- `pnpm audit --prod --audit-level high --registry=https://registry.npmjs.org/` → **No known vulnerabilities found**（exit 0）。
+- 本机默认源（`registry.npmmirror.com`）→ `ERR_PNPM_AUDIT_ENDPOINT_NOT_EXISTS`。**这不是"干净"，是"没查成"**，不可当作结论。
+  （CI 里的同一闸门在 GitHub runner 上默认即官方源 ⇒ CI 的闸门有效；只有本机需要显式指定。）
+
+**GitHub 侧扫描面（本轮新查）**：
+
+| 面 | 结果 | 含义 |
+| --- | --- | --- |
+| Dependabot alerts | `403 — Dependabot alerts are disabled for this repository` | **仓库未开启**，无 GH 侧依赖告警可依赖 |
+| Code scanning (CodeQL) | `404 — no analysis found` | **未配置**，无静态分析基线 |
+
+⇒ 结论：**本仓库唯一的依赖安全闸门是 CI 里那一条 `pnpm audit --prod --audit-level high`**。
+它本身有效，但覆盖面是"生产依赖 + 高/严重"；dev-only 工具链与中低危不在内。这一条已写入 §17.8 建议。
+
+**静态扫描**（`packages/*/src`，全部零命中）：`shell: true` **0**；`eval(` / `new Function(` **0**；
+硬编码密钥（`AIza…` / `sk-…`）**0**；`child_process` 的两处 `spawn` 全部走**argv 数组**（无 shell 解析）。
+
+**本轮新增面评审**：
+
+| 面 | 结论 |
+| --- | --- |
+| `rosSetup: config.rosSetup`（PR #33） | 只是把**配置里已有的字符串**转交给一个本就该读它的工具；不引入新的输入源、不进入任何 shell 拼接 |
+| `resolveApiKeyOrigin()`（PR #34） | **纯函数**，输入是配置文本 / 环境变量 / 密钥文件内容，**均非模型可控输入**；只判定来源，不改变"用哪个 key"（已用并排求值钉住） |
+| 医生报告新增 `apiKeySource` | 只在 `config` / `env` / `secrets` / `missing` 四个枚举间取值，**不含密钥值**（密钥从不回显，沿用既有约束） |
+| 新增测试文件是否随包发布 | 否：`packages/vision/package.json` 的 `files` 只含 `lib`/`cordis.patch.yml`/`vlm`/`offscreen`/`scripts`/`README.md`/`LICENSE` ⇒ 测试不进 tarball |
+| 既有防线回归 | 随测试全绿：`signal` 白名单、`isSafeProfileName` 路径穿越（4 组）、`shq()` 单引号包裹（含空格路径）、safety_monitor 走 argv 数组、`ros2_install` 的 installer 转义（第五轮修复） |
+
+**本轮的安全相关发现（已修，PR #34）**：doctor 的 API Key 报告**把已按推荐方式注入的 key 报成"明文"**，
+并在同一条告警里建议"改用环境变量注入（`${VLM_API_KEY}`）"——**建议的正是它已经在用的做法**；
+同时把**来自 0600 密钥文件的 key 报成 `config`**，把用户引去检查 profile 配置。
+修复后 `plaintext` 只表示"**字面量写在插件配置里**"（那份会被复制/分享/入库的文件），
+环境变量与密钥文件两种推荐方式不再误报。**判定为必要**：一条自相矛盾的安全建议会诱导用户
+把**已经正确**的注入方式改掉，属于"诊断把人带偏"，与第十轮 §16.2 ③ 同类。
+
+**结论：未发现新漏洞**；本轮改动收缩而非扩大攻击面（去掉一个写死的本机路径 + 改正一处误报的来源判定）。
+
+### 17.7 本轮发现（含仓库外的问题）
+
+1. **【流程·基础设施·重要·未修】** **上一轮的定时维护运行是被 30 分钟上限杀掉的**：
+   `run-6a1c0ed8`（`09-23 04:00`）`status=failed` / `"run drive failed: run timed out after 30 minutes"`，
+   其 session 正是留下 PR #32 的那次。任务历史显示这**不是个例**：近两周
+   `timed out after 30 minutes` 出现 4 次（09-14、09-16、09-22），`events is not iterable` 出现 5 次
+   （09-10、09-11、09-12、09-14、09-21）；能完整跑完的只有 09-03～09-06 那几次。
+   **对维护流程的直接含义**：长任务必须**先落地、再记录**——本轮据此把两个修复**各自独立合并**，
+   维护文档**最后写并立即推送**，这样即使会话在文档之后被超时杀掉，成果也已全部进入 `main`。
+   建议（需人工/宿主侧决策）：提高该类运行的时限，或在超时前提供落盘钩子。
+2. **【部署配置·仍未修·仓库外·高优先】** `~/.dsh/profiles/web/cordis.patch.yml` 的 5 处 `rosSetup`
+   仍以 `source /tmp/vlm_ws/install/setup.bash &&` 结尾，而 `/tmp/vlm_ws` **已不存在**；
+   同文件第 29 行注释写着"改用实际构建的交付工作区"——**注释改了、值没改**。
+   新代码已能自愈（本轮实测：剔除死段 + `note` 点名 + `probe.exitCode = 0`），故**不是当前故障**，
+   但每次调用都要多一次 `existsSync` 与一段告警噪声。本轮**未擅自修改**（仓库外 + 运行中的部署）。
+   建议人工执行（改完优雅重启）：把 5 处 `&& source /tmp/vlm_ws/install/setup.bash` 从各行删掉。
+3. **【本机·未解释】** `2026-09-24 15:11:04` 的 `dsh-web` 重启在 journal 中**没有成因记录**：
+   形态与 phoenix 的 `stop; sleep 8; start` 不同（零间隔），也不是 systemd 的 `Restart=on-failure`
+   （无 `Main process exited` / `Scheduled restart`）。其直接后果是**当天 04:00 的定时维护被跳过**，
+   随后以 `overdue: true` 在 15:11:11 补跑（即本会话）。**如实记为未解释**，建议下次维护顺带核对。
+4. **【文档·已修】** 第十轮的 §16.7 第 4 条（`docs/compatibility.md` 把 `/tmp/vlm_ws` 当"本机"位置）
+   已随 PR #32 更正，并补了"**colcon workspace 不要建在 `/tmp`**"的环境注意——这正是本次工作区消失的根因。
+5. **【固有限制·如实声明·不追踪】** `ros2_env_check` 的 `skillCatalogue` / `surface` / `missingSources`
+   等自述字段需要**重启后**才存在；本轮继续把它当**正向信号**使用（字段在不在 ⇒ 进程新旧）。
+6. **【时间口径】** 本节标题用**本地时间（CST）**，而 git / CI / journal / 任务历史的时间戳为 **UTC**：
+   本轮 `09-24 15:11 CST` = `09-24 07:11 UTC`；上一轮的 `09-23 04:00 CST` = `09-22 20:00 UTC`。
+
+### 17.8 结论与下一步建议
+
+- **交付**：PR **#32**（上一轮在途，验收后合并）、**#33**（运行缝接线 + 类不变量测试）、
+  **#34**（API Key 来源语义）全部 CI 绿并合入 `main`（`de7bdba`）；**open issue / open PR 归零**；
+  用例 **292 → 304**；README / README_CN / CHANGELOG 计数同步。
+- **线上价值**：① doctor 的安装根**终于**来自"命令缝真正 source 的那条链"，`built` 不再恒为 `false`；
+  ② API Key 报告不再把"已用环境变量注入"说成"明文"，也不再把它指向错误的来源——
+  这两条都是**"诊断说反话"**类缺陷，会直接把排查引向错误方向。
+- **末端动作**：改动已构建进 `lib/`，并按文档化触发面（`cordis_run`）请求**非强制**优雅重启；
+  由 phoenix 在会话空闲的安全点执行，客户端由 `/__dsh_health` 的 per-boot token 自行刷新。
+- **下次维护建议**：
+  1. **复核重启后的现场**（本轮唯一未闭环的观测）：`ros2_vision_doctor` 的 `workspace.installDirs`
+     应不再是 `[]`（应含 `lite_delivery_aio/install`）；`apiKey.plaintext` 对当前 `${VLM_API_KEY}` 注入应为 `false`，
+     且不应再出现"建议改用环境变量注入"的告警。
+  2. **改配置**（§17.7 第 2 条）：删掉 `cordis.patch.yml` 里 5 处 `/tmp/vlm_ws` 死段，然后优雅重启。
+     **这是连续第三轮被记为"仍未修"的仓库外项**，建议优先处理。
+  3. **盯住定时任务的可靠性**（§17.7 第 1 条）：近两周多数运行失败；在时限被提高之前，
+     维护流程一律遵循"**先落地、再记录**"（本轮范式：小 PR 各自合并 → 文档最后写并立即推送）。
+  4. 考虑开启 GitHub 侧扫描（Dependabot alerts 当前**关闭**、CodeQL **未配置**），
+     把 §17.6 的"唯一依赖闸门是 CI 那一条 audit"补成纵深防御。
+  5. 维持验收线：**推送前** `typecheck + test + build` 全绿、**推送后立刻开 PR 并等 CI 绿再合并**、
+     `pnpm audit` 必须带 `--registry=https://registry.npmjs.org`（本机）。
