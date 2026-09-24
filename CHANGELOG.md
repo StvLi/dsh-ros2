@@ -82,11 +82,11 @@ All notable changes to **dsh-ros2** are documented here. Format follows
   这句已是**假的现状**；改为"colcon 构建在**你自己的** workspace，由 `rosSetup` source，doctor 的安装根
   由该链派生"。同一文档新增一条环境注意：**colcon workspace 不要建在 `/tmp`**（会被清理），
   这正是一个 workspace 消失后把 `rosSetup` 变成死链的根因。
-- **工作区 vitest 用例 277 → 292 例**（第十轮 +8：common +6（整链校验 5 + 前缀拼接 1）、
+- **工作区 vitest 用例 277 → 295 例**（第十轮 +8：common +6（整链校验 5 + 前缀拼接 1）、
   core +2（诊断措辞与数据出口）；第十一轮 +7：common +3（`setupSourcePaths`）、
-  vision +4（doctor 安装根派生））。
+  vision +4（doctor 安装根派生）；第十二轮 +3：运行缝接线不变量）。
   分布：common 54 + core 131(130 过 +1 skip) + moveit 16 + profile 14 + safety 10 + vision 34 +
-  state 8 + dsh-ros2 25 = **292**。README / README_CN 开发章节同步校正为 292 例。
+  state 8 + dsh-ros2 28 = **295**。README / README_CN 开发章节同步校正为 295 例。
 - **`rosSetup` 改为整条 `&&` 链逐段校验**（旧实现只校验**第一段**）：链条 `source A && source B &&`
   在 `B` 已删除时，旧行为判定"配置正常"却让**每一次**调用都失败在 `B` 上（现场案例：`/tmp/vlm_ws`
   被删）。现在逐段 `existsSync`，并按情形处理：
@@ -133,6 +133,20 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 
 ### Fixed
 
+- **`ros2_vision_doctor` 的安装根派生在运行期拿不到配置的 `rosSetup`（接线缺口）**：上一轮把候选安装根改为
+  **从 `deps.rosSetup` 派生**，但 `packages/vision/src/index.ts` 组装 `VisionToolDeps` 时**没有把这个字段转交进去**
+  （core 在第十轮已转交，vision 漏了）。后果不是"少一个候选"，而是**派生永远看不到配置的链**：tool 回退到自动探测的
+  `/opt/ros/<distro>/setup.bash`，而 `/opt/ros/<distro>` 按设计**不是** colcon 安装空间，于是 `installDirs` 恒为 `[]`、
+  `built` **恒为 false**——正是 `ToolDeps.rosSetup` 文档注释警告的那种"报的是自动探测前缀、命令却按配置跑"的错位。
+  运行期实测（重启后的活进程）：`ros2_vision_doctor` 返回 `workspace.installDirs: []`，同一时刻 `ros2_env_check`
+  报的 `setup.prefix` 却是配置里那条 `lite_delivery_aio` 链 ⇒ **doctor 与命令缝在回答两个不同的环境**，
+  而"两者回答同一个已解析前缀"恰是上一轮那条修复自己声称的性质。
+  修复＝一行的转交，加一组**类不变量**测试 `packages/dsh-ros2/tests/run-seam-wiring.spec.ts`：
+  ①**静态**——凡在 `tools.ts` 里读 `deps.rosSetup` 的 bundle，其 `index.ts` 必须出现 `rosSetup:`（下个 bundle 漏传
+  即失败；本类缺陷已出现两次：core 第十轮、vision 第十一轮，故不再只钉单个事故）；②**行为**——用真实 Cordis
+  `Context` 挂载 vision bundle 并执行 doctor，断言安装根来自**配置的链**（多工作区链的两段都要在，且不得出现
+  `/opt/ros/<distro>/…`）。撤掉那一行后 3 项新测试**全部失败**，报错为
+  `expected [] to include '/tmp/dsh-runseam-…/install'`——与线上报告 `installDirs: []` 逐字同形。
 - **`ros2_vision_doctor` 探测一个写死的、早已不存在的安装根**：候选目录里硬编码了 `/tmp/vlm_ws/install`
   （一台历史本机的 colcon 工作区，目录已被删除），于是**每一份**报告都会列出一个不可能存在的构建位置。
   现在安装根**从运行缝真正 source 的环境派生**：`workspaceRoot/install` 加上 `rosSetup` 全链中每个
