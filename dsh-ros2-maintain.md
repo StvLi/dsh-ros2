@@ -2163,8 +2163,9 @@ Dependabot alerts + security updates 已开启，纵深防御补上了一层。
 > 另外本轮**如实记录一次自己的流程事故**（两个提交一度落到了 `main` 上，见 §19.3）与
 > **一次 CI 抓出、本地看不见的真实回归**（§19.4）——两者都不是"顺利"，但都是本轮的真实内容。
 > 结束：代码侧 `main = bc6abd8`（其后仅追加本文档的 `docs:` 提交）、
-> **1 open issue（本轮有意新开的 #40）** / **1 open PR**（**#42**，本轮新增的 `dependabot.yml` 生效后
-> **由 Dependabot 自动开出**，见 §19.7 第 6 条）；用例 **310 → 323**。
+> **1 open issue（本轮有意新开的 #40）** / **open PR 全部来自 Dependabot 且仍在增加**
+> （收尾时已到 **#42–#46**：本轮新增的 `dependabot.yml` 生效后**自动开出**，见 §19.7 第 6 条——
+> **这是配置生效的正常产物，不是未完成的交付**）；用例 **310 → 323**。
 
 ### 19.0 仓库快照（本轮起始/结束）
 
@@ -2172,7 +2173,7 @@ Dependabot alerts + security updates 已开启，纵深防御补上了一层。
 | --- | --- | --- |
 | 当前分支 | `main`（工作树干净） | `main` = **`bc6abd8`**（本地与 `origin/main` 一致） |
 | `main` | `f5cbebf`（第十三轮 docs） | `81c34ab`（#38）→ `1024df1`（#39）→ `bc6abd8`（#41） |
-| open issue / open PR | **0 / 0** | **1 / 1**（#40 是本轮**有意新开**的跟踪项；PR **#42** 是本轮新增的 `dependabot.yml` **生效后由 Dependabot 自动开出**的第一个 PR —— 见 §19.7 第 6 条） |
+| open issue / open PR | **0 / 0** | **1 / N（N 仍在增长）**——#40 是本轮**有意新开**的跟踪项；open PR **全部**由本轮新增的 `dependabot.yml` **自动开出**（收尾时 **#42–#46**，见 §19.7 第 6 条） |
 | vitest 用例 | 310（309 过 + 1 pty-skip） | **323**（322 过 + 1 pty-skip） |
 | sidecar selftest | 10 场景 | **11** 场景（新增 UDS 权限断言） |
 | 包数量 / 环境 | 9 包 · Node `v24.16.0` · pnpm `11.22.0` · vitest 4.1.11 | 同 |
@@ -2439,9 +2440,13 @@ Sep 26 04:19:40  [dsh-phoenix] restart requested (gen 22): plugin-change
    上一次升级（`618bdbe`）是手工提交的。已补 `dependabot.yml`（两生态 weekly）。
    **未采纳**"pin 到完整 commit SHA"：那是更强的姿态但维护成本不同量级，宜与自动化配套后再单独决定。
    **有效性已当场验证**：`dependabot.yml` 合入（`bc6abd8`，20:18 前后）后 **数分钟内**
-   Dependabot 就自动开出了第一个 PR —— **#42 `chore(deps): bump @deepseek-ai/cordis from 4.0.1 to 4.0.4`**
-   （`dependabot/npm_and_yarn/…`，20:19:51）。即配置**不只是"加了个文件"，而是真的产生了 PR 流**。
-   本轮**不代为合并** #42：依赖升级应由 CI 绿 + 人工过一眼后合入，这正是 §19.8 第 4 条要观察的内容。
+   Dependabot 就开始自动开 PR —— 收尾时已到 **#42–#46**（`@deepseek-ai/cordis` 4.0.1→4.0.4、
+   `vitest` 4.1.11→5.0.1、`@deepseek-ai/schemastery`、`@types/node`、`@deepseek-ai/dsh-skill`），
+   且**仍在继续**。即配置**不只是"加了个文件"，而是真的产生了 PR 流**。
+   本轮**不代为合并**这些 PR：依赖升级应由 CI 绿 + 人工过一眼后合入（其中 `vitest` 4→5 是大版本、
+   `@types/node` 24→26 可能牵动 `engines`），这正是 §19.8 第 4 条要观察的内容。
+   顺带说明：**"open PR 数"从本轮起不再是"0"这个静态值**，而是**由自动化持续产生的动态量**——
+   本文档后续不应再把"N open PR"当作"本轮交付是否干净的判据"。
 7. **【时间口径】** 本节标题用**本地时间（CST）**，git / CI / journal / 任务历史为 **UTC**：
    本轮 `09-26 04:00 CST` = `09-25 20:00 UTC`。
 
@@ -2451,8 +2456,9 @@ Sep 26 04:19:40  [dsh-phoenix] restart requested (gen 22): plugin-change
   全部 CI 绿（Node 22/24）并合入 `main`；3 个分支（本地+远端）已清理；
   **0 open PR（截至本轮 3 个 PR 合并完毕时）**；**1 open issue（#40，本轮有意新开）**；
   用例 **310 → 323**；sidecar selftest 10 → 11。
-  **补充（本轮末尾新增）**：`dependabot.yml` 一经合入，Dependabot 在数分钟内自动开出 **PR #42**，
-  因此**结束时 open PR = 1**——这是**本轮配置生效的正常产物**，不是未完成的交付（见 §19.7 第 6 条）。
+  **补充（本轮末尾新增）**：`dependabot.yml` 一经合入，Dependabot 在数分钟内开始自动开 PR
+  （收尾时已到 **#42–#46**，且仍在增加），因此**结束时的 open PR 数不再是 0，而是由自动化持续产生的动态量**
+  —— 这是**本轮配置生效的正常产物**，不是未完成的交付（见 §19.7 第 6 条）。
 - **线上价值**：① 一处**当前正在发生**的凭证暴露面（VLM Key 明文过网）从"静默健康"变为
   **上报并可告警**；② 插件自建的 IPC/状态对象不再继承 umask——其中包括**一个 sudo 进程的 stdin**
   与 **`/tmp` 里的可预测套接字**；③ 供应链从"只有告警"补到"**有版本更新**"。
