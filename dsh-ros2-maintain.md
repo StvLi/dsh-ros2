@@ -1,8 +1,8 @@
 # dsh-ros2 日常维护文档（Maintenance Log）
 
 > 仓库：`StvLi/dsh-ros2` · 本地代码：`/home/stvli/Desktop/embody_agent_ws/dsh-ros2`（git remote `git@github.com:StvLi/dsh-ros2.git`）
-> 维护日期：2026-09-22（最近一轮） · 维护者：DSH scheduled-run agent（StvLi 仓）
-> 维护轮次：第一轮 2026-09-03（§0–§7）；第二轮 2026-09-04（§8）；第三轮 2026-09-05（§9，安全修复）；第四轮 2026-09-05（§10，无 open issue → 安全检查 → 两项维护卫生修复）；第五轮 2026-09-06（§11，无 open issue → 安全检查 → 落地 `ros2_install` 注入修复）；第六轮 2026-09-11（§12，无 open issue → 安全检查 → 落地 `safety_monitor` / `zero_pose_semantics` 注入修复 + vitest 4 升级 + CI 最小权限）；第七轮 2026-09-13（§13，open issue #19 → journey skills + 组合不变量）；第八轮 2026-09-14（§14，3 个 open issue → #21 修复并真机复核、#22 落地但保留 open、#19 完成验收测量）；第九轮 2026-09-21（§15）：open issue #22 → 补齐"会话技能目录对账"（其唯一未实现项）+ 修复 `ros2_env_check` 的"报告 ≠ 执行"缺陷（第八轮存疑项的真因）+ 安全复测；**第十轮 2026-09-22（§16，本轮）：补齐第九轮"在途无 PR"的缺口（PR #27，CI 首跑即抓出"本地绿、CI 红"）→ 在运行中进程里验收并关闭 issue #22 → 定位并修复线上故障真因（`rosSetup` 只校验第一段）→ 3 个 PR 全部合入 main**。
+> 维护日期：2026-09-26（最近一轮） · 维护者：DSH scheduled-run agent（StvLi 仓）
+> 维护轮次：第一轮 2026-09-03（§0–§7）；第二轮 2026-09-04（§8）；第三轮 2026-09-05（§9，安全修复）；第四轮 2026-09-05（§10，无 open issue → 安全检查 → 两项维护卫生修复）；第五轮 2026-09-06（§11，无 open issue → 安全检查 → 落地 `ros2_install` 注入修复）；第六轮 2026-09-11（§12，无 open issue → 安全检查 → 落地 `safety_monitor` / `zero_pose_semantics` 注入修复 + vitest 4 升级 + CI 最小权限）；第七轮 2026-09-13（§13，open issue #19 → journey skills + 组合不变量）；第八轮 2026-09-14（§14，3 个 open issue → #21 修复并真机复核、#22 落地但保留 open、#19 完成验收测量）；第九轮 2026-09-21（§15）：open issue #22 → 补齐"会话技能目录对账"（其唯一未实现项）+ 修复 `ros2_env_check` 的"报告 ≠ 执行"缺陷（第八轮存疑项的真因）+ 安全复测；**第十轮 2026-09-22（§16，本轮）：补齐第九轮"在途无 PR"的缺口（PR #27，CI 首跑即抓出"本地绿、CI 红"）→ 在运行中进程里验收并关闭 issue #22 → 定位并修复线上故障真因（`rosSetup` 只校验第一段）→ 3 个 PR 全部合入 main**；第十二轮 2026-09-24（§17，收尾超时遗留的在途 PR #32 → 实测第十轮的重启请求已按硬期限落地 → 修复"配置没送到 doctor"的接线缺口 + API Key 来源语义）；第十三轮 2026-09-25（§18，0 open issue / 0 open PR → 安全扫描发现并落地 3 处真实缺陷 = PTY 会话 id 路径穿越 · 发布物携带 `__pycache__` 字节码 · 安装器选项注入，并开启 Dependabot 告警）；**第十四轮 2026-09-26（§19，本轮）：0/0 → 先闭环第十三轮唯一的未闭环观测（gen-21 重启逐字命中），再落地 3 个 PR = 明文传输的 VLM API Key 可见化 · 插件自建 IPC 对象权限收紧（PTY 会话文件 / sidecar UDS / 安装器脚本）· Dependabot 版本更新；并把跨五轮未处理的部署配置项升级为 issue #40**。
 
 本文件记录 dsh-ros2 插件的一次完整日常维护循环：**查 issue → 评估建议 → 分支开发 → 验证 → 推送 → 交付维护文档**。每次维护在下方追加一节。
 
@@ -2150,3 +2150,306 @@ Dependabot alerts + security updates 已开启，纵深防御补上了一层。
      （本轮范式：3 个小 PR 各自合并 → 文档最后写并立即推送）。
   5. 维持验收线：**推送前** `typecheck + test + build` 全绿、**推送后立刻开 PR 并等 CI 绿再合并**、
      `pnpm audit` 必须带 `--registry=https://registry.npmjs.org`（本机）。
+
+---
+
+## 19. 维护记录（2026-09-26 04:00 CST / UTC 2026-09-25 20:00 · 第十四轮：0 open issue / 0 open PR → 走"无 issue → step 5 安全扫描"；先闭环第十三轮唯一的未闭环观测（gen-21），再落地 3 个 PR = 明文传输的 VLM API Key 可见化 · 插件自建 IPC 对象权限收紧（PTY 会话文件 / sidecar UDS / 抓取到的安装器脚本）· Dependabot 版本更新；并把跨五轮未处理的部署配置项升级为 issue #40）
+
+> 本轮结论：起始 **0 open issue / 0 open PR**、`main` 与 `origin/main` 一致、工作树干净
+> ⇒ 按 step 1 的分支条件**干净地走 step 5**，与第十/十二轮那种"在途交付"不同。
+> 与第十三轮的关键差别在**看问题的角度**：第十三轮在同一批文件里发现了"会话 id 可以**逃出**会话目录"
+> （路径穿越），本轮在**同样的对象**上换了一个维度——"插件**自己创建**的 IPC/状态对象**权限有多宽**"——
+> 结果 4 处权限都由 umask 派生，其中 1 处**世界可写**、而它正是**一个 sudo 进程的 stdin**。
+> 另外本轮**如实记录一次自己的流程事故**（两个提交一度落到了 `main` 上，见 §19.3）与
+> **一次 CI 抓出、本地看不见的真实回归**（§19.4）——两者都不是"顺利"，但都是本轮的真实内容。
+> 结束：`main = bc6abd8`、**1 open issue（本轮有意新开的 #40）** / **0 open PR**；用例 **310 → 323**。
+
+### 19.0 仓库快照（本轮起始/结束）
+
+| 项 | 起始 | 结束 |
+| --- | --- | --- |
+| 当前分支 | `main`（工作树干净） | `main` = **`bc6abd8`**（本地与 `origin/main` 一致） |
+| `main` | `f5cbebf`（第十三轮 docs） | `81c34ab`（#38）→ `1024df1`（#39）→ `bc6abd8`（#41） |
+| open issue / open PR | **0 / 0** | **1 / 0**（#40 是**本轮按第十三轮自己的建议**新开的跟踪项，见 §19.1） |
+| vitest 用例 | 310（309 过 + 1 pty-skip） | **323**（322 过 + 1 pty-skip） |
+| sidecar selftest | 10 场景 | **11** 场景（新增 UDS 权限断言） |
+| 包数量 / 环境 | 9 包 · Node `v24.16.0` · pnpm `11.22.0` · vitest 4.1.11 | 同 |
+| 运行中的 dsh | 启动于 **2026-09-25 04:25:40 CST**（= 第十三轮 gen-21 重启的产物，MainPID 1698096） | 同进程；本轮改动已构建进 `lib/`，gen-22 重启待执行（§19.5） |
+| GitHub 侧扫描 | Dependabot alerts 已开（0 告警）、secret scanning + push protection 已开、CodeQL 未配置、**无 `dependabot.yml`** | 前三项不变；**新增 `.github/dependabot.yml`**（#41） |
+
+### 19.1 Issue 检查（step 1）——0 / 0，且**先闭环上一轮的预言**
+
+```text
+gh issue list --state open                                     → 0
+gh api "repos/StvLi/dsh-ros2/issues?state=open" --jq 'length'   → 0
+gh pr    list --state open                                     → 0
+git rev-list --left-right --count main...origin/main           → 0  0
+git status --porcelain                                         → （空）
+```
+
+第十三轮的 §18.8 把两条"仓库外"事项列入"下次维护建议"。本轮逐条处理，**结论是：一条闭环、一条升级**：
+
+| 第十三轮遗留项 | 本轮处置 | 结果 |
+| --- | --- | --- |
+| 复核 **gen-21 重启后**的现场（唯一未闭环观测） | 读 journal + 实测运行时 | ✅ **闭环**（§19.5）：journal 五环节齐全，且预言的两个可观测变化**逐字命中** |
+| `~/.dsh/profiles/web/cordis.patch.yml` 的 5 处 `/tmp/vlm_ws` 死段（已连续四轮"仍未修"） | 按第十三轮自己的建议**升级为 issue** | ✅ **已开 issue #40**（§19.7 第 1 条）；配置本身**仍未改动**，理由见该 issue |
+
+⇒ 本轮**结束时有 1 个 open issue**，但这是**有意的状态**，不是漏判：`#40` 记录的是一个
+**仓库外**、需要**运维决定**才能改的运行中部署配置，把它留在 issue 列表里正是为了让它进入
+"下次维护 step 1 → 有 issue → 转 step 2"的正规回路，而不是继续只躺在本文档里。
+
+### 19.2 建议评估（step 2）——本轮无外部 issue，故评估**自己提出的** 5 条
+
+本轮无 open issue，step 2 没有外部建议可评。沿用第十二轮 §17.2 的做法：对**自己提出的**
+每一条主张**逐条核验其真实性**，而不是只写结论——核查方式与判定如下。
+
+| # | 本轮主张 | 核验方式（实证，非推断） | 判定 |
+| --- | --- | --- | --- |
+| F1 | VLM API Key 会以**明文**经过网络，且 doctor 完全没提这件事 | ① 读 `vision.ts` 确认 openai provider 用 `Authorization: Bearer`、gemini 用 `?key=`；② **实跑** `ros2_vision_doctor` 取到线上 `apiKey.baseUrl`；③ 确认该 URL 是非回环 `http://`；④ 全仓库 grep `https\|cleartext\|tls` 确认**没有任何** scheme 检查 | ✅ 真实且**当前正在发生** |
+| F2 | PTY 会话目录/文件权限由 umask 派生，`<sid>.in` 可被同组写 | 用 **`origin/main` 的原版 helper** 在 `umask 000` 下**实跑** `start`，`stat` 结果 | ✅ 真实（`-rw-rw-rw-`，**世界可写**） |
+| F3 | sidecar 控制面 UDS 权限同样由 umask 派生，而协议**无鉴权** | 读 `server.py`（`bind()` 无 chmod、协议无 auth）+ 实测 AF_UNIX 建socket 的模式（本机 umask 0002 → `775`）+ 确认其用**写权限**判定 `connect()` | ✅ 真实（本地可利用面窄，见下） |
+| F4 | `ros2_install` 抓到的安装器脚本组可写，而它**会被执行** | 读 `buildRos2InstallDownloadCommand`：`chmod +x` 不限制 group/other 读 | ✅ 真实（同类，低危） |
+| H1 | Dependabot alerts 已开，但**没有版本更新**（缺 `dependabot.yml`） | `find .github -type f` → 只有 `workflows/ci.yml`；workflow 里 Actions 用的是**可变大版本 tag** | ✅ 真实（加固项） |
+
+**诚实定级（不抬高也不淡化）**：F2/F3/F4 都**依赖 umask**、且都是**本机/同组**范围，
+在当前这台单用户桌面上的实际影响**很小**——所以本轮**没有**把它们写成"高危漏洞"。
+之所以仍然修，是因为受影响的对象是**一个 sudo 进程的 stdin** 和 **世界可写 `/tmp` 里的可预测路径**，
+而且"权限取决于 umask"恰恰是那种**会悄悄失效**的保证。F1 是**唯一一条当前正在发生**的
+凭证暴露面，因此单独立 PR（#38）。
+
+### 19.3 开发管理（git · step 3）
+
+| PR | 分支名 | 提交 | 类型 | 说明 |
+| --- | --- | --- | --- | --- |
+| **#38** | `fix/vision-cleartext-key` | `81c34ab`（squash） | `fix(vision)` | 新增 `classifyVisionTransport()`；doctor 报 `apiKey.transport` 并对 http+非回环**告警** |
+| **#39** | `fix/ipc-object-permissions` | `1024df1`（squash，含 2 个提交） | `fix(core)` + `fix(sidecar)` | PTY 目录/文件 0700/0600 + 安装器脚本 `umask 077`/`chmod 700`；sidecar UDS 0600 |
+| **#41** | `ci/dependabot-version-updates` | `bc6abd8`（squash） | `ci(deps)` | 新增 `.github/dependabot.yml`（github-actions + npm，weekly） |
+
+- 三个分支均以语义前缀新开（`fix/...` = 修复、`ci/...` = 构建/CI），均 `off main`；每个 PR 单独 CI。
+- **#39 为什么是两个提交**：#39 同时动 `core`（PTY + 安装器）与 `sidecar`（UDS）。两者是**两个包、
+  两个不同的 IPC 对象**，拆成两个 `fix(<pkg>)` 提交能让 `git log`/`bisect` 按包定位；这**不是**
+  切分失误，而是有意的（对比第十三轮 §18.3 把 `common`+`core` **合并**成一个提交，理由同样写在正文里）。
+- **F1 为什么只告警、不阻断**：gateway 地址属于**运维的部署**，静默拒发会**破坏一个可用配置**
+  而不是描述它。这与仓库既有 `apiKeyPlaintext` 告警同一形状；修法写在告警正文里（换 https 或改回环）。
+
+**本轮如实记录一次流程事故：两个提交一度落到了 `main` 上。**
+
+- 经过：`gh pr merge 38` 会**自动把本地切回 `main`**。执行它时，#39 的改动**还是未提交的工作树修改**；
+  `git checkout main` 把它们带了过去，`git pull --ff-only` 成功，随后 `git commit` 就把
+  `fix(core)` / `fix(sidecar)` **提交到了本地 `main`**。
+- 影响面：**远端 `main` 未被推送**（本地 `main` 仅 "ahead 2"），因此**没有绕过 PR/CI**；
+  但当时 `git push origin fix/ipc-object-permissions` 推的是**仍指向 `f5cbebf` 的旧分支**，
+  于是 `gh pr create` 报 `No commits between main and fix/ipc-object-permissions`——**这个错误暴露了事故**。
+- 修正：`git branch -f fix/ipc-object-permissions 44d4e94`（把提交归位到分支）→
+  `git branch -f main origin/main`（`main` 退回远端）→ 重新 push（快进）→ 开 PR #39。
+- 教训：`gh pr merge` 会切分支，**合并前必须先提交或 stash**；并且"`gh pr create` 报 no commits"
+  应当**先怀疑分支/提交位置**，而不是怀疑分支名。
+
+### 19.4 本地验收 + 一次"本地绿、CI 红"的真实回归（含一个本地**结构性盲区**）
+
+**#39 的首跑 CI 红了**，而本地三件套全绿：
+
+```text
+FAIL tests/tools.spec.ts > ros2_install interactive flow (mock installer, no network)
+     > start -> send -> status -> stop drives the installer menus via PTY
+AssertionError: expected '' to contain '安装完成'
+```
+
+- **真因（我自己引入的）**：`open_private()` 的第一版对 append 模式也加了 `O_TRUNC`。
+  而 `open(path, "ab")` **不截断**。于是每次 `send` 都把 `.in` 清空——而 daemon **持有自己的读偏移**，
+  截断后写入的数据可能落在该偏移**之后**、**永远读不到**；安装器因此走不到 `安装完成`。
+- **为什么本地是绿的（这是本轮最有价值的一条结构事实）**：
+
+  ```text
+  $ python3 -c 'import pty; pty.openpty()'
+  OSError: out of pty devices
+  $ mount | grep devpts
+  devpts on /dev/pts type devpts (rw,nosuid,noexec,relatime,gid=5,mode=620,ptmxmode=000)
+  ```
+
+  本机 `devpts` 以 **`ptmxmode=000`** 挂载 ⇒ `ptyUsable = false` ⇒ 用例里的
+  `it.skipIf(!ptyUsable)` 让**整条 PTY 交互链被 skip**（本地 `135 passed | 1 skipped`），
+  而 CI（ubuntu runner）能分配 pty，所以**CI 是这条链唯一的大门**。
+- **修正**：恢复 per-mode 语义（`"a"` → `O_APPEND`，不截断；`"w"` → `O_TRUNC`），
+  **并且补一个不需要 pty 的回归测试**：直接驱动 `open_private()`，断言 append **保留**内容、
+  `"w"` **仍然**截断、文件仍是 `0600`。这样**同一类回归在这台无法分配 pty 的机器上也会红**。
+  该缺陷由此从"只有 CI 能看见"变成"本地也能看见"。
+
+最终验收（`main`，包含 #38+#39，自 `rm -rf packages/*/lib` 起）：
+
+```bash
+cd /home/stvli/Desktop/embody_agent_ws/dsh-ros2
+rm -rf packages/*/lib            # 复刻 CI 的"干净 clone"起点
+CI=true pnpm run typecheck       # 9 包 tsc --noEmit 全部 Done（exit 0）
+CI=true pnpm run test            # 323 例（322 过 + 1 pty-skip）（exit 0）
+CI=true pnpm run build           # 全部 Done（exit 0）
+```
+
+**用例分布（实测）**：common **57** + core **137**（136 过 + 1 skip）+ moveit 16 + profile 14 +
+safety 10 + vision **53** + state 8 + dsh-ros2 28 = **323**；另 sidecar selftest **11 场景**（SELFTEST PASSED）。
+第十三轮 310 → 本轮 **+13**（vision +10：7 条 transport 纯函数 + 3 条 doctor 传输面；
+core +3：PTY 权限模式、append 语义回归、安装器脚本模式）。
+
+### 19.5 dsh-phoenix 持续更新 / 测试链路（step 4）——第十三轮的未闭环观测**逐字命中**，并请求 gen-22
+
+**① 第十三轮 §18.8 第 1 条（其唯一未闭环观测）：已闭环 ✅**
+
+第十三轮在 `04:13:27` 登记了 `gen 21` 重启请求（硬期限 ≈ `04:25:27`），但**无法在同一进程内观测结果**。
+本轮起点进程启动于 **2026-09-25 04:25:40 CST**（MainPID 1698096）——**正是 gen-21 的产物**：
+
+```text
+Sep 25 04:13:24  [dsh-phoenix] cordis tool: cordis_run
+Sep 25 04:13:27  [dsh-phoenix] restart requested (gen 21): plugin-change
+Sep 25 04:18:27  [dsh-phoenix] soft defer deadline reached; agent still busy —
+                  restart will be forced at the hard deadline (policy=auto)
+Sep 25 04:25:27  [dsh-phoenix] agent idle; executing deferred restart (gen 21)
+Sep 25 04:25:27  [dsh-phoenix] scheduling restart (plugin-change, gen 21): systemd-run … stop; sleep 8; start
+Sep 25 04:25:27  [dsh-phoenix] restart cmd exit=0
+Sep 25 04:25:32  systemd: Stopped dsh-web.service
+Sep 25 04:25:40  systemd: Started dsh-web.service
+Sep 25 04:25:42  [dsh-phoenix] loaded (graceful restart + client reconnect + lifecycle)
+```
+
+⇒ 与 gen-19/gen-20 **同一套生命周期**（软告警 5 分钟 → 硬期限前执行 → 停 8 秒 → 起 → loaded），
+**五环节齐全**。第十三轮预言的两个可观测变化本轮**实测命中**：
+
+```text
+ros2_install action=send session="../../victim"
+  → { ok:false, code:"INVALID_SESSION", message:"非法会话 id ../../victim：只允许字母/数字/._-…" }
+     # 第十三轮 PR #35 的修复在活进程里生效；且它不再触碰文件系统（第十三轮证明过 before/after）
+
+ros2_vision_doctor → workspace.installDirs: ["/home/stvli/lite_delivery_aio/install"]  # 第十二轮是 []
+                     apiKey: { source:"secrets", keyConfigured:true, plaintext:false }  # 不再误报
+ros2_env_check     → bundles.stale:false · drift 全 false · totalTools 81 · totalSkills 9
+                     skillCatalogue.complete:true · missing:[]        # 正向信号齐全
+                     setup.missingSources:["/tmp/vlm_ws/install/setup.bash"] · probe.exitCode:0  # 自愈仍有效
+```
+
+**② 本轮末端动作：请求 gen-22 优雅重启**
+
+本轮 3 个 PR 已合入 `main` 并重建 `lib/`（`pnpm run build` exit 0），随后按本 preset 的
+**文档化触发面**激活一个**惰性**动态包（`apply()` 空实现：不注册工具/事件/服务/UI，
+唯一作用就是"让 `cordis_run` 发生"）⇒ phoenix 会登记第 22 代重启请求。
+
+- **重启后可观测的变化（预期）**：`ros2_vision_doctor` 的 `apiKey.transport` 字段**新出现**，
+  且对本机当前配置（`http://121.9.219.138:8888/v1`）应**报 `cleartext: true` 并带告警**——
+  这是本轮唯一能**在同一会话重启后直接验证**的运行时变化，已列为 §19.8 第 1 条。
+- **诚实边界**：F2/F3/F4（权限类）**在活进程里不可观测**——它们影响的是**新创建**的文件/套接字，
+  而本轮没有新建 PTY 会话（`action=start` 需审批，且本机 ROS2 已安装 ⇒ 直接 `already-installed`）。
+  其证据是**真实 helper 的 before/after 实测**（§19.6）与**测试断言**，这一点不夸大。
+
+### 19.6 安全扫描（step 5）
+
+**依赖漏洞**：
+
+- `pnpm audit --prod --audit-level high --registry=https://registry.npmjs.org/` → **No known vulnerabilities found**（exit 0）。
+- 本机默认源（`registry.npmmirror.com`）→ `ERR_PNPM_AUDIT_ENDPOINT_NOT_EXISTS`。**这不是"干净"，是"没查成"**，
+  不可当作结论；CI 在 GitHub runner 上默认即官方源 ⇒ CI 闸门有效。沿用第八/十/十二/十三轮同一结论。
+
+**GitHub 侧扫描面（本轮重查）**：
+
+| 面 | 本轮结果 | 与第十三轮对比 |
+| --- | --- | --- |
+| Dependabot alerts | **已开启**（`GET /vulnerability-alerts` → `204`），开放告警 **0** | 保持（第十三轮开启） |
+| Dependabot security updates | `enabled: true`, `paused: false` | 保持 |
+| **Dependabot 版本更新** | 第十三轮为**无**（`.github/` 只有 `workflows/ci.yml`） | **本轮补上**（#41 新增 `dependabot.yml`，两生态 weekly） |
+| Secret scanning | **enabled**，开放告警 **0** | 保持 |
+| Secret scanning push protection | **enabled** | 保持 |
+| `secret_scanning_non_provider_patterns` / `validity_checks` | `disabled` / `disabled` | 未改动（非阻塞项） |
+| Code scanning (CodeQL) | **`404 — no analysis found`** | 未改动；见 §19.8 第 3 条 |
+
+**静态扫描**（本轮覆盖面**扩大**到第十三轮未列的目录）：
+
+| 面 | 结果 |
+| --- | --- |
+| `eval(` / `new Function` / `vm.` | **0** |
+| `shell: true` / `execSync` | **0** |
+| `child_process.exec(` 命中 | 全部是 `RegExp.prototype.exec`（逐处核对） |
+| `execFile` / `spawn` | 全部走 **argv 数组**（`runner.ts:37/395`、`core/tools.ts:177`、`gui.ts:364`） |
+| `bash -lc` 的 4 个调用点 | ① `runner.ts:275`：`cmd` 由 `args.map(shq)` 逐参拼装；② `gui.ts`：**常量模板** + 变量经 `env`（`SCREENSHOT_PATH`/`SCREENSHOT_CROP`）传入；③ `core/tools.ts` probe：**纯常量字符串**；④ `process_cleanup`：`bracket` 自带 `'` → `'\''` 转义且整体单引号包裹，`signal` 先过 `KILL_SIGNAL_RE` 再 `shq()` |
+| Python `shell=True` / `os.system` / `pickle` / `yaml.load` | **0**——本轮覆盖面**新增** `packages/sidecar/sidecar/**`、`packages/safety/safety/**`、`packages/vision/vlm/**`（第十三轮只扫了 `packages/*/scripts`） |
+| Python `subprocess.*` | 全部 **argv 数组**（含 `safety_monitor` 的 `["timeout", …, "ros2","topic","echo", topic, "--once"]`、`image_snapshot.py` 的 `["ffmpeg","-f","v4l2",…]`） |
+| 硬编码密钥（工作树） | **0**（`sk-…` / `AIza…` / `ghp_…` / `xox…` / `BEGIN PRIVATE KEY`） |
+| 硬编码密钥（**全 git 历史、全分支所有 blob**） | **0**（逐 blob 扫描，实测 `total blobs with secret-like content: 0`） |
+| 包 `lifecycle` 脚本 | **9 个包 + root 全部 none**（无安装期执行面） |
+| `.gitignore` | 覆盖 `secrets.json` / `*.secrets.json` / `.dsh-ros2/` / `.env` / `lib/` / `node_modules/` / `__pycache__/` |
+| 密钥文件处置 | `~/.dsh-ros2/secrets.json`：mode **`600`**、**仓库外**（实测 `readlink -f` 不在仓库内）、不在 `files` 白名单；`ros2_vision_set_key` 返回体为 `{stored, source, path, mode, hint}`——**只回 mode，从不回显密钥** |
+
+**本轮新增面的评审（自己新引入的代码）**：
+
+| 面 | 结论 |
+| --- | --- |
+| `classifyVisionTransport()`（#38） | **纯函数、全定义域**（空/畸形 URL 返回"无 scheme、无风险"而非抛错——doctor 不能因坏配置而失败）；回环判定含整个 `127.0.0.0/8` 与 `[::1]`；**只读**，不改变任何请求行为 |
+| doctor 的 transport 告警（#38） | 只**新增**一个数据字段与一条 `warnings` 条目；**不改**调用路径、不改失败语义 |
+| `ensure_private_dir()` / `open_private()`（#39） | **收紧**：只改新创建对象的 mode；**不改**读写内容（append 语义已按 `open()` 逐 mode 对齐并补测试） |
+| 安装器 `umask 077` + `chmod 700`（#39） | **收紧**：脚本仍可执行（同 uid），`--` 终止选项解析的既有保证不变；既有 quoting 测试**无需改动仍全绿** |
+| sidecar UDS `chmod 0600`（#39） | **收紧**：best-effort（OSError 忽略），平台不支持 chmod 时服务器照常工作 |
+| `.github/dependabot.yml`（#41） | **只增不改**：Dependabot **只开 PR**，每个 PR 仍须过同一条 CI（typecheck+test+build+发布面闸门）才能进 `main`，**不新增**任何绕过人工审查的路径；`permissions: contents: read` 不变 |
+| 既有防线回归 | 随测试全绿：`isSafePathComponent`/`safe_name()` 穿越用例、`ros2_interface_create` 的 `PATH_ESCAPE`、`shq()` 单引号包裹、safety_monitor argv 数组、PTY 会话 id 双层守卫 |
+
+### 19.7 本轮发现（含仓库外的问题）
+
+1. **【仓库外·已升级为 issue #40·仍未改】** `~/.dsh/profiles/web/cordis.patch.yml` 第 33/37/41/45/49 行
+   仍以 `&& source /tmp/vlm_ws/install/setup.bash` 结尾，而 `/tmp/vlm_ws` **已不存在**
+   （第 29 行注释写着"`/tmp/vlm_ws` 已删除，改用实际构建的交付工作区"——**注释改了、5 个值没改**）。
+   **本轮不再只写进文档**（这已是连续第五轮）：按第十三轮 §18.8 第 2 条自己的建议，
+   **升级为 issue #40**，附上实测证据与一行修法，让它在 issue 列表里被 step 1 捡起。
+   代价仍只是每次调用多一次 `existsSync` 与一段告警噪声（自愈本轮**再次实测有效**：
+   `missingSources` 有值、`probe.exitCode = 0`、`note` 点名），**不是当前故障**。
+   **本轮仍不擅自修改**，理由与该 issue 正文一致：文件在**仓库外**、属于**运行中的部署**、
+   改动需**重启**才生效，而本轮被要求维护的是**仓库**。
+2. **【安全·已修·真实且正在发生（#38）】** **VLM API Key 明文过网**。openai provider 用
+   `Authorization: Bearer <key>`、gemini 用 `?key=`，而线上 `vision.baseUrl` 是
+   **`http://121.9.219.138:8888/v1`（非回环、公开地址）**⇒ 每次 `ros2_vision_describe` /
+   `ros2_vision_analyze` 都把密钥交给路径上的任何中间设备；而 doctor 把该网关报成
+   "reachable / HTTP 200"的**健康**状态，**没有任何一处**看过 scheme。
+   **这条是本轮最重要的发现**：它不在任何 issue 里，是安全扫描自己撞见的，且**不是理论问题**。
+3. **【安全·已修·umask 派生（#39）】** **插件自建的 IPC/状态对象权限过宽**，一处**世界可写**：
+   - **PTY 会话文件**：`<sid>.in` 是**被驱动进程的 stdin**（此流程 = 带 sudo 的鱼香ROS安装器）。
+     用 `origin/main` 原版 helper 在 `umask 000` 下实跑：`drwxrwxrwx`（目录）与
+     `-rw-rw-rw-`（`.in`/`.meta`）⇒ 修后 **0700 / 0600**。
+   - **sidecar 控制面 UDS**：`bind()` 的 mode 由 umask 派生，默认路径 `/tmp/dsh-ros2-sidecar.sock`
+     在**世界可写目录**；AF_UNIX 以**写权限**判定 `connect()`，而协议**无鉴权** ⇒ 同组用户可读语义缓存。修后 **0600**。
+   - **抓取到的安装器脚本**：`chmod +x` 不限制 group/other ⇒ 改为 `umask 077` + `chmod 700`；
+     该脚本**会被执行**，组可写即"取回与执行之间可被换掉"的窗口。
+   **诚实定级**：三者都**依赖 umask、且是本机/同组范围**，单用户桌面上影响很小 ⇒ 记为**加固**，
+   不记为"活漏洞"。
+4. **【流程·自曝·已修正】** **一次分支/提交位置事故**（§19.3）：`gh pr merge` 自动切回 `main` 时，
+   #39 的改动尚未提交而**随之落到 `main`**。**远端未被推送、未绕过 PR/CI**；
+   由 `gh pr create` 报 `No commits between …` 暴露，已用 `git branch -f` 归位并重开 PR。
+5. **【本地盲区·已补测试】** **本机无法验证 PTY 交互链**：`devpts` 以 `ptmxmode=000` 挂载
+   ⇒ `ptyUsable=false` ⇒ 整条用例在本机 skip，**CI 是唯一大门**。这正是 #39 首跑"本地绿、CI 红"的成因。
+   已补一条**不需要 pty** 的回归测试（直接驱动 `open_private()`），使同类回归本机也能红。
+   **这是本轮新增的结构性认知**：今后的验收线不能默认"本地全绿 = 全部被覆盖"。
+6. **【供应链·已修（#41）】** Dependabot **告警**已开但**版本更新**未开（缺 `dependabot.yml`）；
+   且 workflow 里 Actions 用的是**可变大版本 tag**（`actions/checkout@v7` 等），
+   上一次升级（`618bdbe`）是手工提交的。已补 `dependabot.yml`（两生态 weekly）。
+   **未采纳**"pin 到完整 commit SHA"：那是更强的姿态但维护成本不同量级，宜与自动化配套后再单独决定。
+7. **【时间口径】** 本节标题用**本地时间（CST）**，git / CI / journal / 任务历史为 **UTC**：
+   本轮 `09-26 04:00 CST` = `09-25 20:00 UTC`。
+
+### 19.8 结论与下一步建议
+
+- **交付**：PR **#38**（明文密钥可见化）、**#39**（IPC 对象权限）、**#41**（Dependabot 版本更新）
+  全部 CI 绿（Node 22/24）并合入 `main`；3 个分支（本地+远端）已清理；
+  **0 open PR**；**1 open issue（#40，本轮有意新开）**；用例 **310 → 323**；sidecar selftest 10 → 11。
+- **线上价值**：① 一处**当前正在发生**的凭证暴露面（VLM Key 明文过网）从"静默健康"变为
+  **上报并可告警**；② 插件自建的 IPC/状态对象不再继承 umask——其中包括**一个 sudo 进程的 stdin**
+  与 **`/tmp` 里的可预测套接字**；③ 供应链从"只有告警"补到"**有版本更新**"。
+- **末端动作**：改动已构建进 `lib/`，并按文档化触发面激活惰性动态包，请求 phoenix 的 **gen-22** 优雅重启。
+- **下次维护建议**：
+  1. **复核 gen-22 重启后的现场**（本轮唯一可闭环的运行时观测）：确认 `ros2_vision_doctor`
+     新出现 `apiKey.transport`，且对本机配置报 **`cleartext: true` + 告警**（§19.5）。
+  2. **处理 issue #40**（部署配置的 5 处 `/tmp/vlm_ws` 死段）：这是唯一一条**已经跨五轮**的事项，
+     本轮已把它从"文档备注"升级为 **issue**，因此它会自动进入下次 step 1 的判定——
+     **要么修（一行 ×5 + 优雅重启），要么明确以"不改"关闭**，不要再悬着。
+  3. **考虑配置 CodeQL**（第二轮提出）：Dependabot 两半（告警 + 版本更新）现已齐全，
+     但**静态分析仍无基线**；本仓库 TS + Python 混合，值得给 `packages/*/src` 与
+     `packages/*/scripts` 建一条 code scanning 工作流。
+  4. **`dependabot.yml` 生效后观察首批 PR**：确认两个生态都能开 PR、且 `commit-message.prefix`
+     符合本仓库的 `ci:` / `chore(deps):` 约定；若 pnpm workspace 解析有问题，改为按包目录列出。
+  5. **维持验收线（并按本轮第 5 条**扩展认知**）**：`pnpm audit` 必须带
+     `--registry=https://registry.npmjs.org`（本机）；**"本地全绿"≠"全部被覆盖"**——
+     凡涉及 PTY/交互路径的改动，**本地 skip 是常态，必须以 CI 为准**；
+     推送前 `typecheck + test + build`、推送后**立刻开 PR 并等 CI 绿再合并**；
+     合并前**先提交或 stash**（§19.3 的教训）。
