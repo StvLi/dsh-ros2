@@ -52,7 +52,7 @@
     "dsh-ros2-moveit": "workspace:^0.1.0",
     "dsh-ros2-safety": "workspace:^0.1.0",
     "dsh-ros2-vision": "workspace:^0.1.0",
-    "@deepseek-ai/schemastery": "^3.18.1"
+    "@deepseek-ai/schemastery": "^3.18.4"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
