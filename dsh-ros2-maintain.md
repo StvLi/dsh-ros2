@@ -2327,9 +2327,20 @@ ros2_env_check     → bundles.stale:false · drift 全 false · totalTools 81 �
 
 **② 本轮末端动作：请求 gen-22 优雅重启**
 
-本轮 3 个 PR 已合入 `main` 并重建 `lib/`（`pnpm run build` exit 0），随后按本 preset 的
-**文档化触发面**激活一个**惰性**动态包（`apply()` 空实现：不注册工具/事件/服务/UI，
-唯一作用就是"让 `cordis_run` 发生"）⇒ phoenix 会登记第 22 代重启请求。
+本轮 3 个 PR 已合入 `main` 并重建 `lib/`（`pnpm run build` exit 0；实测 `core/lib/tools.js` 含
+`umask 077`/`chmod 700`、`core/scripts/pty_session.py` 含 `ensure_private_dir`/`open_private`、
+`vision/lib/transport.js` 存在且 `vision/lib/tools.js` 含 `classifyVisionTransport`、
+`sidecar/server.py` 含 `chmod 0o600`），随后按本 preset 的**文档化触发面**激活一个**惰性**动态包
+（`apply()` 空实现：不注册工具/事件/服务/UI；唯一作用就是"让 `cordis_run` 发生"）：
+
+```text
+Sep 26 04:19:37  [dsh-phoenix] cordis tool: cordis_run
+Sep 26 04:19:40  [dsh-phoenix] restart requested (gen 22): plugin-change
+```
+
+即 phoenix **看到了**这次激活并登记为**第 22 代**重启请求（journal 原文，非推断），
+与 gen-19/20/21 走同一套"软告警 5 分钟 / 硬期限前执行 / policy auto"生命周期。
+本会话仍在运行，**重启后的现场无法在同一进程内观测**——如实列为 §19.8 第 1 条。
 
 - **重启后可观测的变化（预期）**：`ros2_vision_doctor` 的 `apiKey.transport` 字段**新出现**，
   且对本机当前配置（`http://121.9.219.138:8888/v1`）应**报 `cleartext: true` 并带告警**——
@@ -2436,7 +2447,8 @@ ros2_env_check     → bundles.stale:false · drift 全 false · totalTools 81 �
 - **线上价值**：① 一处**当前正在发生**的凭证暴露面（VLM Key 明文过网）从"静默健康"变为
   **上报并可告警**；② 插件自建的 IPC/状态对象不再继承 umask——其中包括**一个 sudo 进程的 stdin**
   与 **`/tmp` 里的可预测套接字**；③ 供应链从"只有告警"补到"**有版本更新**"。
-- **末端动作**：改动已构建进 `lib/`，并按文档化触发面激活惰性动态包，请求 phoenix 的 **gen-22** 优雅重启。
+- **末端动作**：改动已构建进 `lib/`，并按文档化触发面激活惰性动态包，**已确认** phoenix 登记
+  `gen 22` 重启请求（`04:19:40`，journal 原文）；由 phoenix 在会话空闲的安全点执行优雅重启。
 - **下次维护建议**：
   1. **复核 gen-22 重启后的现场**（本轮唯一可闭环的运行时观测）：确认 `ros2_vision_doctor`
      新出现 `apiKey.transport`，且对本机配置报 **`cleartext: true` + 告警**（§19.5）。
