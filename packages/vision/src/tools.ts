@@ -45,6 +45,7 @@ import {
 } from 'dsh-ros2-common'
 import { spawnJob } from 'dsh-ros2-common'
 import { createVisionProvider } from './vision.js'
+import { classifyVisionTransport } from './transport.js'
 import {
   resolveApiKey,
   secretsFileInfo,
@@ -346,7 +347,7 @@ function makeVisionDoctorTool(deps: VisionToolDeps) {
   return defineTool({
     name: 'ros2_vision_doctor',
     description:
-      'Vision pipeline self-check (read-only): is the vlm workspace built, are vlm_node / vision_bringup running, is the gateway reachable, which image topics are visible, and is the API key resolved from env or plaintext? Gives one-click build/launch guidance and a clear degradation path (ros2_image_snapshot + Agent multimodal) when the pipeline is not ready.',
+      'Vision pipeline self-check (read-only): is the vlm workspace built, are vlm_node / vision_bringup running, is the gateway reachable, which image topics are visible, is the API key resolved from env or plaintext, and does the key travel encrypted (http:// to a non-loopback host is reported as a cleartext warning)? Gives one-click build/launch guidance and a clear degradation path (ros2_image_snapshot + Agent multimodal) when the pipeline is not ready.',
     parameters: {},
     output: { schema: resultSchema, render: renderResult },
     async execute() {
@@ -383,6 +384,7 @@ function makeVisionDoctorTool(deps: VisionToolDeps) {
 
       const keyRes = await resolveApiKey(meta)
       const secretsInfo = await secretsFileInfo()
+      const transport = classifyVisionTransport(meta?.baseUrl)
       const apiKeyStatus = meta
         ? {
             provider: meta.provider,
@@ -395,6 +397,10 @@ function makeVisionDoctorTool(deps: VisionToolDeps) {
             plaintext: meta.apiKeyPlaintext,
             model: meta.model || '(默认)',
             baseUrl: meta.baseUrl || '(未配置)',
+            // Whether the key travels encrypted. The provider puts it on every
+            // request (Authorization header for openai, ?key= for gemini), so
+            // the scheme and host decide whether the key stays private.
+            transport,
             secretsFile: secretsInfo,
           }
         : { note: 'vision provider 未启用（mock）' }
@@ -427,6 +433,15 @@ function makeVisionDoctorTool(deps: VisionToolDeps) {
       }
       if (meta?.apiKeyPlaintext) {
         result.warnings = [...(result.warnings ?? []), 'API Key 以字面量写在插件配置里（该配置会被复制/分享/入库）——建议改为 ${VLM_API_KEY} 环境变量注入，或用 ros2_vision_set_key 存到 ~/.dsh-ros2/secrets.json（0600，仓库外）']
+      }
+      if (transport.cleartext && keyRes.source !== 'missing') {
+        result.warnings = [
+          ...(result.warnings ?? []),
+          `VLM API Key 会以明文经过网络：vision.baseUrl 是 http:// 且主机 ${transport.host} 不是回环地址。` +
+          'openai provider 用 `Authorization: Bearer` 头、gemini provider 用 `?key=` 查询串携带密钥，' +
+          '因此这一跳的任何中间设备（交换机/代理/同网段主机）都能拿到它。' +
+          '修法：把网关换成 https://（或在同一台机器上起服务并用 http://127.0.0.1:… 本地回环访问，回环不会触发本告警）。',
+        ]
       }
       return result
     },

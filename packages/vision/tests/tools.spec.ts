@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, afterEach, beforeEach } from 'vitest'
 import { createRos2Tools } from '../src/tools.js'
 import { type RunFn, type ToolResult, type RosResult } from 'dsh-ros2-common'
 
@@ -240,5 +240,92 @@ describe('ros2_vision_doctor install roots (no hardcoded machine path)', () => {
     const data = out.data as { workspace: { installDirs: string[] } }
     expect(data.workspace.installDirs).toContain(`${ws}/install`)
     expect(data.workspace.installDirs).not.toContain('/tmp/vlm_ws/install')
+  })
+})
+
+describe('ros2_vision_doctor transport security', () => {
+  // The provider attaches the API key to every request (`Authorization: Bearer`
+  // for openai, `?key=` for gemini), so the gateway scheme decides whether the
+  // key stays private. `fetch` is stubbed so the gateway probe stays hermetic —
+  // a real probe against a public address would both hit the network and take
+  // the full 3s timeout in the suite.
+  //
+  // The secrets file must be isolated too: `resolveApiKey` falls back to
+  // `~/.dsh-ros2/secrets.json`, so without this the suite would read whatever
+  // key the machine running it happens to have and the "no key configured" case
+  // could never be expressed.
+  let secretsDir = ''
+  let savedSecrets: string | undefined
+
+  beforeEach(() => {
+    const { mkdtempSync } = require('node:fs')
+    const os = require('node:os')
+    const path = require('node:path')
+    secretsDir = mkdtempSync(path.join(os.tmpdir(), 'dsh-vis-transport-'))
+    savedSecrets = process.env.DSH_ROS2_SECRETS
+    process.env.DSH_ROS2_SECRETS = path.join(secretsDir, 'secrets.json')
+  })
+
+  afterEach(() => {
+    const { rmSync } = require('node:fs')
+    if (savedSecrets === undefined) delete process.env.DSH_ROS2_SECRETS
+    else process.env.DSH_ROS2_SECRETS = savedSecrets
+    rmSync(secretsDir, { recursive: true, force: true })
+  })
+
+  async function doctorWith(baseUrl: string, apiKey = 'sk-secret'): Promise<ToolResult> {
+    const run = makeRun(() => ({ stdout: '' }))
+    const t = createRos2Tools({
+      run,
+      workspaceRoot: '/tmp/ws',
+      visionMeta: { provider: 'openai', apiKey, apiKeyFromEnv: null, apiKeyPlaintext: false, model: 'gpt-4o-mini', baseUrl },
+    }).find((x) => x.name === 'ros2_vision_doctor')
+    if (!t) throw new Error('ros2_vision_doctor not registered')
+    return (await t.execute({}, execStub)) as ToolResult
+  }
+
+  async function withStubbedFetch<T>(fn: () => Promise<T>): Promise<T> {
+    const original = globalThis.fetch
+    globalThis.fetch = (async () => ({ ok: true, status: 200 })) as unknown as typeof fetch
+    try {
+      return await fn()
+    } finally {
+      globalThis.fetch = original
+    }
+  }
+
+  it('warns that the key crosses the network in the clear (the live deployment shape)', async () => {
+    await withStubbedFetch(async () => {
+      const out = await doctorWith('http://121.9.219.138:8888/v1')
+      const data = out.data as { apiKey: { transport: { cleartext: boolean; host: string } } }
+      expect(data.apiKey.transport.cleartext).toBe(true)
+      expect(data.apiKey.transport.host).toBe('121.9.219.138')
+      const warning = (out.warnings ?? []).find((w) => w.includes('明文'))
+      expect(warning).toBeDefined()
+      expect(warning).toContain('121.9.219.138')
+    })
+  })
+
+  it('stays quiet for https, and for a loopback gateway', async () => {
+    await withStubbedFetch(async () => {
+      for (const url of ['https://api.openai.com/v1', 'http://127.0.0.1:8000/v1']) {
+        const out = await doctorWith(url)
+        const data = out.data as { apiKey: { transport: { cleartext: boolean } } }
+        expect(data.apiKey.transport.cleartext, url).toBe(false)
+        expect((out.warnings ?? []).some((w) => w.includes('明文')), url).toBe(false)
+      }
+    })
+  })
+
+  it('does not claim a cleartext key when no key is configured at all', async () => {
+    await withStubbedFetch(async () => {
+      const out = await doctorWith('http://203.0.113.9:8888/v1', '')
+      const data = out.data as { apiKey: { transport: { cleartext: boolean } } }
+      // The transport really is cleartext; there is simply no key to leak yet,
+      // so the actionable warning is the missing-key one.
+      expect(data.apiKey.transport.cleartext).toBe(true)
+      expect((out.warnings ?? []).some((w) => w.includes('明文'))).toBe(false)
+      expect((out.warnings ?? []).some((w) => w.includes('未解析到 VLM API Key'))).toBe(true)
+    })
   })
 })
