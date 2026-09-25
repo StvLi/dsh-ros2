@@ -85,6 +85,16 @@ class UdsServer:
             pass
         srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         srv.bind(self.sock_path)
+        # The socket mode is umask-derived (0775 with the common umask 002), and
+        # the default path sits in the world-writable /tmp. Anyone who can WRITE
+        # the socket inode can connect(), and this protocol has no
+        # authentication, so a group member could read the semantic cache.
+        # Force owner-only rather than inheriting the ambient umask. Best-effort:
+        # a platform that refuses the chmod still gets a working server.
+        try:
+            os.chmod(self.sock_path, 0o600)
+        except OSError:
+            pass
         srv.listen(8)
         try:
             while not self._stop.is_set():
