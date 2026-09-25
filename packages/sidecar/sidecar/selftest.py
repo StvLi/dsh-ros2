@@ -51,6 +51,11 @@ def main() -> int:
     t.start()
     time.sleep(0.2)
 
+    # 3a. UDS 权限：socket 由本进程创建，模式不得随 umask 漂移。协议无鉴权，且默认
+    # 路径在 /tmp（世界可写目录）——能写该 inode 的人即可 connect()，读到语义缓存。
+    check("socket is owner-only (0600), not umask-derived",
+          oct(os.stat(sock).st_mode & 0o777) == "0o600")
+
     def call(msg):
         c = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         c.connect(sock)
@@ -83,7 +88,7 @@ def main() -> int:
     if failures:
         print("SELFTEST FAILED: " + ", ".join(failures))
         return 1
-    print("SELFTEST PASSED (10 scenarios)")
+    print("SELFTEST PASSED (11 scenarios)")
     return 0
 
 

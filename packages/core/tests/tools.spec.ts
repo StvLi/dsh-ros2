@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -355,6 +355,25 @@ describe('ros2_install', () => {
       .toContain(`cp -- '/tmp/install.sh' '${boot}'`)
     expect(buildRos2InstallDownloadCommand('file://-rf', bootDir, boot)).toContain(`cp -- '-rf'`)
   })
+
+  it('buildRos2InstallDownloadCommand creates the fetched script owner-only', () => {
+    const bootDir = '/tmp/dsh-ros2'
+    const boot = '/tmp/dsh-ros2/fishros-install'
+    // The fetched script is EXECUTED as this user, so its mode is part of its
+    // safety: a group-writable copy is a swap-the-script window between fetch
+    // and run. `umask 077` covers what the chain creates, and the two chmods
+    // pin paths that may already exist from an older, umask-derived run.
+    for (const cmd of [
+      buildRos2InstallDownloadCommand('https://example.com/install.sh', bootDir, boot),
+      buildRos2InstallDownloadCommand('/tmp/install.sh', bootDir, boot),
+      buildRos2InstallDownloadCommand('file:///tmp/install.sh', bootDir, boot),
+    ]) {
+      expect(cmd).toContain('umask 077')
+      expect(cmd).toContain(`chmod 700 '${bootDir}'`)
+      expect(cmd).toContain(`chmod 700 '${boot}'`)
+      expect(cmd).not.toContain('chmod +x')
+    }
+  })
 })
 
 /**
@@ -424,6 +443,104 @@ describe('ros2_install session-id path escape', () => {
       expect(readFileSync(path.join(tmp, 'dsh-ros2', 'pty', 'ros2install-1.in'), 'utf8')).toBe('INJECTED\n')
       expect(readdirSync(victim)).toEqual([])
     } finally {
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('PTY helper append semantics', () => {
+  const helperPath = fileURLToPath(new URL('../scripts/pty_session.py', import.meta.url))
+
+  // This host mounts devpts with `ptmxmode=000`, so `pty.openpty()` raises
+  // "out of pty devices" and the whole interactive flow above is SKIPPED here —
+  // CI is its only gate. That is exactly how an `O_TRUNC`-on-append regression
+  // in `open_private()` reached a red CI run while the local suite stayed green:
+  // truncating `.in` on every `send` destroys the installer's command channel,
+  // because the daemon keeps its own read offset and input written after a
+  // truncation can land behind that offset and never be read again.
+  //
+  // Pinning the file semantics directly means the defect is caught locally, on
+  // a machine that cannot allocate a pty at all.
+  it('appends without truncating (the CI-caught regression), and still 0600', () => {
+    const tmp = mkdtempSync(path.join(tmpdir(), 'dsh-pty-append-'))
+    const script = [
+      'import importlib.util, os, sys',
+      'spec = importlib.util.spec_from_file_location("pty_session", sys.argv[1])',
+      'm = importlib.util.module_from_spec(spec)',
+      'spec.loader.exec_module(m)',
+      'p = os.path.join(sys.argv[2], "x.in")',
+      'with m.open_private(p, "ab") as f:',
+      '    f.write(b"first\\n")',
+      'with m.open_private(p, "ab") as f:',
+      '    f.write(b"second\\n")',
+      'sys.stdout.write("A|" + open(p).read())',
+      '# "w" must still truncate: the session files are rewritten on start/stop.',
+      'with m.open_private(p, "w") as f:',
+      '    f.write("replaced\\n")',
+      'sys.stdout.write("W|" + open(p).read())',
+      'sys.stdout.write("M|" + oct(os.stat(p).st_mode & 0o777))',
+    ].join('\n')
+    try {
+      const out = execFileSync('python3', ['-c', script, helperPath, tmp], { encoding: 'utf8', timeout: 15000 })
+      expect(out).toContain('A|first\nsecond\n')
+      expect(out).toContain('W|replaced\n')
+      expect(out).toContain('M|0o600')
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+})
+/**
+ * The session files are the plugin's OWN IPC objects, not caller-supplied paths,
+ * so their mode must not be whatever the ambient umask happens to be. `<sid>.in`
+ * is the STDIN channel of the process being driven (the ros2 installer): a
+ * group-writable `.in` lets anyone in the group type into that process, and a
+ * group-readable `.out` hands them the installer's output. Round 13 hardened the
+ * session id against ESCAPING this directory; this pins the other half — the
+ * objects inside it are owner-only.
+ *
+ * No pty skip needed: `run_start` creates the directory and all three session
+ * files *before* it ever calls `pty.openpty()`, so the modes are observable even
+ * where pty allocation is unavailable.
+ */
+describe('PTY session objects are owner-only', () => {
+  const helperPath = fileURLToPath(new URL('../scripts/pty_session.py', import.meta.url))
+
+  it('creates the dir 0700 and .in/.out/.meta 0600 even under umask 000', async () => {
+    const tmp = mkdtempSync(path.join(tmpdir(), 'dsh-pty-mode-'))
+    const env = { ...process.env, TMPDIR: tmp, PTY_HELPER: helperPath }
+    const mode = (p: string): string => (statSync(p).mode & 0o777).toString(8)
+    try {
+      // Worst case on purpose: under umask 000 the previous code produced
+      // 0777 directories and 0666 session files.
+      execFileSync('bash', ['-c', 'umask 000; exec python3 "$PTY_HELPER" start mode1 /bin/sleep 5'], {
+        env, stdio: 'pipe', timeout: 15000,
+      })
+      const dir = path.join(tmp, 'dsh-ros2', 'pty')
+      const inFile = path.join(dir, 'mode1.in')
+      // `start` daemonises, so the session files are created by the child.
+      for (let i = 0; i < 50 && !existsSync(inFile); i++) {
+        await new Promise((resolve) => setTimeout(resolve, 100))
+      }
+      expect(existsSync(inFile)).toBe(true)
+      expect(mode(path.join(tmp, 'dsh-ros2'))).toBe('700')
+      expect(mode(dir)).toBe('700')
+      for (const ext of ['in', 'out', 'meta']) {
+        expect(mode(path.join(dir, `mode1.${ext}`)), ext).toBe('600')
+      }
+
+      // A file an older (umask-derived) run left loose must be tightened on the
+      // next use — `open()` alone cannot do that, it only applies mode at
+      // creation time.
+      chmodSync(inFile, 0o666)
+      execFileSync('python3', [helperPath, 'send', 'mode1', '--', 'x'], { env, stdio: 'pipe', timeout: 10000 })
+      expect(mode(inFile)).toBe('600')
+    } finally {
+      try {
+        execFileSync('python3', [helperPath, 'stop', 'mode1'], { env, stdio: 'pipe', timeout: 10000 })
+      } catch {
+        // nothing to stop — the assertion above already ran
+      }
       rmSync(tmp, { recursive: true, force: true })
     }
   })

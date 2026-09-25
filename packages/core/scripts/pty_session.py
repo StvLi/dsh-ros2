@@ -60,8 +60,66 @@ def paths(sid):
             os.path.join(DIR, sid + ".meta"))
 
 
+# The session files are created by THIS process, so their mode must not depend on
+# the ambient umask. With the common umask 002 the old code produced a 0775
+# directory and a 0664 `<sid>.in` — and `<sid>.in` is the STDIN channel of the
+# process the caller is driving (the ros2 installer). Anything that can write it
+# can type into that process, which is a command channel, not just a leak. The
+# `.out`/`.meta` files carry the installer's output. Create them owner-only.
+DIR_MODE = 0o700
+FILE_MODE = 0o600
+
+
+def ensure_private_dir(path_):
+    """Create `path_` as 0700, whatever the umask says.
+
+    `os.makedirs(mode=…)` applies the mode to the LEAF directory only, and
+    neither `mkdir` nor `makedirs` changes a directory that already exists — so
+    the mode has to be forced explicitly to survive an inherited umask.
+    """
+    parent = os.path.dirname(path_)
+    if parent and not os.path.isdir(parent):
+        os.makedirs(parent, mode=DIR_MODE, exist_ok=True)
+        _chmod_quietly(parent, DIR_MODE)
+    os.makedirs(path_, mode=DIR_MODE, exist_ok=True)
+    _chmod_quietly(path_, DIR_MODE)
+
+
+def _chmod_quietly(path_, mode):
+    try:
+        os.chmod(path_, mode)
+    except OSError:
+        pass
+
+
+def open_private(path_, mode="w"):
+    """Open a session file that only its owner may read or write.
+
+    `open()` cannot do this for a file that already exists: it applies `mode`
+    only at creation time. `os.open` + `os.fchmod` sets it either way, so a file
+    left behind by an older (umask-derived) run is tightened on next use.
+
+    The flags mirror what `open()` does for each mode, which is the part that is
+    easy to get wrong: `"a"` APPENDS and must NOT truncate. Truncating there
+    destroys the `.in` command channel (the daemon holds its own read offset, so
+    input written after a truncation can land behind that offset and never be
+    read again) and drops the `state=` line the daemon's stop path checks.
+    """
+    flags = os.O_WRONLY | os.O_CREAT
+    if "a" in mode:
+        flags |= os.O_APPEND
+    else:
+        flags |= os.O_TRUNC
+    fd = os.open(path_, flags, FILE_MODE)
+    try:
+        os.fchmod(fd, FILE_MODE)
+    except OSError:
+        pass
+    return os.fdopen(fd, mode)
+
+
 def meta_write(sid, state, exit_code=None):
-    with open(paths(sid)[2], "w") as f:
+    with open_private(paths(sid)[2], "w") as f:
         f.write("state=%s\n" % state)
         if exit_code is not None:
             f.write("exit=%s\n" % exit_code)
@@ -81,11 +139,11 @@ def meta_read(sid):
 
 
 def run_start(sid, cmd, args):
-    os.makedirs(DIR, exist_ok=True)
+    ensure_private_dir(DIR)
     out_path, in_path, _ = paths(sid)
-    with open(out_path, "w") as _f:
+    with open_private(out_path, "w") as _f:
         pass
-    with open(in_path, "w") as _f:
+    with open_private(in_path, "w") as _f:
         pass
     meta_write(sid, "running")
     # child pid holder
@@ -121,9 +179,9 @@ def run_start(sid, cmd, args):
     os.close(slave)
     meta_write(sid, "running", None)  # keep pid current
 
-    out_f = open(out_path, "ab")
+    out_f = open_private(out_path, "ab")
     in_f = open(in_path, "rb")
-    status_f = open(paths(sid)[2], "a")
+    status_f = open_private(paths(sid)[2], "a")
     status_f.write("child=%s\n" % pid)
     status_f.close()
 
@@ -184,7 +242,7 @@ def run_start(sid, cmd, args):
 
 def run_send(sid, text):
     _, in_path, _ = paths(sid)
-    with open(in_path, "ab") as f:
+    with open_private(in_path, "ab") as f:
         if not text.endswith("\n"):
             text += "\n"
         f.write(text.encode("utf-8", "replace"))
@@ -202,7 +260,7 @@ def run_status(sid, all_out):
                 except (FileNotFoundError, ValueError):
                     f.seek(0, os.SEEK_END)
                     try:
-                        with open(mark, "w") as mf:
+                        with open_private(mark, "w") as mf:
                             mf.write(str(f.tell()))
                     except OSError:
                         pass
@@ -210,7 +268,7 @@ def run_status(sid, all_out):
                     f.seek(0)
                 data = f.read()
                 try:
-                    with open(mark, "w") as mf:
+                    with open_private(mark, "w") as mf:
                         mf.write(str(f.tell()))
                 except OSError:
                     pass
@@ -232,7 +290,7 @@ def run_status(sid, all_out):
 
 def run_stop(sid):
     _, _, meta_path = paths(sid)
-    with open(meta_path, "w") as f:
+    with open_private(meta_path, "w") as f:
         f.write("state=stopping\n")
     # give the daemon a moment, then hard-kill the child if needed
     for _ in range(10):
