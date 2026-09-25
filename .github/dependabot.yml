@@ -1,0 +1,35 @@
+# Dependabot VERSION updates.
+#
+# Round 13 enabled the repository's alerting side (Dependabot alerts +
+# automated security fixes) via the API, but alerts only fire on a *known
+# advisory*. Version updates need this file, and without it two things stayed
+# manual:
+#
+#   github-actions — the workflows pin mutable major tags
+#     (`actions/checkout@v7`, `pnpm/action-setup@v6`, `actions/setup-node@v7`).
+#     A major tag is a moving ref, so the only way to notice a new major (or a
+#     re-pointed tag) was to look. The last bump, commit 618bdbe "ci: bump
+#     Actions to node24 majors", was done by hand.
+#   npm — CI gates the runtime graph with `pnpm audit --prod --audit-level high`,
+#     which catches advisories but opens no upgrades for anything else.
+#
+# Weekly and uncapped-by-noise: five PRs per ecosystem is enough for a repo this
+# size, and every PR still has to pass the normal CI (typecheck + test + build +
+# the publish-surface gate) before it can merge.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: ci
+
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
