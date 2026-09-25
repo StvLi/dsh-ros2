@@ -631,13 +631,23 @@ function makeJobStatusTool(deps: CoreToolDeps) {
  * that file as its config (which can name both a URL and an output path). `--`
  * terminates option parsing, so the operand is always an operand. It costs
  * nothing legitimate: no mirror URL or path begins with `-`.
+ *
+ * It also creates the fetched script owner-only (see the note inside): the file
+ * is executed, so its mode is part of its safety, not a detail.
  */
 export function buildRos2InstallDownloadCommand(installer: string, bootDir: string, boot: string): string {
+  // The downloaded script is EXECUTED by the PTY as this user, so a
+  // group-writable copy is a swap-the-script window between fetch and run.
+  // `umask 077` covers everything the chain creates (mkdir/curl/cp all inherit
+  // it), the directory is pinned explicitly so a pre-existing 0775 one is
+  // tightened, and the script is made owner-only-executable — plain `chmod +x`
+  // would leave it group/other-readable under the ambient umask.
+  const header = `umask 077 && mkdir -p ${shq(bootDir)} && chmod 700 ${shq(bootDir)}`
   if (installer.startsWith('file://') || installer.startsWith('/')) {
     const src = installer.startsWith('file://') ? installer.slice('file://'.length) : installer
-    return `mkdir -p ${shq(bootDir)} && cp -- ${shq(src)} ${shq(boot)} && chmod +x ${shq(boot)}`
+    return `${header} && cp -- ${shq(src)} ${shq(boot)} && chmod 700 ${shq(boot)}`
   }
-  return `mkdir -p ${shq(bootDir)} && (curl -fsSL -o ${shq(boot)} -- ${shq(installer)} || wget -q -O ${shq(boot)} -- ${shq(installer)}) && test -s ${shq(boot)} && chmod +x ${shq(boot)}`
+  return `${header} && (curl -fsSL -o ${shq(boot)} -- ${shq(installer)} || wget -q -O ${shq(boot)} -- ${shq(installer)}) && test -s ${shq(boot)} && chmod 700 ${shq(boot)}`
 }
 
 function makeRos2InstallTool(deps: CoreToolDeps) {
