@@ -247,8 +247,11 @@ Perception matches the robot-control stack: the VLM runs in a **separate ROS2 pr
 
 ```bash
 # build + launch the vision pipeline (auto bridge per image topic)
-mkdir -p /tmp/vlm_ws/src && ln -s <repo>/vlm /tmp/vlm_ws/src/dsh_ros2_vlm
-cd /tmp/vlm_ws && colcon build --symlink-install && source install/setup.bash
+# Build the workspace OUTSIDE /tmp: a reboot wipes /tmp, and a `rosSetup` that
+# sources a deleted workspace is the misconfiguration documented in
+# docs/feedback-env-recovery.md. Use any persistent path (`~/vlm_ws` here).
+mkdir -p ~/vlm_ws/src && ln -s <repo>/vlm ~/vlm_ws/src/dsh_ros2_vlm
+cd ~/vlm_ws && colcon build --symlink-install && source install/setup.bash
 VLM_API_KEY=... ros2 run dsh_ros2_vlm vlm_node &       # parallel VLM process
 ros2 run dsh_ros2_vlm vision_bringup &                 # discover topics, one bridge each
 ```
@@ -258,9 +261,9 @@ ros2 run dsh_ros2_vlm vision_bringup &                 # discover topics, one br
 The real rviz rendering stack (`rviz_common` + OGRE + `rviz_default_plugins`) loads a `.rviz` scene offscreen under Xvfb and publishes it to the `/rviz/scene` image topic — read from the render kernel, not X screenshots, no window-stacking dependency.
 
 ```bash
-# build (needs a colcon workspace like vlm_ws)
-ln -s <repo>/offscreen /tmp/vlm_ws/src/dsh_ros2_rviz_offscreen
-cd /tmp/vlm_ws && colcon build --symlink-install && source install/setup.bash
+# build (needs a colcon workspace like vlm_ws — keep it out of /tmp)
+ln -s <repo>/offscreen ~/vlm_ws/src/dsh_ros2_rviz_offscreen
+cd ~/vlm_ws && colcon build --symlink-install && source install/setup.bash
 # run (config_path points at a .rviz scene file)
 xvfb-run -a -s "-screen 0 1280x800x24" ros2 run dsh_ros2_rviz_offscreen rviz_offscreen_node \
   --ros-args -p config_path:=/tmp/robot_scene.rviz -p topic:=/rviz/scene \
@@ -359,8 +362,8 @@ tool-layer safety gate (pre-execution: /safety/state LOCKED; monitor-down per sa
 
 ```bash
 # build the safety package (same colcon workspace as vlm/ and offscreen/)
-ln -s <repo>/safety /tmp/vlm_ws/src/dsh_ros2_safety
-cd /tmp/vlm_ws && colcon build --symlink-install && source install/setup.bash
+ln -s <repo>/safety ~/vlm_ws/src/dsh_ros2_safety
+cd ~/vlm_ws && colcon build --symlink-install && source install/setup.bash
 ```
 
 The `safety_core` pure logic ships with a fault-injection self test
