@@ -147,3 +147,30 @@ ros2_workspace {action: "reset"}
 即：**插件能自愈这个坏配置**（无需改配置、无需重启即生效于下一次调用）。配置本身仍建议修正——自愈是兜底，不是许可。
 
 **新增测试**：common `runner.spec.ts` +5（尾段缺失保留头段、多段链只剔缺失段且其余逐字保留、全健康零变化、全缺失才回退并点名全部、会话覆盖链同样校验）；core `tools.spec.ts` +2（缺失段作为数据如实报告；探针失败时告警指向配置而非否认 rosSetup）。
+
+---
+
+## 部署配置卫生：别把 colcon 工作区建在 `/tmp`（2026-09-27 补，issue #40）
+
+自愈是**兜底**，不是**许可**（见上一节末句）。这一节把"这种坏配置是怎么攒出来的、怎么收尾"写清楚。
+
+**成因**：`/tmp` 会被重启清空。把 colcon 工作区建在 `/tmp/vlm_ws`（仓库早期 README / README_CN 的示例写法）
+意味着**下一次重启之后，`rosSetup` 的尾段必然指向一个已不存在的路径**：插件仍能自愈（逐段剔除 + 保留活段），
+但每次调用都多一次 `existsSync`、并多一条 `missingSources` 告警噪音——**配置与运行时状态长期不一致**。
+README / README_CN 的构建示例已改为持久路径 `~/vlm_ws`，并在注释里点明这条约束。
+
+**收尾（仓库外，一处部署 5 行）**：`~/.dsh/profiles/web/cordis.patch.yml` 中 5 个 bundle 的 `rosSetup`
+若仍以 `&& source /tmp/vlm_ws/install/setup.bash` 结尾，删掉该尾段，只留真正构建过的交付工作区：
+
+```yaml
+rosSetup: source /home/stvli/lite_delivery_aio/install/setup.bash &&
+```
+
+**可以先验证再改（行为等价性）**：删段前后**生效前缀逐字节相同**。`resolveSetup` 本来就把缺失段剔除，
+`ros2_env_check` 实测 `data.setup.prefix` 已是
+`source /home/stvli/lite_delivery_aio/install/setup.bash && `（`missingSources` 仍如实列出死段）。
+所以这是**让配置追上运行时状态**，不是行为变更；改完等一次优雅重启（dsh-phoenix）告警即消失，
+**不改也不影响功能**——这正是它可以被安全地推迟、但不应被无限期悬置的原因。
+
+**通用规则**：`rosSetup` 只应 source **持久**且**真实存在**的工作区；工作区被重建 / 移动 / 清理后，
+配置里的路径要同步更新——`ros2_env_check` 的 `setup.missingSources` 就是这条规则的探针。
