@@ -547,6 +547,36 @@ describe('PTY session objects are owner-only', () => {
 })
 
 describe('ros2_install interactive flow (mock installer, no network)', () => {
+  /**
+   * Poll `status` until the PTY output satisfies `done`, or the deadline passes.
+   *
+   * The installer runs inside a pty daemon, so its output arrives
+   * asynchronously. Reading `status` once, straight after `start`/`send`, is a
+   * race: it wins on a fast local machine and loses on a loaded CI runner.
+   * Observed on `check (22)` of a docs-only PR —
+   * `AssertionError: expected '' to contain '众多工具'` — with the very same job
+   * passing on an immediate re-run and on every neighbouring PR.
+   *
+   * The `setTimeout(800)` / `setTimeout(2500)` this replaces were the same
+   * hazard written as a guessed duration: they lower the odds without removing
+   * the race, and they make the suite slower in the common case.
+   */
+  async function statusUntil(
+    t: { execute: (args: Record<string, unknown>, exec: never) => Promise<unknown> },
+    session: string,
+    done: (d: { output: string; state: string }) => boolean,
+    timeoutMs: number,
+  ): Promise<{ output: string; state: string }> {
+    const deadline = Date.now() + timeoutMs
+    let last = { output: '', state: '' }
+    for (;;) {
+      const res = (await t.execute({ action: 'status', session }, execStub)) as ToolResult
+      last = res.data as { output: string; state: string }
+      if (done(last) || Date.now() > deadline) return last
+      await new Promise((r) => setTimeout(r, 100))
+    }
+  }
+
   it.skipIf(!ptyUsable)('start -> send -> status -> stop drives the installer menus via PTY', async () => {
     const run = makeRun((bin, args) => {
       if (bin === 'bash') return { ok: true, stdout: '', exitCode: 0 } // no /opt/ros (fresh machine)
@@ -563,27 +593,27 @@ describe('ros2_install interactive flow (mock installer, no network)', () => {
     expect(session.startsWith('ros2install-')).toBe(true)
 
     // menu appears
-    const s1 = (await t.execute({ action: 'status', session }, execStub)) as ToolResult
-    const out1 = (s1.data as { output: string }).output
+    const out1 = (await statusUntil(t, session, (d) => d.output.includes('众多工具'), 8000)).output
     expect(out1).toContain('众多工具')
     expect(out1).toContain('请输入数字')
 
     // choose "1" (install ROS) -> version menu
     await t.execute({ action: 'send', session, input: '1' }, execStub)
-    await new Promise((r) => setTimeout(r, 800))
-    const s2 = (await t.execute({ action: 'status', session }, execStub)) as ToolResult
-    expect((s2.data as { output: string }).output).toContain('选择ROS版本')
+    const s2 = await statusUntil(t, session, (d) => d.output.includes('选择ROS版本'), 8000)
+    expect(s2.output).toContain('选择ROS版本')
 
     // choose "2" (Jazzy) -> finish
     await t.execute({ action: 'send', session, input: '2' }, execStub)
-    await new Promise((r) => setTimeout(r, 2500))
-    const s3 = (await t.execute({ action: 'status', session }, execStub)) as ToolResult
-    const d3 = s3.data as { output: string; state: string }
+    const d3 = await statusUntil(
+      t, session,
+      (d) => d.output.includes('安装完成') && d.state.includes('exited'),
+      10000,
+    )
     expect(d3.output).toContain('安装完成')
     expect(d3.state).toContain('exited')
 
     await t.execute({ action: 'stop', session }, execStub)
-  }, 15000)
+  }, 30000)
 })
 
 describe('tool inventory', () => {
