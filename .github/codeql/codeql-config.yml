@@ -1,0 +1,15 @@
+# CodeQL configuration for dsh-ros2.
+#
+# `docs/archify/` holds GENERATED artifacts from the archify skill — `bridge.html`
+# is a 643 KB generated bundle, not source anyone here writes or reviews.
+# Scanning it produced 12 of the 29 findings in the first baseline run, every one
+# of them in third-party generated code. That volume buries the alerts that are
+# actually about this repository, which is the only thing the baseline is for.
+#
+# Nothing else is excluded, and no query filters are set: the rest of the tree is
+# in scope, which is the point. Real findings from the first baseline (the
+# interface-create TOCTOU and the unquoted auto-detected setup path) are fixed in
+# the same change that introduced this file.
+
+paths-ignore:
+  - docs/archify/**

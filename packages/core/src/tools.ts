@@ -422,15 +422,19 @@ function makeInterfaceCreateTool(deps: CoreToolDeps) {
       const approval = await requestApproval(deps, exec, 'ros2_interface_create', `创建消息文件：${filePath}\n${content}`)
       if (!approval.allowed) return deniedResult('ros2_interface_create', command, approval.outcome)
       try {
-        await access(filePath)
-        return toolError('ros2_interface_create', command, 'FILE_EXISTS', `文件已存在，不覆盖：${filePath}`)
-      } catch {
-        // not exists — proceed
-      }
-      try {
         await mkdir(path.dirname(filePath), { recursive: true })
-        await writeFile(filePath, content, 'utf8')
+        // `wx` = O_CREAT|O_EXCL: the kernel refuses when the path already
+        // exists. A separate `access()` check followed by a plain write is a
+        // TOCTOU — between the two, a concurrent call (or a symlink) can create
+        // the path and the write then clobbers it silently, which is exactly
+        // what this tool promises never to do ("文件已存在，不覆盖"). O_EXCL
+        // makes the existence check and the creation one atomic step.
+        await writeFile(filePath, content, { encoding: 'utf8', flag: 'wx' })
       } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code
+        if (code === 'EEXIST') {
+          return toolError('ros2_interface_create', command, 'FILE_EXISTS', `文件已存在，不覆盖：${filePath}`)
+        }
         return toolError('ros2_interface_create', command, 'WRITE_FAILED', error instanceof Error ? error.message : String(error))
       }
       const value: ToolResult = {

@@ -59,7 +59,33 @@ describe('resolveSetup fallback chain + session override', () => {
     expect(setup.note).toContain('不存在')
     // never keeps the broken explicit prefix; either auto-detected or empty
     expect(setup.prefix.includes('nonexistent')).toBe(false)
-    expect(['', 'source /opt/ros/']).toContain(setup.prefix.slice(0, 'source /opt/ros/'.length))
+    // The auto-detected path is spliced into a `bash -lc` string, so it must be
+    // ONE shq()-quoted shell word — a bare path would break on a space.
+    expect(['', `source '/opt/ros`]).toContain(setup.prefix.slice(0, `source '/opt/ros`.length))
+  })
+
+  it('quotes the auto-detected setup path so a space or metacharacter cannot break out', async () => {
+    const { resolveSetup } = await import('../src/runner.js')
+    const { mkdirSync, mkdtempSync, writeFileSync } = require('node:fs')
+    const { tmpdir } = require('node:os')
+    const path = require('node:path')
+    // A workspace root carrying both a space and a shell metacharacter. The
+    // mkdtemp suffix matters: a predictable name under the temp dir is itself a
+    // finding (and two concurrent runs of this suite would collide on it), and
+    // it keeps the `;` and the space in the generated path.
+    const root = mkdtempSync(path.join(tmpdir(), 'dsh-runner auto ws;'))
+    try {
+      mkdirSync(`${root}/install`, { recursive: true })
+      writeFileSync(`${root}/install/setup.bash`, 'true\n')
+      const setup = resolveSetup({ rosSetup: 'source /nonexistent/ros/setup.bash && ', workspaceRoot: root })
+      // sourcePath stays a real filesystem path (consumers stat it)…
+      expect(setup.sourcePath).toBe(`${root}/install/setup.bash`)
+      // …while the prefix carries it as one single-quoted word, so neither the
+      // space nor the `;` can end the command or start another one.
+      expect(setup.prefix).toBe(`source '${root}/install/setup.bash' && `)
+    } finally {
+      require('node:fs').rmSync(root, { recursive: true, force: true })
+    }
   })
 
   it('session override beats the configured rosSetup (real paths)', async () => {

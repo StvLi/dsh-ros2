@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -1417,6 +1417,57 @@ describe('ros2_workspace', () => {
       // Leave no session override behind for later tests in this process.
       setSessionRosSetup(null)
       rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('ros2_interface_create — atomic create', () => {
+  const approval = async () => 'allowed-once'
+
+  function interfaceTool() {
+    const found = createRos2Tools({ run: makeRun(() => ({ stdout: '' })), approval })
+      .find((t) => t.name === 'ros2_interface_create')
+    if (!found) throw new Error('ros2_interface_create not found')
+    return found
+  }
+
+  it('refuses to overwrite an existing file and leaves its bytes untouched', async () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'dsh-iface-'))
+    try {
+      const target = path.join(root, 'demo_pkg', 'msg', 'JointCmd.msg')
+      mkdirSync(path.dirname(target), { recursive: true })
+      writeFileSync(target, 'float64 original\n')
+      const out = (await interfaceTool().execute(
+        { package: 'demo_pkg', kind: 'msg', name: 'JointCmd', fields: 'float64 replacement', outputRoot: root },
+        execStub,
+      )) as ToolResult
+      expect(out.error?.code).toBe('FILE_EXISTS')
+      // "never overwrite" has to mean the old bytes survive, not just that the
+      // call reported failure.
+      expect(readFileSync(target, 'utf8')).toBe('float64 original\n')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('does not follow a symlink planted at the target path', async () => {
+    // This is the TOCTOU the O_EXCL flag closes: an `access()` check sees a free
+    // path, the link appears before the write, and a plain `writeFile` follows
+    // it out of the output root. With `flag: 'wx'` the create fails instead.
+    const root = mkdtempSync(path.join(tmpdir(), 'dsh-iface-link-'))
+    try {
+      const outside = path.join(root, 'outside.txt')
+      const target = path.join(root, 'demo_pkg', 'msg', 'Escape.msg')
+      mkdirSync(path.dirname(target), { recursive: true })
+      symlinkSync(outside, target)
+      const out = (await interfaceTool().execute(
+        { package: 'demo_pkg', kind: 'msg', name: 'Escape', fields: 'float64 x', outputRoot: root },
+        execStub,
+      )) as ToolResult
+      expect(out.ok).toBe(false)
+      expect(existsSync(outside)).toBe(false)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
     }
   })
 })
