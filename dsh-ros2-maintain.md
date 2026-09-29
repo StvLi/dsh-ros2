@@ -2781,7 +2781,7 @@ warnings: ["…VLM API Key 会以明文经过网络：vision.baseUrl 是 http://
 | open issue / open PR | **1 / 6**（#40 / #42–#47） | **1 / 4**（#40 / #42/#43/#45/#46） |
 | vitest 用例 | `main` **323**（322 过 + 1 pty-skip） | `main` **344**；**#51 分支 347**（346 过 + 1 skip） |
 | GitHub 授信 | ✅ **`gh` 已登录 `StvLi`**（`repo` + `workflow`） | 同（本轮 PR/合并/评论全部走 API） |
-| 代码扫描 | ❌ 无（`code-scanning/alerts` → `404 no analysis found`） | ✅ **CodeQL 已上线并跑过 main**；首基线 **29 条告警** |
+| 代码扫描 | ❌ 无（`code-scanning/alerts` → `404 no analysis found`） | ✅ **CodeQL 已上线并跑过 main**；首基线 **29 条告警 → 分诊并修复后实测 13 条**（§21.3.3） |
 | 运行中的 dsh | 启动于 **2026-09-29 10:48:45 CST**（= 第十五轮请求的 **gen-23** 落地产物；MainPID 32283） | 同进程；`lib/` 已于本轮重建，**gen-24 重启请求待执行**（§21.5） |
 
 **第十五轮请求的 gen-23 已确认落地**（本轮开工时读到的状态文件）：
@@ -2918,13 +2918,28 @@ package/scripts/__pycache__/moveit_common.cpython-312.pyc     ← 已发布
 
 | 规则 | 数量 | 位置 | 定性 |
 | --- | --- | --- | --- |
-| `js/remote-property-injection` | 12 | `docs/archify/bridge.html` | **生成物**：archify skill 产出的 643 KB 打包 HTML，不是人写的源码 → **排除出扫描** |
-| `js/insecure-temporary-file` | 6 | 5 处测试文件 + `scripts/verification/measure.mjs` | 测试/校验脚本，且都在私有 `mkdtemp` 目录下；**不触生产路径** |
+| `js/remote-property-injection` | 13 | `docs/archify/bridge.html` | **生成物**：archify skill 产出的 643 KB 打包 HTML，不是人写的源码 → **排除出扫描** |
+| `js/insecure-temporary-file` | 8 | 7 处测试文件 + `scripts/verification/measure.mjs` | 测试/校验脚本，且都在私有 `mkdtemp` 目录下；**不触生产路径** |
 | `js/polynomial-redos` | 3 | `parse.ts` ×2、`toolkit.ts` | **真实但低危 → 本轮有意不修**（理由见下） |
 | `js/file-access-to-http` | 2 | `vision.ts` | **设计如此**：图像字节就是发给 VLM 网关的请求体 |
 | `js/shell-command-injection-from-environment` | 1 | `runner.ts:38` | **设计如此**：这里**就是**那个 shell runner，参数由调用方 `shq()` 引号化 |
 | **`js/file-system-race`** | 1 | `core/tools.ts` | **★ 真实缺陷 → 已修** |
 | **`js/shell-command-constructed-from-input`** | 1 | `common/runner.ts` | **★ 真实缺陷 → 已修** |
+
+**分诊后实测（#51 合入 `main` 后重跑）：29 → 13，与被移除的两类逐条对上——**
+
+| 类别 | 变化 | 对应动作 |
+| --- | --- | --- |
+| `js/remote-property-injection`（生成物） | 13 → **0** | `paths-ignore: docs/archify/**` 生效 |
+| `js/file-system-race` | 1 → **0** | `O_EXCL` 修好 |
+| `js/shell-command-constructed-from-input` | 1 → **0** | `shq()` 修好 |
+| 剩余 | **13** | 3 ReDoS + 8 insecure-temporary-file + 2 file-access-to-http，**全部落在已分诊的"有意不修 / 设计如此"三类里**，**没有出现预料之外的新规则** |
+
+**"降幅可预测、且降完正好落回预期分类"这件事本身就是分诊正确的证据**：
+如果哪一类没有消失，或者冒出一条新规则，就说明分诊漏了东西、或者修得不干净。
+
+> 更正记录：本节初稿把这两类写成 `12` 与 `6`（合计 25，与总数 29 对不上——**表格自身的算术就是错的**），
+> 实测后更正为 `13` 与 `8`。**一个"29 条"的分诊表里，条目数相加必须等于 29**，这是分诊自检的最低要求。
 
 **修复 1 · `ros2_interface_create` 的 TOCTOU**：工具文档写着"文件已存在，不覆盖"，
 实现却是 `access()` 检查后接一个**普通** `writeFile`——
@@ -3010,6 +3025,34 @@ dsh-ros2-common -> ../../../../Desktop/embody_agent_ws/dsh-ros2/packages/common
 一个**惰性动态包**请求优雅重启（与第十四/十五轮同一做法）。phoenix 对 busy agent 会 **defer**
 （软期限 300 s / 硬期限 900 s），**不会打断当前回合**。
 
+**已确认（journal 原文 + 状态文件，2026-09-30 04:22:47 CST）**：
+
+```text
+[dsh-phoenix] cordis tool: cordis_run
+[dsh-phoenix] restart requested (gen 24): plugin-change        ← 04:22:47
+[dsh-phoenix] cordis tool: cordis_run
+[dsh-phoenix] restart already in-flight; coalesced plugin-change   ← 04:22:55
+```
+
+```json
+{ "generation": 24, "lifecycleState": "deferred", "pendingResume": false,
+  "deferDeadline": 1790714267566, "updatedAt": 1790713367566, "coalesced": true }
+```
+
+`deferDeadline − updatedAt = 900000 ms`，**正好是文档化的 900 s 硬期限**——与第十四/十五轮一致。
+
+**两个如实记录的点**：
+
+1. **第一次激活失败了，原因是沙箱而不是这个包**：受限 `ctx` **不暴露 `logger`**
+   （报错原文：`sandbox ctx does not expose "logger". Available: ctx.tools.register / ctx.on /
+   ctx.provide / the timer helpers …`）。第十四/十五轮记的"惰性包只打一行日志"这个写法
+   **在当前的受限 ctx 下已经不再可用**。改为**真正空实现的 `apply()`**——因为
+   **phoenix 的触发面是 `cordis_run` 这次调用本身，不是 `apply()` 做了什么**，
+   所以空实现**既足够又是最安全的形式**（零能力 ⇒ 零失败面）。
+   **⇒ 下次维护不必再尝试 `ctx.logger`，直接空 apply。**
+2. `coalesced: true` 与 `restart already in-flight` 说明**第二次激活被合并进同一个 gen-24 请求**，
+   这是正确行为，也顺带证明 phoenix 的去重是按"in-flight 重启请求"而非按包走的。
+
 **一个本轮识别出、但有意不做的改进（连同它为什么不能草率做）**：
 本轮**无法从进程内部判断"新代码到底加载了没有"**——`bundleDriftReport()` 比的是
 `package.json` 的 **version**，而本轮 `common` 的 **版本号没变**，所以 **drift 看不见**这次变更
@@ -3075,8 +3118,10 @@ dsh-ros2-common -> ../../../../Desktop/embody_agent_ws/dsh-ros2/packages/common
 - **线上价值**：① **首次有了"读我们自己代码"的安全基线**，且**第一跑就抓到并修掉 2 处真实缺陷**——
    其中 `ros2_interface_create` 的 TOCTOU 是**能被符号链接穿出 output root** 的那一类；
    ② 发布面不再有 3 个包"裸奔"；③ 第十五轮那个静默换环境修复**终于进了 main**。
-- **末端动作**：改动已构建进 `lib/`；按文档化触发面激活惰性动态包，**已确认** phoenix 登记重启请求，
-  由 phoenix 在会话空闲的安全点执行优雅重启。
+- **末端动作**：改动已构建进 `lib/`；按文档化触发面（`cordis_run`）激活一个**空实现**的动态包，
+  **已确认 phoenix 登记 `gen 24` 重启请求**（journal `restart requested (gen 24): plugin-change`，
+  04:22:47 CST；状态文件 `lifecycleState: deferred`、`coalesced: true`、硬期限 900 s），
+  由 phoenix 在会话空闲的安全点执行优雅重启（§21.5）。
 - **待运维（本轮无法完成的三件事）**：
   1. **决定 issue #40**：按 §21.2 的**6 处**逐字清单修改部署配置（含第 63 行），随后优雅重启。
   2. **#45 的决定**：`@types/node` 是钉在最低受支持大版本（22），还是继续跟进最新（26）？
@@ -3084,7 +3129,8 @@ dsh-ros2-common -> ../../../../Desktop/embody_agent_ws/dsh-ros2/packages/common
   3. **复核 gen-24 重启后的现场**：确认新 `lib/` 已加载——**不能只看 `drift`**（§21.7 第 6 条）。
 - **下次维护建议**：
   1. **先看 CodeQL**：跑一轮 `gh api repos/StvLi/dsh-ros2/code-scanning/alerts`，
-     确认 #51 合入后**降到 ~17 条且只剩已分诊的规则**；若出现**新规则**，优先分诊新的。
+     **本条已在合入后当场核验：29 → 13，且 13 条全部落在已分诊的分类里**（§21.3.3）。
+     下次只需确认**没有反弹**（新规则 / 新增同规则实例），若有则优先分诊新的。
   2. **把 3 条 ReDoS 单独做成一个 `fix`**：目标是"可证明线性"，**必须自带行为等价测试**。
   3. **重新评估 `drift` 的观测盲区**：设计已写在 §21.5——要覆盖**工作区传递依赖**，
      否则抓不到"只改了 `common`"这种最常见的情况。
