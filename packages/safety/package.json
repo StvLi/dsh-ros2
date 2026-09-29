@@ -16,9 +16,10 @@
     "lib",
     "cordis.patch.yml",
     "safety",
-    "!safety/scripts/__pycache__",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "!**/__pycache__",
+    "!**/*.pyc"
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
