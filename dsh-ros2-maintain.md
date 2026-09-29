@@ -2762,7 +2762,7 @@ warnings: ["…VLM API Key 会以明文经过网络：vision.baseUrl 是 http://
 
 ---
 
-## 21. 维护记录（2026-09-30 04:00 CST / UTC 2026-09-29 20:00 · 第十六轮：open issue #40 → step 2 复核 + **上游缺口消失（`gh` 有 token 了）** → 先把第十五轮卡住的在途分支开成 **PR #48** 并合入 → `fix(packaging)` 发布面守卫 + **CodeQL 基线首次落地** + 基线告警里的 **2 处真实缺陷**）
+## 21. 维护记录（2026-09-30 04:00 CST / UTC 2026-09-29 20:00 · 第十六轮：open issue #40 → step 2 复核 + **上游缺口消失（`gh` 有 token 了）** → 先把第十五轮卡住的在途分支开成 **PR #48** 并合入 → `fix(packaging)` 发布面守卫 + **CodeQL 基线首次落地** + 基线告警里的 **2 处真实缺陷** → **计划外：本轮自己的 CI 抓出 PTY 测试竞争（PR #53）**）
 
 > 本轮结论：起始 **1 open issue（#40）** / **6 open PR（#42–#47）**、`main = origin/main = 7d0b4b5`、工作树干净，
 > 但当前分支 `fix/workspace-path-hygiene` 上仍有 **5 个提交领先 `origin/main`、已推送、却没有 PR**——
@@ -2776,8 +2776,8 @@ warnings: ["…VLM API Key 会以明文经过网络：vision.baseUrl 是 http://
 
 | 项 | 起始 | 结束 |
 | --- | --- | --- |
-| 当前分支 | `fix/workspace-path-hygiene`（**领先 `main` 5 个提交、已推送、无 PR**） | `fix/codeql-security-hardening`（= **PR #51**） |
-| `main` | `7d0b4b5`（= `origin/main`） | **`4c4601d`**（#48/#49/#50/#47 已合入；#51 待合） |
+| 当前分支 | `fix/workspace-path-hygiene`（**领先 `main` 5 个提交、已推送、无 PR**） | `fix/pty-status-race`（= **PR #53**；本轮共 6 个 PR） |
+| `main` | `7d0b4b5`（= `origin/main`） | **`7bdfc85`**（#48/#49/#50/#51/#52/#53 与 #47 全部合入） |
 | open issue / open PR | **1 / 6**（#40 / #42–#47） | **1 / 4**（#40 / #42/#43/#45/#46） |
 | vitest 用例 | `main` **323**（322 过 + 1 pty-skip） | `main` **344**；**#51 分支 347**（346 过 + 1 skip） |
 | GitHub 授信 | ✅ **`gh` 已登录 `StvLi`**（`repo` + `workflow`） | 同（本轮 PR/合并/评论全部走 API） |
@@ -2970,6 +2970,59 @@ await writeFile(filePath, content, 'utf8')   // … 再用 —— 两步之间�
 把解析器改写成"可证明线性"会**改变整个工具集依赖的解析形状**，
 那应当**单独一个改动、配自己的测试**，而不是**夹带在一个安全 PR 里**。**有意留着可见，不藏。**
 
+#### 21.3.4 `fix(test)`：一次只改文档的 PR 被 PTY 测试判红（PR #53）
+
+**这是本轮最后一个、也是计划外的一个 PR**——它由本轮自己的 CI 逼出来，值得单独记。
+
+**现象**：PR **#52**（**只改 `dsh-ros2-maintain.md`，零代码**）的 `check (22)` **红**：
+
+```text
+FAIL tests/tools.spec.ts > ros2_install interactive flow (mock installer, no network)
+     > start -> send -> status -> stop drives the installer menus via PTY
+AssertionError: expected '' to contain '众多工具'
+```
+
+**先怀疑环境，先验证再归因**（避免把"偶发"当借口）：
+
+| 证据 | 结果 |
+| --- | --- |
+| #52 首次运行 `check (22)` | **fail** |
+| **同一 job 原样重跑（零代码改动）** | **pass** |
+| #48 / #49 / #50 / #51 的 22/24 四个 job | **全 pass** |
+| 本地 `pnpm test` | **skip**（本机 `it.skipIf(!ptyUsable)`，无法分配 pty） |
+
+⇒ **是偶发（flake），不是我的改动、也不是环境整体坏掉。**
+
+**根因（读代码即可确定，不需要复现）**：`ros2_install` 把安装器跑在一个 **pty 守护进程**里，
+输出是**异步**到达的；而测试在 `start` 之后**立刻只读一次** `status`，要求菜单**此刻已经在**：
+
+```js
+await t.execute({ action: 'start', ... })
+const s1 = await t.execute({ action: 'status', session })   // ← 一点等待都没有
+expect(s1.data.output).toContain('众多工具')                  // ← 赌守护进程已经赢了
+```
+
+后面两步其实是**同一个问题换了一种写法**——`setTimeout(800)` / `setTimeout(2500)`：
+**用"猜一个时长"代替"等到条件成立"**，**降低概率但没有消除竞争**，而且**每次都白付这段延迟**。
+
+**修复**：`statusUntil(t, session, predicate, timeoutMs)` —— **有上限的 100 ms 轮询**，
+**条件一成立立刻返回**；最后一步的判据同时要求 `state` 已到 `exited`，
+而不是**假定输出与状态同时翻转**。测试超时 15 s → 30 s，使真正的失败仍然表现为
+**"哪一个断言始终没等到"**，而不是一个笼统的 timeout。
+
+**验证（如实说明分工）**：`pnpm run typecheck` 过；但这条路径是 `it.skipIf(!ptyUsable)`，
+**本机无法分配 pty**，所以**代码路径只有 CI 能验**——
+`check (22)` 与 `check (24)` **双绿**，这正是 §19.8 记过的"本地 skip / CI 为准"分工。
+
+**为什么把它当成本轮的一条发现，而不是"重跑一下就算了"**：
+
+> **一个偶发红的门禁，本身就是维护负债。**
+> 本维护循环的全部纪律都建立在"push → 开 PR → **等 CI 绿**再合并"之上，
+> 而这条纪律**只有在"绿"确实有信息量时才成立**。
+> 一个会随机把"只改文档"判红的测试，**教出来的是"红了就重跑，直到绿"**——
+> 那一刻起，**绿不再证明任何事**，整套验收线同时失效。
+> 所以"重跑到绿然后合并"是**把问题推向下一轮**，而**修掉竞争**才是这一轮该做的事。
+
 ### 21.4 Dependabot 积压处理
 
 起始 6 个（#42–#47），本轮 6 → 4。**没有采用"逐个合入"的粗暴做法**，因为那正是 #44 的翻车方式：
@@ -3107,14 +3160,20 @@ dsh-ros2-common -> ../../../../Desktop/embody_agent_ws/dsh-ros2/packages/common
    ② **`*.py` glob 会漏掉本仓 6 个无扩展名 Python 脚本**（§21.6）。
 9. **【3 条 ReDoS 有意不修】** 低危但非零（`parseSafetyEcho` 的输入来自话题内容，发布者可控）。
    **改写解析器应当独立成一个改动**，不夹带进安全 PR（§21.3.3）。
+10. **【已修·真实·计划外】PTY 安装器测试存在竞争，会随机把"只改文档"的 PR 判红**（§21.3.4）。
+   不是环境问题：**同一 job 原样重跑即绿**。根因是 **`start` 之后一次 `status` 都不等**，
+   加上两处**用固定 sleep 猜时长**。已改为**有上限的谓词轮询**。
+   **一条发现值得单独立一条**：**偶发红的门禁会摧毁"绿=可信"这个前提**，
+   而本维护循环的合并纪律**完全建立在该前提上**——所以"重跑到绿"不是解决方案，**修掉竞争才是**。
 
 ### 21.8 结论与下一步建议
 
-- **交付**：**4 个 PR**——#48（承接第十五轮在途分支，含 `fix(common)`）、#49（`fix(packaging)`）、
-  #50（`ci(security)` CodeQL 基线）、#51（`fix(security)` 2 处真实缺陷）；其中 **#48/#49/#50 已合入 main**，
-  #51 本轮结束时在跑 CI。另有 #47 合入、#44 关闭。
-  **CI 全部 Node 22/24 双绿**；**CodeQL 首次运行双绿**；用例 `main` **323 → 344**、#51 分支 **347**；
-  9/9 发布面闸门通过；`pnpm audit`（prod 与含 dev）均干净。
+- **交付**：**6 个 PR**——#48（承接第十五轮在途分支，含 `fix(common)`）、#49（`fix(packaging)`）、
+  #50（`ci(security)` CodeQL 基线）、#51（`fix(security)` 2 处真实缺陷）、#52（`docs` 更正 §21 计数
+  ——**含把"29 条的分诊表自身算术对不上"这件事也记进去**）、#53（`fix(test)` PTY 竞争）。
+  **6 个 PR 全部合入 `main`**（另有 #47 合入、#44 关闭）。
+  **CI 全部 Node 22/24 双绿**；**CodeQL 首次运行双绿**；用例 `main` **323 → 347**（346 过 + 1 pty-skip）；
+  9/9 发布面闸门通过；`pnpm audit`（prod 与含 dev）均干净；**告警 29 → 13**（剩下 13 条全是已分诊的类别）。
 - **线上价值**：① **首次有了"读我们自己代码"的安全基线**，且**第一跑就抓到并修掉 2 处真实缺陷**——
    其中 `ros2_interface_create` 的 TOCTOU 是**能被符号链接穿出 output root** 的那一类；
    ② 发布面不再有 3 个包"裸奔"；③ 第十五轮那个静默换环境修复**终于进了 main**。
