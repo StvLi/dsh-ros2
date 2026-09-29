@@ -19,7 +19,9 @@
     "offscreen",
     "scripts",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "!**/__pycache__",
+    "!**/*.pyc"
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",

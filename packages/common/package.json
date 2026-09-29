@@ -17,7 +17,8 @@
     "scripts",
     "README.md",
     "LICENSE",
-    "!**/__pycache__"
+    "!**/__pycache__",
+    "!**/*.pyc"
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
