@@ -2670,6 +2670,19 @@ warnings: ["…VLM API Key 会以明文经过网络：vision.baseUrl 是 http://
 激活一个**惰性动态包**请求重启——与第十四轮同一做法。phoenix 对 busy agent 会**defer**
 （软期限 300 s / 硬期限 900 s），**不会打断当前回合**。
 
+**已确认（journal 原文 + 状态文件，2026-09-29 10:47:49 CST）**：
+
+```text
+[cordis:reload-1] [dsh-ros2-maintain] round 15: requesting a graceful dsh restart via dsh-phoenix …
+[dsh-phoenix] cordis tool: cordis_run
+[dsh-phoenix] restart requested (gen 23): plugin-change        ← 10:47:52
+```
+
+状态文件随即由 `generation: 22` 变为 **`generation: 23` / `lifecycleState: deferred`**
+（`deferDeadline` = 请求后 +900 s 硬期限）——即 phoenix **已登记 gen-23**，正等本会话空闲；
+浏览器由 phoenix 心跳自动重连（§4）。该惰性包**不取任何能力**（只打一行日志），故不可能失败；
+它是**进程内**的临时定义，重启后自然消失。
+
 **如实记录一个观测盲区**：本轮改动落在 `dsh-ros2-common` 的 `lib/`（已重建），但**版本号未变**
 ⇒ `ros2_env_check` 的 **drift 检测看不见**这次变更（它比对的是 `package.json` 的版本，
 不是 `lib/` 的内容哈希）。所以"重启后确认新代码已加载"**不能**只看 drift——
