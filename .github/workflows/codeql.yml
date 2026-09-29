@@ -1,0 +1,79 @@
+# CodeQL code scanning — a baseline for the repository's own code.
+#
+# Rounds 14 and 15 of the maintenance log both recommended this and it kept not
+# happening. Dependabot covers the two halves it can — advisories (alerts +
+# automated security fixes) and version updates — but neither half reads this
+# repository's source. `pnpm audit` only sees the dependency graph either. This
+# is the first check that looks at what we actually wrote.
+#
+# SCOPE
+#
+# The two languages that dominate the tree: 66 TypeScript files and 21 Python
+# files (`git ls-files`). C/C++ is deliberately out of scope — the repository
+# holds exactly ONE `.cpp` (packages/vision/offscreen/src/rviz_offscreen_node.cpp),
+# and a CodeQL C/C++ database that is expected to be *built* would need a full
+# ROS2 Jazzy toolchain (rclcpp, rviz_rendering) on the runner before it could
+# extract anything meaningful. That is a lot of CI for one file; revisit if the
+# C++ surface grows.
+#
+# The Python extractor reads `.py` files and shebang'd extensionless scripts, so
+# packages/vision/vlm/scripts/{vlm_node,vlm_bridge_node,vision_bringup,…} — which
+# are extensionless and begin with `#!/usr/bin/env python3` — are covered too.
+#
+# No `pnpm install` and no build step: the JS/TS and Python extractors are
+# static, so this stays fast and independent of the pnpm workspace layout.
+
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Weekly, so a newly published query can still find something in code that
+    # has not changed since the last scan.
+    - cron: '23 2 * * 1'
+
+# Workflow default stays read-only; the analyze job widens it only for the upload.
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    # A Dependabot-triggered run only ever gets a read-only GITHUB_TOKEN, so the
+    # SARIF upload cannot succeed ("Resource not accessible by integration") and
+    # the check would go red on every dependency PR — this repository has six
+    # such PRs open right now, so that noise would be constant. Skip those and
+    # let the push-to-main run analyse the merged result instead.
+    if: github.actor != 'dependabot[bot]'
+
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [javascript-typescript, python]
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          # Beyond the default suite, in keeping with the security focus of the
+          # maintenance loop. The quality suite is intentionally NOT enabled:
+          # this baseline is for vulnerabilities, not style.
+          queries: security-extended
+
+      # Reports to the Security tab. It does not fail the build on findings, so
+      # this cannot block a legitimate merge.
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:${{ matrix.language }}
