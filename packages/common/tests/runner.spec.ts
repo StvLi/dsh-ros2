@@ -167,6 +167,80 @@ describe('resolveSetup fallback chain + session override', () => {
       setSessionRosSetup(null)
     }
   })
+
+  // ── the existence probe reads the SHELL's word, not its raw text ──────────
+  // `~/vlm_ws/install/setup.bash` names a real file that the raw string "~/…"
+  // is not. Comparing the raw text called the workspace missing, dropped the
+  // segment, and — as the only segment — replaced it with an auto-detected
+  // /opt/ros setup: a silent swap to a different environment than the one
+  // configured, which is exactly what self-heal promises not to do. The README
+  // now recommends the `~/vlm_ws` form, so this is the documented path shape.
+
+  function withFakeHome<T>(run: (home: string) => T): T {
+    const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = require('node:fs')
+    const { tmpdir } = require('node:os')
+    const { join } = require('node:path')
+    const prevHome = process.env.HOME
+    const home = mkdtempSync(join(tmpdir(), 'dsh-home-'))
+    mkdirSync(join(home, 'vlm_ws/install'), { recursive: true })
+    writeFileSync(join(home, 'vlm_ws/install/setup.bash'), 'true\n')
+    process.env.HOME = home
+    try {
+      return run(home)
+    } finally {
+      if (prevHome === undefined) delete process.env.HOME
+      else process.env.HOME = prevHome
+      rmSync(home, { recursive: true, force: true })
+    }
+  }
+
+  it('keeps a healthy ~/… workspace instead of dropping it and swapping the environment', async () => {
+    const { resolveSetup } = await import('../src/runner.js')
+    withFakeHome(() => {
+      const chain = 'source ~/vlm_ws/install/setup.bash && '
+      const setup = resolveSetup({ rosSetup: chain })
+      expect(setup.missingSources).toEqual([])
+      expect(setup.note).toBe('')
+      // emitted verbatim: the configured text is never rewritten to its expansion
+      expect(setup.prefix).toBe(chain)
+      expect(setup.prefix).not.toContain('/opt/ros')
+    })
+  })
+
+  it('validates a $HOME/… segment and still names a genuinely dead sibling', async () => {
+    const { resolveSetup } = await import('../src/runner.js')
+    withFakeHome(() => {
+      const head = 'source $HOME/vlm_ws/install/setup.bash'
+      const setup = resolveSetup({ rosSetup: `${head} && source /nonexistent/sibling/setup.bash && ` })
+      expect(setup.missingSources).toEqual(['/nonexistent/sibling/setup.bash'])
+      expect(setup.prefix).toBe(`${head} && `)
+      // reported as WRITTEN, so the operator can find it in the configuration
+      expect(setup.sourcePath).toBe('$HOME/vlm_ws/install/setup.bash')
+    })
+  })
+
+  it("reports a single-quoted '~/…' as missing — bash would not expand it either", async () => {
+    const { resolveSetup } = await import('../src/runner.js')
+    withFakeHome(() => {
+      const setup = resolveSetup({ rosSetup: "source '~/vlm_ws/install/setup.bash' && ", workspaceRoot: '' })
+      expect(setup.missingSources).toEqual(['~/vlm_ws/install/setup.bash'])
+      expect(setup.prefix).not.toContain('~/vlm_ws')
+    })
+  })
+
+  it('leaves an unresolvable word to the shell instead of declaring it dead', async () => {
+    const { resolveSetup } = await import('../src/runner.js')
+    const prev = process.env.DSH_UNSET_WS_PROBE
+    delete process.env.DSH_UNSET_WS_PROBE
+    try {
+      const chain = 'source $DSH_UNSET_WS_PROBE/install/setup.bash && '
+      const setup = resolveSetup({ rosSetup: chain })
+      expect(setup.missingSources).toEqual([])
+      expect(setup.prefix).toBe(chain)
+    } finally {
+      if (prev !== undefined) process.env.DSH_UNSET_WS_PROBE = prev
+    }
+  })
 })
 
 describe('buildSafetyMonitorCommand', () => {
@@ -242,5 +316,26 @@ describe('setupSourcePaths', () => {
     const { setupSourcePaths } = await import('../src/runner.js')
     expect(setupSourcePaths('')).toEqual([])
     expect(setupSourcePaths('export ROS_DOMAIN_ID=1 && ')).toEqual([])
+  })
+
+  it('resolves ~ and $VAR so a consumer can stat the workspace it names', async () => {
+    // The callers of this helper `existsSync` the result (vision doctor install
+    // roots): handing them the literal `~/vlm_ws/install` would report a built
+    // workspace as missing.
+    const { setupSourcePaths } = await import('../src/runner.js')
+    const home = process.env.HOME
+    process.env.HOME = '/home/dsh-setup-paths'
+    process.env.DSH_SETUP_WS = '/opt/dsh-setup'
+    try {
+      const prefix = 'source ~/vlm_ws/install/setup.bash && source $DSH_SETUP_WS/install/setup.bash && '
+      expect(setupSourcePaths(prefix)).toEqual([
+        '/home/dsh-setup-paths/vlm_ws/install/setup.bash',
+        '/opt/dsh-setup/install/setup.bash',
+      ])
+    } finally {
+      if (home === undefined) delete process.env.HOME
+      else process.env.HOME = home
+      delete process.env.DSH_SETUP_WS
+    }
   })
 })
