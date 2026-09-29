@@ -1,6 +1,7 @@
 import { execFile, spawn, type ExecFileOptions } from 'node:child_process'
 import path from 'node:path'
 import { accessSync, existsSync, readdirSync } from 'node:fs'
+import { expandShellWord, parseSourceWord, resolveSourcePath } from './shellword.js'
 
 export interface RosResult {
   ok: boolean
@@ -92,14 +93,16 @@ export function getSessionRosSetup(): string | null {
 /**
  * Extract the source path from ONE `&&`-separated segment of a shell prefix
  * (`source <path>`), where <path> may be bare, single-quoted (shq), or
- * double-quoted. Returns the unquoted path so callers can `existsSync` it.
- * Bare paths are matched up to the first whitespace / shell control token
- * (legacy behaviour); quoted paths are de-quoted so a path containing spaces
- * round-trips correctly.
+ * double-quoted. Returns the word's text with the outer quotes removed — the
+ * path as WRITTEN, which is what a report should quote back to the operator.
+ *
+ * This is the display/prefixed form, NOT a filesystem path: word splitting and
+ * quoting rules live in `shellword.ts`, and `~/ws` or `$HOME/ws` name real
+ * directories that this text does not. Expand with `expandShellWord` before
+ * touching the filesystem.
  */
 function extractSourcePath(prefix: string): string | undefined {
-  const m = /\bsource\s+(?:'([^']*)'|"([^"]*)"|([^\s&;|]+))/.exec(prefix)
-  return m ? (m[1] ?? m[2] ?? m[3]) : undefined
+  return parseSourceWord(prefix)?.text
 }
 
 /** First existing candidate for `/opt/ros/<distro>/setup.bash`. */
@@ -152,18 +155,21 @@ function splitSourceChain(prefix: string): string[] {
 }
 
 /**
- * Every `source` path of a setup chain, in order, de-quoted.
+ * Every `source` path of a setup chain, in order, resolved for the filesystem
+ * (`~/ws` and `$HOME/ws` expand to real directories).
  *
  * A chain may name more than one workspace (`source A && source B && `), so a
  * caller that needs the workspaces behind the prefix has to read all of them —
  * `extractSourcePath` is deliberately the single-path helper. Segments that
- * carry no `source` (e.g. `export FOO=1`) contribute nothing.
+ * carry no `source` (e.g. `export FOO=1`) contribute nothing. Consumers stat
+ * these paths, so they must be expanded: the raw `~/…` form would answer
+ * "not built" for a workspace that is.
  */
 export function setupSourcePaths(prefix: string): string[] {
   const paths: string[] = []
   for (const segment of splitSourceChain(prefix)) {
-    const src = extractSourcePath(segment)
-    if (src) paths.push(src)
+    const resolved = resolveSourcePath(segment)
+    if (resolved) paths.push(resolved.path)
   }
   return paths
 }
@@ -179,6 +185,13 @@ export function setupSourcePaths(prefix: string): string[] {
  * was written to build *this* environment, so replacing it wholesale with an
  * auto-detected setup would quietly source something else. If nothing usable
  * remains, the original auto-detect fallback applies.
+ *
+ * The check runs against the SHELL's reading of the word, not its raw text
+ * (`~/ws` and `$HOME/ws` are expanded; see `shellword.ts`), because a raw
+ * comparison calls a healthy `~/ws` missing — and then swaps the environment
+ * for an auto-detected one, the very outcome this function exists to avoid.
+ * A word that cannot be resolved (`~user`, unset variable, `$(…)`) is kept and
+ * left to the shell: dropping it would be a guess.
  */
 export function resolveSetup(opts: RunOptions): SetupResolution {
   const explicit = sessionRosSetup ?? opts.rosSetup ?? ''
@@ -186,9 +199,15 @@ export function resolveSetup(opts: RunOptions): SetupResolution {
     const missingSources: string[] = []
     const healthy: string[] = []
     for (const segment of splitSourceChain(explicit)) {
-      const src = extractSourcePath(segment)
-      if (src && !existsSync(src)) missingSources.push(src)
-      else healthy.push(segment)
+      const word = parseSourceWord(segment)
+      if (!word) {
+        // No `source` at all (e.g. `export FOO=1`): no path to check.
+        healthy.push(segment)
+        continue
+      }
+      const resolved = expandShellWord(word)
+      if (!resolved.verified || existsSync(resolved.path)) healthy.push(segment)
+      else missingSources.push(word.text)
     }
     if (missingSources.length === 0) {
       return {

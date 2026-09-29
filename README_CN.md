@@ -257,8 +257,10 @@ GUI 生命周期 + 截图 + 多模态视觉（"先能看，再谈动"）+ xdotoo
 
 ```bash
 # 构建并启动视觉流水线（每图像话题自动建桥）
-mkdir -p /tmp/vlm_ws/src && ln -s <repo>/vlm /tmp/vlm_ws/src/dsh_ros2_vlm
-cd /tmp/vlm_ws && colcon build --symlink-install && source install/setup.bash
+# 工作区请建在 /tmp 之外：重启会清空 /tmp，而 `rosSetup` source 一个已删除的
+# 工作区正是 docs/feedback-env-recovery.md 记录的那类错误配置。这里用 `~/vlm_ws`。
+mkdir -p ~/vlm_ws/src && ln -s <repo>/vlm ~/vlm_ws/src/dsh_ros2_vlm
+cd ~/vlm_ws && colcon build --symlink-install && source install/setup.bash
 VLM_API_KEY=... ros2 run dsh_ros2_vlm vlm_node &       # 并行 VLM 进程
 ros2 run dsh_ros2_vlm vision_bringup &                 # 发现话题，每路一桥
 ```
@@ -268,9 +270,9 @@ ros2 run dsh_ros2_vlm vision_bringup &                 # 发现话题，每路�
 真实 rviz 渲染栈（`rviz_common` + OGRE + `rviz_default_plugins`）在 Xvfb（虚拟显示器）下加载 `.rviz` 场景离屏渲染，把画面发布为 `/rviz/scene` 图像话题——读取渲染内核而非 X 截图，无窗口层级依赖。
 
 ```bash
-# 构建（需要 vlm_ws 同款工作区）
-ln -s <repo>/offscreen /tmp/vlm_ws/src/dsh_ros2_rviz_offscreen
-cd /tmp/vlm_ws && colcon build --symlink-install && source install/setup.bash
+# 构建（需要 vlm_ws 同款工作区——同样别建在 /tmp 里）
+ln -s <repo>/offscreen ~/vlm_ws/src/dsh_ros2_rviz_offscreen
+cd ~/vlm_ws && colcon build --symlink-install && source install/setup.bash
 # 运行（config_path 指向 .rviz 场景文件）
 xvfb-run -a -s "-screen 0 1280x800x24" ros2 run dsh_ros2_rviz_offscreen rviz_offscreen_node \
   --ros-args -p config_path:=/tmp/robot_scene.rviz -p topic:=/rviz/scene \
@@ -352,8 +354,8 @@ MoveIt 包——只需 SRDF 路径（包扫描自动解析，或显式 `srdf`/`p
 
 ```bash
 # 构建 safety 包（与 vlm/、offscreen/ 同一 colcon 工作区）
-ln -s <repo>/safety /tmp/vlm_ws/src/dsh_ros2_safety
-cd /tmp/vlm_ws && colcon build --symlink-install && source install/setup.bash
+ln -s <repo>/safety ~/vlm_ws/src/dsh_ros2_safety
+cd ~/vlm_ws && colcon build --symlink-install && source install/setup.bash
 ```
 
 `safety_core` 纯逻辑自带故障注入自测（`python3 packages/safety/safety/scripts/safety_core.py

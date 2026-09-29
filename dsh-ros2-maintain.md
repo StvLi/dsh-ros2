@@ -1,8 +1,8 @@
 # dsh-ros2 日常维护文档（Maintenance Log）
 
 > 仓库：`StvLi/dsh-ros2` · 本地代码：`/home/stvli/Desktop/embody_agent_ws/dsh-ros2`（git remote `git@github.com:StvLi/dsh-ros2.git`）
-> 维护日期：2026-09-26（最近一轮） · 维护者：DSH scheduled-run agent（StvLi 仓）
-> 维护轮次：第一轮 2026-09-03（§0–§7）；第二轮 2026-09-04（§8）；第三轮 2026-09-05（§9，安全修复）；第四轮 2026-09-05（§10，无 open issue → 安全检查 → 两项维护卫生修复）；第五轮 2026-09-06（§11，无 open issue → 安全检查 → 落地 `ros2_install` 注入修复）；第六轮 2026-09-11（§12，无 open issue → 安全检查 → 落地 `safety_monitor` / `zero_pose_semantics` 注入修复 + vitest 4 升级 + CI 最小权限）；第七轮 2026-09-13（§13，open issue #19 → journey skills + 组合不变量）；第八轮 2026-09-14（§14，3 个 open issue → #21 修复并真机复核、#22 落地但保留 open、#19 完成验收测量）；第九轮 2026-09-21（§15）：open issue #22 → 补齐"会话技能目录对账"（其唯一未实现项）+ 修复 `ros2_env_check` 的"报告 ≠ 执行"缺陷（第八轮存疑项的真因）+ 安全复测；**第十轮 2026-09-22（§16，本轮）：补齐第九轮"在途无 PR"的缺口（PR #27，CI 首跑即抓出"本地绿、CI 红"）→ 在运行中进程里验收并关闭 issue #22 → 定位并修复线上故障真因（`rosSetup` 只校验第一段）→ 3 个 PR 全部合入 main**；第十二轮 2026-09-24（§17，收尾超时遗留的在途 PR #32 → 实测第十轮的重启请求已按硬期限落地 → 修复"配置没送到 doctor"的接线缺口 + API Key 来源语义）；第十三轮 2026-09-25（§18，0 open issue / 0 open PR → 安全扫描发现并落地 3 处真实缺陷 = PTY 会话 id 路径穿越 · 发布物携带 `__pycache__` 字节码 · 安装器选项注入，并开启 Dependabot 告警）；**第十四轮 2026-09-26（§19，本轮）：0/0 → 先闭环第十三轮唯一的未闭环观测（gen-21 重启逐字命中），再落地 3 个 PR = 明文传输的 VLM API Key 可见化 · 插件自建 IPC 对象权限收紧（PTY 会话文件 / sidecar UDS / 安装器脚本）· Dependabot 版本更新；并把跨五轮未处理的部署配置项升级为 issue #40**。
+> 维护日期：2026-09-29（最近一轮） · 维护者：DSH scheduled-run agent（StvLi 仓）
+> 维护轮次：第一轮 2026-09-03（§0–§7）；第二轮 2026-09-04（§8）；第三轮 2026-09-05（§9，安全修复）；第四轮 2026-09-05（§10，无 open issue → 安全检查 → 两项维护卫生修复）；第五轮 2026-09-06（§11，无 open issue → 安全检查 → 落地 `ros2_install` 注入修复）；第六轮 2026-09-11（§12，无 open issue → 安全检查 → 落地 `safety_monitor` / `zero_pose_semantics` 注入修复 + vitest 4 升级 + CI 最小权限）；第七轮 2026-09-13（§13，open issue #19 → journey skills + 组合不变量）；第八轮 2026-09-14（§14，3 个 open issue → #21 修复并真机复核、#22 落地但保留 open、#19 完成验收测量）；第九轮 2026-09-21（§15）：open issue #22 → 补齐"会话技能目录对账"（其唯一未实现项）+ 修复 `ros2_env_check` 的"报告 ≠ 执行"缺陷（第八轮存疑项的真因）+ 安全复测；**第十轮 2026-09-22（§16，本轮）：补齐第九轮"在途无 PR"的缺口（PR #27，CI 首跑即抓出"本地绿、CI 红"）→ 在运行中进程里验收并关闭 issue #22 → 定位并修复线上故障真因（`rosSetup` 只校验第一段）→ 3 个 PR 全部合入 main**；第十二轮 2026-09-24（§17，收尾超时遗留的在途 PR #32 → 实测第十轮的重启请求已按硬期限落地 → 修复"配置没送到 doctor"的接线缺口 + API Key 来源语义）；第十三轮 2026-09-25（§18，0 open issue / 0 open PR → 安全扫描发现并落地 3 处真实缺陷 = PTY 会话 id 路径穿越 · 发布物携带 `__pycache__` 字节码 · 安装器选项注入，并开启 Dependabot 告警）；**第十四轮 2026-09-26（§19）：0/0 → 先闭环第十三轮唯一的未闭环观测（gen-21 重启逐字命中），再落地 3 个 PR = 明文传输的 VLM API Key 可见化 · 插件自建 IPC 对象权限收紧（PTY 会话文件 / sidecar UDS / 安装器脚本）· Dependabot 版本更新；并把跨五轮未处理的部署配置项升级为 issue #40；**第十五轮 2026-09-29（§20，本轮）：open issue #40 → step 2 评估（合理、必要，但配置在仓库外且需运维决定）→ **承接上一轮时间窗被截断留下的在途分支** `fix/workspace-path-hygiene` 并落地 `fix(common)`：自愈探针用**原始文本**比对存在性，把**存活但写成 `~/…`** 的工作区判为缺失、剔除该段、并在只剩它时**静默切换到 `/opt/ros/<distro>`** —— 恰是本轮文档新推荐的路径形式；闭环第十四轮的 gen-22 观测（逐字命中）；实测线上 **6 处**死链（issue #40 少算 1 处）；本轮**无 GitHub API token**，改用一次性 `ci/probe-*` 分支取得 CI（Node 22/24 双绿）后删除**。**
 
 本文件记录 dsh-ros2 插件的一次完整日常维护循环：**查 issue → 评估建议 → 分支开发 → 验证 → 推送 → 交付维护文档**。每次维护在下方追加一节。
 
@@ -2480,3 +2480,282 @@ Sep 26 04:19:40  [dsh-phoenix] restart requested (gen 22): plugin-change
      凡涉及 PTY/交互路径的改动，**本地 skip 是常态，必须以 CI 为准**；
      推送前 `typecheck + test + build`、推送后**立刻开 PR 并等 CI 绿再合并**；
      合并前**先提交或 stash**（§19.3 的教训）。
+
+---
+
+## 20. 维护记录（2026-09-29 10:35 CST / UTC 2026-09-29 02:35 · 第十五轮：open issue #40 → step 2 → 承接在途 `fix/workspace-path-hygiene` 并落地 `fix(common)`（自愈把"存活但写成 `~/…`"的工作区判为缺失 → **静默换环境**）→ 闭环第十四轮 gen-22 观测 → 实测线上 **6 处**死链 → 本轮无 API token，用一次性 `ci/probe-*` 分支取得 CI 双绿）
+
+> 本轮结论：起始 **1 open issue（#40）** / **6 open PR（#42–#47）**、`main = origin/main = 7d0b4b5`、工作树干净，
+> 但**当前分支 `fix/workspace-path-hygiene` 上有 2 个未推送的 `docs:` 提交**——即**上一轮的时间窗被截断，留下一段在途交付**。
+> 于是本轮按 step 1 的"有 issue"分支走 step 2–4，但**不是从零开始**：先**承接在途分支**（命名本就符合 `fix/...`），
+> 再在其上补上**唯一真正缺的那一半**——代码。
+> 本轮最有价值的发现**不在 issue 里**：issue #40 讲的是"配置里指向已删除的工作区"，
+> 而本轮发现**插件自己**会把**存活的工作区**判成缺失并**静默换到另一个环境**，
+> 触发条件正是**本分支刚在 README 里推荐的 `~/vlm_ws` 写法**。
+> 另外如实记录一个**运维缺口**：本轮的 `gh` **没有可用 token**，"开 PR / 合并"两环**首次无法执行**（§20.7 第 3 条）。
+
+### 20.0 仓库快照（本轮起始/结束）
+
+| 项 | 起始 | 结束 |
+| --- | --- | --- |
+| 当前分支 | `fix/workspace-path-hygiene`（**本地领先 `main` 2 个 `docs:` 提交、未推送**；工作树干净） | 同分支 = **`2b7780a`**（**已推送** `origin/fix/workspace-path-hygiene`） |
+| `main` | `7d0b4b5`（= `origin/main`） | 同（**未动**——本轮无权开 PR，故不直接落 `main`） |
+| open issue / open PR | **1 / 6**（#40 / #42–#47） | **1 / 6**（本轮**未新增、也未合并**任何 PR——授信缺口见 §20.3） |
+| vitest 用例 | 323（322 过 + 1 pty-skip） | **344**（343 过 + 1 pty-skip） |
+| 包数量 / 环境 | 9 包 · Node `v24.16.0` · pnpm `11.22.0` · vitest 4.1.11 | 同 |
+| 运行中的 dsh | 启动于 **2026-09-29 10:32:53 CST**（= 第十四轮请求的 **gen-22** 落地产物，phoenix `generation: 22`、`lifecycleState: running`、MainPID 1570） | 同进程；本轮改动已重新构建进 `lib/`，**gen-23 重启请求待执行**（§20.5） |
+| GitHub 侧 | Dependabot 告警 + 版本更新均已开（`#42–#47` 已自动开出）、**CodeQL 未配置** | 同（CodeQL 仍未配置——连续第二轮提出） |
+
+### 20.1 Issue 检查（step 1）
+
+```text
+gh issue list --state open   → 1   （#40）
+GET /issues?state=open       → 7   （其中 6 条是 PR：#42–#47）
+git rev-list --left-right --count main...origin/main → 0  0
+git status --porcelain       → （空）
+```
+
+| # | 类型 | 标题 | 创建 | CI / 可合并性（本轮实测） |
+| --- | --- | --- | --- | --- |
+| **#40** | **issue** | `chore(deploy): 5 rosSetup chains still source the deleted /tmp/vlm_ws (self-heal masks it)` | 2026-09-25 | —（**本轮 step 2 的评估对象**） |
+| #42 | PR·Dependabot | `chore(deps): bump @deepseek-ai/cordis 4.0.1 → 4.0.4` | 2026-09-25 | `check (22)`/`check (24)` **success**，`clean` |
+| #43 | PR·Dependabot | `chore(deps): bump vitest 4.1.11 → 5.0.1` | 2026-09-25 | **success**（大版本，`mergeable_state=unknown`） |
+| #44 | PR·Dependabot | `chore(deps): bump @deepseek-ai/schemastery 3.18.1 → 3.18.4` | 2026-09-25 | **`check(24): failure` / `check(22): cancelled`** ← 已知的 lockfile 双副本问题 |
+| #45 | PR·Dependabot | `chore(deps): bump @types/node 24.13.3 → 26.6.2` | 2026-09-25 | **success**（`engines` 可能受影响，待人工过目） |
+| #46 | PR·Dependabot | `chore(deps): bump @deepseek-ai/dsh-skill 0.1.0-rc.6 → 0.1.0-rc.8` | 2026-09-25 | **success**，`clean` |
+| #47 | PR·本仓 | `fix(deps): take the schemastery bump with a deduplicated lockfile` | 2026-09-26 | **success**，`clean`——**#44 的超集替代**（第十四轮为此而开） |
+
+**⇒ 存在未处理的 issue（#40）→ 转入 step 2。** 与第十三/十四轮"0 open issue → 直接 step 5"不同。
+
+### 20.2 建议评估（step 2）——issue #40 的合理性与必要性
+
+issue #40 的主张：`~/.dsh/profiles/web/cordis.patch.yml` 有 5 处 `rosSetup` 以
+`&& source /tmp/vlm_ws/install/setup.bash` 结尾，而 `/tmp/vlm_ws` 已不存在；插件会自愈
+（剔除死段）故**不是故障**，但每次调用多一次 `existsSync` 与一条告警噪声。
+
+| 判断维度 | 结论 | 依据（本轮实证，非推断） |
+| --- | --- | --- |
+| **真实性** | ✅ 成立 | 读配置：第 33/37/41/45/49 行**逐字**仍是 `/tmp/vlm_ws/…`；`ls -d /tmp/vlm_ws` → 不存在 |
+| **自愈确实有效（不是故障）** | ✅ 成立 | 实跑 `ros2_env_check`：`setup.prefix` 已收敛为 `source /home/stvli/lite_delivery_aio/install/setup.bash && `，`missingSources` 如实点名死段，`probe.exitCode = 0` |
+| **影响面** | ⚠️ **低**（同意 issue 自评） | 代价 = 每次调用一次 `existsSync` + 一条 note；**不改**语义、不失败 |
+| **是否必要的修复** | ✅ 必要，但**须由运维决定** | 文件在**仓库外**、属于**运行中的部署**、改动**需重启**才生效；issue 正文自己声明"editing it is a deliberate operator decision" |
+| **本次是否该由维护任务直接改** | ❌ 不改 | ① 沙箱策略为 workspace-write，该文件在会话工作区**之外**；② 即便可写，这正是 issue 明确保留给运维的决定，**speculative escalation** 不应成立；③ 本轮**无 token**，改完也**无法开 PR** 让改动可审（§20.3） |
+
+**本轮对该 issue 的推进方式（不是"又悬着"，而是把它拆成能落地的两半）**：
+
+1. **根因侧（仓库内·已落地）**：README / README_CN 的构建示例**不再教**把 colcon 工作区建在 `/tmp`
+   （改为持久路径 `~/vlm_ws` 并写明理由）——**死链是这些示例攒出来的**。
+2. **收尾侧（仓库外·给出可粘贴修法）**：`docs/feedback-env-recovery.md` 新增一节，
+   写明成因、一行修法（×6，见 §20.7 第 2 条）、以及"删段前后生效前缀**逐字节相同**"的等价性证明。
+3. **【本轮新增·最重要】发现推荐写法在插件里**本来是坏的**：`~/vlm_ws` 这种写法会让自愈
+   把**存活**的工作区判为缺失并**静默换环境**（§20.4）。也就是说，
+   **照 issue #40 的修法把路径改短、或照 README 的推荐写法配置，反而会踩到一个更坏的缺陷**——
+   这一条 issue #40 完全没有提到，是本轮扫描/验证自己撞见的。
+
+### 20.3 开发管理（git · step 3）
+
+**分支策略**：起始分支 `fix/workspace-path-hygiene` 已存在且**命名符合 `fix/...` 规范**、
+内容正是 issue #40 的文档一半（`docs:` ×2），只是**未被推送**（上一轮时间窗截断）。
+本轮**承接该分支**而非另开新分支——另开会让这段在途工作与代码修复分家，
+而 PR 审阅时"根因文档 + 根因代码"本就应该在一起。**不重复开分支是有意的判断，不是省事。**
+
+| 提交 | 类型 | 内容 |
+| --- | --- | --- |
+| `ed6053c` | `docs` | README / README_CN 构建示例 `/tmp/vlm_ws` → `~/vlm_ws`（**根因**：`/tmp` 重启即清空） |
+| `92a7f5b` | `docs(env)` | `docs/feedback-env-recovery.md` 增"部署配置卫生"节：成因 + 一行修法 + 等价性证明 + 通用规则 |
+| **`2b7780a`** | **`fix(common)`** | **新增 `shellword.ts`，让存在性探针按 shell 的读法解析 `source` 词；`runner.ts` 接入；+21 用例** |
+
+**本轮的方法论调整：无 API token ⇒ 用一次性 probe 分支取得 CI（重要且如实记录）**
+
+```text
+$ gh auth status
+  X Failed to log in to github.com account StvLi … The token … is invalid.
+$ ls -la ~/.config/gh/hosts.yml   → 97 bytes，**只有用户名，没有任何 token**
+$ gh auth token -u StvLi          → （空）
+$ git push --dry-run origin …     → ✅ 可用（SSH key 正常）
+```
+
+⇒ 本轮**只能 SSH 推送，不能 `gh pr create` / `gh pr merge`**（第十/十二/十三/十四轮都可用 `gh`）。
+若就此收尾，就会丢掉本文档一贯的验收线"**推送后 CI 绿**"——因为 `ci.yml` 只在
+`push: [main]` 与 `pull_request` 上触发，**推一个 feature 分支不会产生任何 CI 运行**。
+
+为不放弃这条验收线，本轮采用**一次性 probe 分支**：
+
+1. 从 `fix/workspace-path-hygiene` 开 `ci/probe-workspace-path-hygiene`（**树与 fix 分支逐字节相同**）；
+2. 仅在其上加一个提交，把 workflow 触发面临时改为 `branches: [main, 'ci/probe-*']`；
+3. 推送 → CI 运行 → **Node 22 / Node 24 双绿**：
+   <https://github.com/StvLi/dsh-ros2/actions/runs/36513969874>
+   （`check (22): success`、`check (24): success`；提交 `e116ee6`）
+4. **删除该分支**（本地 + 远端），使远端不留一次性分支。
+
+**这不是绕过 PR 流程**：probe 分支只提供"同一棵树已过 CI"这一条独立证据，
+**正式 PR 仍需运维在有 token 时开**（见 §20.8"待运维"）。之所以值得这么做，是因为
+CI 在**干净 checkout + `--frozen-lockfile` + 公共 registry audit** 下跑，
+本机跑不出这两个条件（§20.6）。
+
+### 20.4 本地验收 + 修复的真实前后对比
+
+**发现路径**：本轮的文档提交把 README 的示例改成 `~/vlm_ws`。顺手核验"这个形式插件真的支持吗"——
+`resolveSetup` 用 `existsSync` 比对**原始文本**，而 Node **不展开 `~`**。
+
+**修复前（用修复前构建的 `lib/` 实跑，非推断）**：
+
+```text
+$ node -e "…resolveSetup({rosSetup:'source ~/Desktop/…/dsh-ros2/package.json && '})"
+{ "prefix": "source /opt/ros/jazzy/setup.bash && ",          ← ★ 静默换到了别的环境
+  "sourcePath": "/opt/ros/jazzy/setup.bash",
+  "missingSources": ["~/Desktop/…/dsh-ros2/package.json"],   ← ★ 文件明明存在
+  "note": "配置的 rosSetup source 路径不存在：…；已自动回退到 /opt/ros/jazzy/setup.bash。建议修正配置。" }
+$ node -e "require('fs').existsSync('~/…/package.json')"  →  false   （展开后 → true）
+```
+
+**修复后（同一表达式，本次重新构建的 `lib/`）**：
+
+```text
+$ node -e "…resolveSetup({rosSetup:'source ~/.bashrc && '})"
+  missingSources: []           ← 不再误判
+  prefix: "source ~/.bashrc && "   ← ★ 逐字保留配置原文，未被改写成展开形式
+```
+
+**为什么这是"静默换环境"而不是"少报一条警告"**：`~/vlm_ws` 作为**唯一**段时，缺失判定会让
+`kept.length === 0`，代码随后走 `autoDetectSetup()` → `/opt/ros/<distro>/setup.bash`。
+于是**用户自己构建的工作区从 `AMENT_PREFIX_PATH` 里彻底消失**，
+所有 `ros2_*` 工具都对着**另一个环境**跑——而这正是该函数注释里"replacing it wholesale with an
+auto-detected setup would quietly source something else"声称要避免的事，且**没有任何红色信号**。
+
+**修复设计（faithful，不越权）**：
+
+| 面 | 处理 |
+| --- | --- |
+| 展开范围 | **只**做决定存在性的两种：行首 `~`（**仅裸词**——bash 在引号内不展开 `~`）与 `$NAME` / `${NAME}` |
+| 引号语义 | 单引号**什么都不展开**；双引号**不展开 `~`**；`\$` 保持字面 `$` |
+| 裸词分词 | 顺带修好 `\X` 转义：`source /a\ b/setup.bash` 现在是**一个**词，不再在空格处被截断 |
+| **不可解**的词 | `~user`、**未设置**的变量、`$(…)` → `verified: false` → **保留该段**（**绝不**凭猜测换环境），把错误留给 shell 自己的 stderr |
+| 是否改写命令 | **否**。`prefix` 逐字节不变（有测试断言 `~/…` 链路原样回环）；`missingSources` 仍报**配置里的原文**，便于运维 grep 定位 |
+| `setupSourcePaths` | 改为返回**已解析**路径——其消费者（vision doctor 的 install 根）要 `existsSync` 它，否则会把**已构建**的 `~/vlm_ws` 报成 "not built" |
+
+**验收（与 CI 同样的步骤，本机执行）**：
+
+| 步骤 | 结果 |
+| --- | --- |
+| `pnpm install --frozen-lockfile` | ✅ |
+| `pnpm audit --prod --audit-level high` | ⚠️ 本机镜像（npmmirror）**没有 audit 端点**；改用 `--registry=https://registry.npmjs.org` → ✅ **No known vulnerabilities found** |
+| `pnpm run typecheck` | ✅ 9 包 |
+| `pnpm run test` | ✅ **343 过 + 1 pty-skip = 344**（323 → 344，**+21** = `shellword.spec.ts` 16 + `runner.spec.ts` 5） |
+| `pnpm run build` | ✅ |
+| 发布面闸门（`pnpm pack` ×9） | ✅ 9/9 OK，**无 tarball 携带 `.pyc`/`__pycache__`** |
+| **CI（probe 分支，干净 checkout）** | ✅ **Node 22 + 24 双绿** |
+
+### 20.5 dsh-phoenix 持续更新/测试循环（step 4）
+
+**先闭环第十四轮唯一的运行时可观测项（预言 → 实测第二次）**：第十四轮 §19.8 第 1 条要求复核
+"gen-22 重启后 `ros2_vision_doctor` 应出现 `apiKey.transport`，且对本机配置报 `cleartext: true` + 告警"。
+本轮**逐字命中**：
+
+```json
+"apiKey": { "provider":"openai", "source":"secrets", "plaintext":false,
+            "baseUrl":"http://121.9.219.138:8888/v1",
+            "transport": { "scheme":"http","host":"121.9.219.138","loopback":false,"cleartext":true },
+            "secretsFile": { "mode":"600", "keyPresent":true } }
+warnings: ["…VLM API Key 会以明文经过网络：vision.baseUrl 是 http:// 且主机 121.9.219.138 不是回环地址…"]
+```
+
+⇒ **#38 的线上价值确认闭环**（一处"当前正在发生"的凭证暴露面已从"静默健康"变为"上报 + 告警"）。
+
+**循环接线核对**：dsh-phoenix `0.2.6` 以 `link:` 装入 web profile；`/__dsh_health` 在线
+（token `1790649175334-…`）；状态文件 `~/.dsh-phoenix-state.json`：
+`generation: 22`、`lifecycleState: running`、`pendingResume: false`；`systemd --user dsh-web.service` active。
+**触发面**：本会话的工具表里**没有** phoenix 自己的 `dsh_phoenix_restart` 工具，
+故按文档化触发面（`cordis_run`，phoenix 的 `CORDIS_TRIGGER = { cordis_run: true }`）在**本轮末尾**
+激活一个**惰性动态包**请求重启——与第十四轮同一做法。phoenix 对 busy agent 会**defer**
+（软期限 300 s / 硬期限 900 s），**不会打断当前回合**。
+
+**已确认（journal 原文 + 状态文件，2026-09-29 10:47:49 CST）**：
+
+```text
+[cordis:reload-1] [dsh-ros2-maintain] round 15: requesting a graceful dsh restart via dsh-phoenix …
+[dsh-phoenix] cordis tool: cordis_run
+[dsh-phoenix] restart requested (gen 23): plugin-change        ← 10:47:52
+```
+
+状态文件随即由 `generation: 22` 变为 **`generation: 23` / `lifecycleState: deferred`**
+（`deferDeadline` = 请求后 +900 s 硬期限）——即 phoenix **已登记 gen-23**，正等本会话空闲；
+浏览器由 phoenix 心跳自动重连（§4）。该惰性包**不取任何能力**（只打一行日志），故不可能失败；
+它是**进程内**的临时定义，重启后自然消失。
+
+**如实记录一个观测盲区**：本轮改动落在 `dsh-ros2-common` 的 `lib/`（已重建），但**版本号未变**
+⇒ `ros2_env_check` 的 **drift 检测看不见**这次变更（它比对的是 `package.json` 的版本，
+不是 `lib/` 的内容哈希）。所以"重启后确认新代码已加载"**不能**只看 drift——
+这也是 §20.8 第 1/2 条给出**具体验证手法**的原因。
+
+### 20.6 安全扫描（step 5）
+
+| 面 | 结果 |
+| --- | --- |
+| 供应链（`pnpm audit --prod --audit-level high`，公共 registry） | ✅ **No known vulnerabilities found**；其"空转"风险已定级为**环境问题**（本机镜像无 audit 端点，须显式 `--registry`） |
+| 硬编码密钥（`sk-…` / `AIza…` / `ghp_…` / `api_key: "…"`） | ✅ **0**（工作树 `git grep`） |
+| 发布面 | ✅ 9/9 tarball 含入口点、**0 个** `.pyc` / `__pycache__` |
+| Python 执行面 | ✅ `shell=True` / `os.system` / `eval` / `exec(` **命中 0**；`subprocess.*` **全部 argv 数组** |
+| TS 命令面 | ✅ 只有 `execFile` / `spawn`（argv 数组）+ `bash -lc`（命令由 `shq()` 逐参拼装），**无 `execSync` / `shell: true`** |
+| 既有防线回归（第十三/十四轮） | ✅ 全部仍在：PTY 会话 id 双层守卫（`safe_sid()`）、PTY 目录/文件 **0700/0600**、sidecar UDS **0600**、安装器 `umask 077` + `chmod 700`、`classifyVisionTransport()` 的回环/明文判定、9 包 `files` 均排除 `__pycache__` |
+| CodeQL / 静态分析 | ❌ **仍未配置**（连续第二轮提出） |
+
+**本轮新增代码的安全评审（自己引入的面）**：
+
+| 面 | 结论 |
+| --- | --- |
+| `shellword.ts` 的展开 | **只读、纯函数**：不执行、不写文件、不发网络；无正则回溯风险（均为线性字符类）；对同一输入必然前进，**无死循环** |
+| 展开是否影响**实际执行的命令** | **否**。`prefix` 逐字节保留原文（有测试断言），展开结果**只**用于 `existsSync` |
+| 展开是否可能**放宽**既有保证 | **否**，方向相反：修复前的行为是"**误判缺失 → 剔除 → 回退到别的环境**"（更激进）；修复后只在**证明缺失**时才剔除，**不可解就保留** |
+| 新增的**信息可见面** | `setupSourcePaths` 现在返回展开后的路径，若配置里写了 `$SOME_VAR`，`ros2_vision_doctor` 的 install 根列表会**显示该变量的值**。**如实记录为边界，不定级为缺陷**：变量来自**运维自己写的配置**与**本进程环境**，非远端输入，无新增执行/网络路径；且值本就由配置持有者掌控 |
+| 未采纳 | ① 不把 `~user` 交给 passwd 查询（需要额外 API，收益极低）；② **不**让插件改写运维的配置文件（issue #40 明确保留该决定） |
+
+### 20.7 本轮发现
+
+1. **【已修·真实·类型：静默换环境】自愈探针把存活工作区判为缺失并回退到另一环境**（§20.4）。
+   触发形式是 `~/vlm_ws`——**本分支的文档刚推荐**、且 README 长期以 `source <path>` 示例
+   `~` 的写法在 shell 里极其常见。**这是本轮最有价值的发现，且不在任何 issue 里。**
+   定级：**正确性缺陷、无安全影响**；后果是"对错环境执行"而非崩溃，恰恰因此**更难察觉**。
+2. **【仓库外·仍悬置·实测 6 处（issue 少算 1 处）】** 线上配置的 `rosSetup` 死链**不是 5 处而是 6 处**：
+   5 处属于 `dsh-ros2` 各 bundle（`/tmp/vlm_ws/install/setup.bash`），
+   第 6 处在 **`dsh-deepcybo-lite`**（第 63 行，`/home/stvli/Desktop/bar_ws/install/setup.bash`，**该目录不存在**；
+   `dsh-deepcybo-lite` 已作为 bundle 装入 web profile，非惰性残留）。
+   issue #40 只统计了前者。**本轮仍不擅自修改**（理由见 §20.2），但把它从"5 处"更正为"6 处"。
+3. **【运维缺口·本轮首次·阻断交付后两环】** **`gh` 无可用 token**（`hosts.yml` 里没有任何 token、
+   `gh auth token` 为空）⇒ 只能 SSH push，**不能 `gh pr create` / `gh pr merge`**。
+   后果：① 推 feature 分支**不触发 CI**（`ci.yml` 只在 `push: [main]` 与 `pull_request` 上跑）；
+   ② 本轮成果**只能停在分支上**，无法进入评审/合并。已用 §20.3 的 probe 分支补上 CI 证据，
+   但**"开 PR"这一环必须由运维恢复**（`gh auth login`，或提供 `GH_TOKEN`）。
+   *这是维护循环第一次遇到该缺口，建议把它本身当作一条运维待办。*
+4. **【CI 观测】** #44（schemastery）**红**、#47（去重 lockfile 的同版升级）**绿**——
+   第十四轮开 #47 的判断得到验证；另有 **4 个 Dependabot PR（#42/#43/#45/#46）CI 已绿**却仍开着，
+   说明**积压的原因不是 CI，而是无人合并**（本轮亦无合并权限）。
+5. **【观测盲区】** bundle 的 `drift` 只看版本号 ⇒ **"`lib/` 已重建但进程未重启"不可见**（§20.5）。
+
+### 20.8 结论与下一步建议
+
+- **交付**：分支 `fix/workspace-path-hygiene`（`origin` 上的 `2b7780a`）共 3 个提交：
+  `docs`（README 根因）+ `docs(env)`（运维修法）+ **`fix(common)`**（本轮代码修复）。
+  **CI（等价树）Node 22/24 双绿**；用例 **323 → 344**；9/9 发布面闸门通过；`pnpm audit` 干净。
+- **线上价值**：自愈不再把**存活**的工作区判死并**静默切换到 `/opt/ros/<distro>`**；
+  `~/…` / `$HOME/…` 这类**正常写法**不再触发"建议修正配置"的假警报；
+  顺带修好裸词 `\ ` 转义被截断的分词缺陷。
+- **待运维（本轮无法完成的三件事）**：
+  1. **开 PR**：`fix/workspace-path-hygiene` → `main`（本轮无 token；CI 证据见 §20.3）。
+  2. **决定 issue #40**：按 §20.7 第 2 条给出的**6 处**逐字修法修改部署配置（一行删尾段），
+     随后**优雅重启**使告警消失；等价性已证明（前缀逐字节相同），因此可安全后置、但不应无限期悬置。
+  3. **恢复 PR 能力**：`gh auth login`（或提供 `GH_TOKEN`），否则后续每一轮都会卡在同一处；
+     同时可顺手合并 **#47**（绿，替代 #44）、关闭 #44。
+- **下次维护建议**：
+  1. **复核 gen-23 重启后的现场**（本轮唯一的运行时观测）：确认新 `common` 已加载
+     ——**不能只看 `drift`**（§20.7 第 5 条），可用 §20.5 的方法或直接看 `lib/` 的 mtime。
+  2. **用真实 `~/…` 配置做运行中验收**：把某个 bundle 的 `rosSetup` 之一改写成
+     `~/lite_delivery_aio/install/setup.bash`（**行为等价**：同一文件、同一展开结果）后，
+     运行中进程的 `ros2_env_check` 应报 `missingSources: []`——这是把本轮修复在**运行中进程**里
+     闭环的唯一办法（本机 `node` 直跑只验证了库，不是进程内）。
+  3. **处理积压**：issue #40（6 处）+ 5 个 Dependabot PR（#47 优先）。
+  4. **配置 CodeQL**（连续第二轮）：Dependabot 两半已齐，静态分析仍无基线；本仓 TS + Python 混合，
+     值得给 `packages/*/src` 与 `packages/*/scripts` 建一条 code scanning。
+  5. **维持并扩展验收线**：`typecheck + test + build` 全绿 → push → **开 PR 等 CI** →
+     合并前先提交/stash；本机 `pnpm audit` **必须带 `--registry=https://registry.npmjs.org`**；
+     **无 token 时**用一次性 `ci/probe-*` 分支取得 CI 证据并**用完即删**（§20.3）。
