@@ -3025,6 +3025,34 @@ dsh-ros2-common -> ../../../../Desktop/embody_agent_ws/dsh-ros2/packages/common
 一个**惰性动态包**请求优雅重启（与第十四/十五轮同一做法）。phoenix 对 busy agent 会 **defer**
 （软期限 300 s / 硬期限 900 s），**不会打断当前回合**。
 
+**已确认（journal 原文 + 状态文件，2026-09-30 04:22:47 CST）**：
+
+```text
+[dsh-phoenix] cordis tool: cordis_run
+[dsh-phoenix] restart requested (gen 24): plugin-change        ← 04:22:47
+[dsh-phoenix] cordis tool: cordis_run
+[dsh-phoenix] restart already in-flight; coalesced plugin-change   ← 04:22:55
+```
+
+```json
+{ "generation": 24, "lifecycleState": "deferred", "pendingResume": false,
+  "deferDeadline": 1790714267566, "updatedAt": 1790713367566, "coalesced": true }
+```
+
+`deferDeadline − updatedAt = 900000 ms`，**正好是文档化的 900 s 硬期限**——与第十四/十五轮一致。
+
+**两个如实记录的点**：
+
+1. **第一次激活失败了，原因是沙箱而不是这个包**：受限 `ctx` **不暴露 `logger`**
+   （报错原文：`sandbox ctx does not expose "logger". Available: ctx.tools.register / ctx.on /
+   ctx.provide / the timer helpers …`）。第十四/十五轮记的"惰性包只打一行日志"这个写法
+   **在当前的受限 ctx 下已经不再可用**。改为**真正空实现的 `apply()`**——因为
+   **phoenix 的触发面是 `cordis_run` 这次调用本身，不是 `apply()` 做了什么**，
+   所以空实现**既足够又是最安全的形式**（零能力 ⇒ 零失败面）。
+   **⇒ 下次维护不必再尝试 `ctx.logger`，直接空 apply。**
+2. `coalesced: true` 与 `restart already in-flight` 说明**第二次激活被合并进同一个 gen-24 请求**，
+   这是正确行为，也顺带证明 phoenix 的去重是按"in-flight 重启请求"而非按包走的。
+
 **一个本轮识别出、但有意不做的改进（连同它为什么不能草率做）**：
 本轮**无法从进程内部判断"新代码到底加载了没有"**——`bundleDriftReport()` 比的是
 `package.json` 的 **version**，而本轮 `common` 的 **版本号没变**，所以 **drift 看不见**这次变更
@@ -3090,8 +3118,10 @@ dsh-ros2-common -> ../../../../Desktop/embody_agent_ws/dsh-ros2/packages/common
 - **线上价值**：① **首次有了"读我们自己代码"的安全基线**，且**第一跑就抓到并修掉 2 处真实缺陷**——
    其中 `ros2_interface_create` 的 TOCTOU 是**能被符号链接穿出 output root** 的那一类；
    ② 发布面不再有 3 个包"裸奔"；③ 第十五轮那个静默换环境修复**终于进了 main**。
-- **末端动作**：改动已构建进 `lib/`；按文档化触发面激活惰性动态包，**已确认** phoenix 登记重启请求，
-  由 phoenix 在会话空闲的安全点执行优雅重启。
+- **末端动作**：改动已构建进 `lib/`；按文档化触发面（`cordis_run`）激活一个**空实现**的动态包，
+  **已确认 phoenix 登记 `gen 24` 重启请求**（journal `restart requested (gen 24): plugin-change`，
+  04:22:47 CST；状态文件 `lifecycleState: deferred`、`coalesced: true`、硬期限 900 s），
+  由 phoenix 在会话空闲的安全点执行优雅重启（§21.5）。
 - **待运维（本轮无法完成的三件事）**：
   1. **决定 issue #40**：按 §21.2 的**6 处**逐字清单修改部署配置（含第 63 行），随后优雅重启。
   2. **#45 的决定**：`@types/node` 是钉在最低受支持大版本（22），还是继续跟进最新（26）？
