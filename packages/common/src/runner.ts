@@ -119,7 +119,17 @@ function globFirstRosSetup(): string | null {
   return null
 }
 
-/** Auto-detect: workspaceRoot/install/setup.bash, then /opt/ros/<distro>/setup.bash. */
+/**
+ * Auto-detect: workspaceRoot/install/setup.bash, then /opt/ros/<distro>/setup.bash.
+ *
+ * Returns a PATH, not a shell fragment. Every caller that splices it into a
+ * `source <path> && ` prefix must run it through `shq()`: `workspaceRoot` comes
+ * from configuration, and an unquoted path containing a space or a shell
+ * metacharacter would otherwise be interpolated straight into the `bash -lc`
+ * string that prefix is prepended to. The `ros2_workspace use` path already
+ * quotes for exactly this reason — the two disagreed until CodeQL's
+ * `js/shell-command-constructed-from-input` pointed at this one.
+ */
 function autoDetectSetup(opts: RunOptions): string | null {
   if (opts.workspaceRoot) {
     const cand = path.join(opts.workspaceRoot, 'install', 'setup.bash')
@@ -224,7 +234,7 @@ export function resolveSetup(opts: RunOptions): SetupResolution {
       // explicit source path(s) all wrong: report + auto-correct via the chain
       const auto = autoDetectSetup(opts)
       return {
-        prefix: auto ? `source ${auto} && ` : '',
+        prefix: auto ? `source ${shq(auto)} && ` : '',
         sourcePath: auto ?? null,
         explicit: true,
         autoCandidate: auto ?? null,
@@ -247,7 +257,7 @@ export function resolveSetup(opts: RunOptions): SetupResolution {
   }
   const auto = autoDetectSetup(opts)
   return {
-    prefix: auto ? `source ${auto} && ` : '',
+    prefix: auto ? `source ${shq(auto)} && ` : '',
     sourcePath: auto ?? null,
     explicit: false,
     autoCandidate: auto ?? null,
