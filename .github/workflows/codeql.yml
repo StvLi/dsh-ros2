@@ -67,6 +67,9 @@ jobs:
       - uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}
+          # Keeps generated artifacts out of the baseline; the file's header says
+          # what is excluded and why. Everything else stays in scope.
+          config-file: ./.github/codeql/codeql-config.yml
           # Beyond the default suite, in keeping with the security focus of the
           # maintenance loop. The quality suite is intentionally NOT enabled:
           # this baseline is for vulnerabilities, not style.
