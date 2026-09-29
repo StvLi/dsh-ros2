@@ -66,17 +66,26 @@ describe('resolveSetup fallback chain + session override', () => {
 
   it('quotes the auto-detected setup path so a space or metacharacter cannot break out', async () => {
     const { resolveSetup } = await import('../src/runner.js')
-    const { mkdirSync, writeFileSync } = require('node:fs')
-    // A workspace root carrying both a space and a shell metacharacter.
-    const root = `/tmp/dsh-runner auto ws;${process.pid}`
-    mkdirSync(`${root}/install`, { recursive: true })
-    writeFileSync(`${root}/install/setup.bash`, 'true\n')
-    const setup = resolveSetup({ rosSetup: 'source /nonexistent/ros/setup.bash && ', workspaceRoot: root })
-    // sourcePath stays a real filesystem path (consumers stat it)…
-    expect(setup.sourcePath).toBe(`${root}/install/setup.bash`)
-    // …while the prefix carries it as one single-quoted word, so neither the
-    // space nor the `;` can end the command or start another one.
-    expect(setup.prefix).toBe(`source '${root}/install/setup.bash' && `)
+    const { mkdirSync, mkdtempSync, writeFileSync } = require('node:fs')
+    const { tmpdir } = require('node:os')
+    const path = require('node:path')
+    // A workspace root carrying both a space and a shell metacharacter. The
+    // mkdtemp suffix matters: a predictable name under the temp dir is itself a
+    // finding (and two concurrent runs of this suite would collide on it), and
+    // it keeps the `;` and the space in the generated path.
+    const root = mkdtempSync(path.join(tmpdir(), 'dsh-runner auto ws;'))
+    try {
+      mkdirSync(`${root}/install`, { recursive: true })
+      writeFileSync(`${root}/install/setup.bash`, 'true\n')
+      const setup = resolveSetup({ rosSetup: 'source /nonexistent/ros/setup.bash && ', workspaceRoot: root })
+      // sourcePath stays a real filesystem path (consumers stat it)…
+      expect(setup.sourcePath).toBe(`${root}/install/setup.bash`)
+      // …while the prefix carries it as one single-quoted word, so neither the
+      // space nor the `;` can end the command or start another one.
+      expect(setup.prefix).toBe(`source '${root}/install/setup.bash' && `)
+    } finally {
+      require('node:fs').rmSync(root, { recursive: true, force: true })
+    }
   })
 
   it('session override beats the configured rosSetup (real paths)', async () => {
