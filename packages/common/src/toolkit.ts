@@ -12,6 +12,7 @@ import path from 'node:path'
 import { defineTool, type ParameterSchemaSpec } from '@deepseek-ai/dsh-tools'
 import { runCommand, type JobHooks, type RunOptions, type RosResult } from './runner.js'
 import { type JsonValue, parseJsonOrRaw } from './parse.js'
+import { isWhitespace, isWordChar } from './chars.js'
 import { isSafeProfileName } from './names.js'
 
 /** Execution seam injected by the plugin entry (real runner in prod, fake in tests). */
@@ -231,13 +232,36 @@ export interface SafetyFields {
   detail?: string
 }
 
-/** Parse the flat `field: value` echo output of SafetyState.msg. */
+/** One `field: value` line, or `null` when the line is not that shape. */
+function scanSafetyLine(line: string): { key: string; value: string } | null {
+  const n = line.length
+  let key = 0
+  while (key < n && isWordChar(line[key]!)) key++
+  if (key === 0 || key === n || line[key] !== ':') return null
+  let skip = 0
+  while (key + 1 + skip < n && isWhitespace(line[key + 1 + skip]!)) skip++
+  return { key: line.slice(0, key), value: line.slice(key + 1 + skip, n) }
+}
+
+/**
+ * Parse the flat `field: value` echo output of SafetyState.msg.
+ *
+ * Written as a scan rather than `/^(\w+):\s*(.*)$/`: CodeQL reports that
+ * pattern as `js/polynomial-redos` because `\s*` and `.*` overlap, and this
+ * input is the one parser here fed by *topic content* — any node on the DDS
+ * domain can publish a `SafetyState`, so it is attacker-influenced. A
+ * measurement over the shapes the alert names (`0:` + spaces) stayed linear
+ * (the greedy `.*` reaches `$` without backtracking), i.e. the alert is not
+ * reproducible today; scanning linearly means it cannot become reproducible
+ * if the surrounding pattern ever changes.
+ */
 export function parseSafetyEcho(stdout: string): SafetyFields {
   const out: SafetyFields = {}
   for (const line of stdout.split('\n')) {
-    const m = /^(\w+):\s*(.*)$/.exec(line.trim())
-    if (m && (m[1] === 'state' || m[1] === 'severity' || m[1] === 'cause' || m[1] === 'detail')) {
-      out[m[1] as keyof SafetyFields] = m[2]
+    const parsed = scanSafetyLine(line.trim())
+    if (!parsed) continue
+    if (parsed.key === 'state' || parsed.key === 'severity' || parsed.key === 'cause' || parsed.key === 'detail') {
+      out[parsed.key] = parsed.value
     }
   }
   return out
