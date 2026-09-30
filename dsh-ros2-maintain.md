@@ -1,8 +1,8 @@
 # dsh-ros2 日常维护文档（Maintenance Log）
 
 > 仓库：`StvLi/dsh-ros2` · 本地代码：`/home/stvli/Desktop/embody_agent_ws/dsh-ros2`（git remote `git@github.com:StvLi/dsh-ros2.git`）
-> 维护日期：2026-09-30（最近一轮） · 维护者：DSH scheduled-run agent（StvLi 仓）
-> 维护轮次：第一轮 2026-09-03（§0–§7）；第二轮 2026-09-04（§8）；第三轮 2026-09-05（§9，安全修复）；第四轮 2026-09-05（§10，无 open issue → 安全检查 → 两项维护卫生修复）；第五轮 2026-09-06（§11，无 open issue → 安全检查 → 落地 `ros2_install` 注入修复）；第六轮 2026-09-11（§12，无 open issue → 安全检查 → 落地 `safety_monitor` / `zero_pose_semantics` 注入修复 + vitest 4 升级 + CI 最小权限）；第七轮 2026-09-13（§13，open issue #19 → journey skills + 组合不变量）；第八轮 2026-09-14（§14，3 个 open issue → #21 修复并真机复核、#22 落地但保留 open、#19 完成验收测量）；第九轮 2026-09-21（§15）：open issue #22 → 补齐"会话技能目录对账"（其唯一未实现项）+ 修复 `ros2_env_check` 的"报告 ≠ 执行"缺陷（第八轮存疑项的真因）+ 安全复测；**第十轮 2026-09-22（§16，本轮）：补齐第九轮"在途无 PR"的缺口（PR #27，CI 首跑即抓出"本地绿、CI 红"）→ 在运行中进程里验收并关闭 issue #22 → 定位并修复线上故障真因（`rosSetup` 只校验第一段）→ 3 个 PR 全部合入 main**；第十二轮 2026-09-24（§17，收尾超时遗留的在途 PR #32 → 实测第十轮的重启请求已按硬期限落地 → 修复"配置没送到 doctor"的接线缺口 + API Key 来源语义）；第十三轮 2026-09-25（§18，0 open issue / 0 open PR → 安全扫描发现并落地 3 处真实缺陷 = PTY 会话 id 路径穿越 · 发布物携带 `__pycache__` 字节码 · 安装器选项注入，并开启 Dependabot 告警）；**第十四轮 2026-09-26（§19）：0/0 → 先闭环第十三轮唯一的未闭环观测（gen-21 重启逐字命中），再落地 3 个 PR = 明文传输的 VLM API Key 可见化 · 插件自建 IPC 对象权限收紧（PTY 会话文件 / sidecar UDS / 安装器脚本）· Dependabot 版本更新；并把跨五轮未处理的部署配置项升级为 issue #40；**第十五轮 2026-09-29（§20）：open issue #40 → step 2 评估（合理、必要，但配置在仓库外且需运维决定）→ **承接上一轮时间窗被截断留下的在途分支** `fix/workspace-path-hygiene` 并落地 `fix(common)`：自愈探针用**原始文本**比对存在性，把**存活但写成 `~/…`** 的工作区判为缺失、剔除该段、并在只剩它时**静默切换到 `/opt/ros/<distro>`** —— 恰是本轮文档新推荐的路径形式；闭环第十四轮的 gen-22 观测（逐字命中）；实测线上 **6 处**死链（issue #40 少算 1 处）；本轮**无 GitHub API token**，改用一次性 `ci/probe-*` 分支取得 CI（Node 22/24 双绿）后删除**；**第十六轮 2026-09-30（§21，本轮）：open issue #40 → step 2 复核（逐字确认**仍然准确**、更正为**实测 6 处**死链、结论仍交运维）→ **上一轮唯一的运维缺口已消失：`gh` 有了 token**，于是第一个动作就是把第十五轮卡住的在途分支**开成 PR #48、CI 双绿后合入 main**（第一次拿到**真实** PR CI，不再需要 `ci/probe-*` 代跑）；随后落地 3 个 PR = `fix(packaging)` 发布面 `__pycache__` 守卫（**此前只有"碰巧出现过"的那 3 个包有守卫**，实测 moveit 可复现泄漏 `.pyc`）+ `ci(security)` **CodeQL 代码扫描基线**（第十四/十五轮连续两次建议、本轮首次落地）+ `fix(security)` 首个基线 **29 条告警**中的**2 处真实缺陷**（`ros2_interface_create` 的 TOCTOU 可被符号链接穿出 · 自愈探针的自动探测路径未加引号）；Dependabot 积压 6 → 4（#47 合入并替掉失败的 #44）**。
+> 维护日期：2026-10-01（最近一轮） · 维护者：DSH scheduled-run agent（StvLi 仓）
+> 维护轮次：第一轮 2026-09-03（§0–§7）；第二轮 2026-09-04（§8）；第三轮 2026-09-05（§9，安全修复）；第四轮 2026-09-05（§10，无 open issue → 安全检查 → 两项维护卫生修复）；第五轮 2026-09-06（§11，无 open issue → 安全检查 → 落地 `ros2_install` 注入修复）；第六轮 2026-09-11（§12，无 open issue → 安全检查 → 落地 `safety_monitor` / `zero_pose_semantics` 注入修复 + vitest 4 升级 + CI 最小权限）；第七轮 2026-09-13（§13，open issue #19 → journey skills + 组合不变量）；第八轮 2026-09-14（§14，3 个 open issue → #21 修复并真机复核、#22 落地但保留 open、#19 完成验收测量）；第九轮 2026-09-21（§15）：open issue #22 → 补齐"会话技能目录对账"（其唯一未实现项）+ 修复 `ros2_env_check` 的"报告 ≠ 执行"缺陷（第八轮存疑项的真因）+ 安全复测；**第十轮 2026-09-22（§16，本轮）：补齐第九轮"在途无 PR"的缺口（PR #27，CI 首跑即抓出"本地绿、CI 红"）→ 在运行中进程里验收并关闭 issue #22 → 定位并修复线上故障真因（`rosSetup` 只校验第一段）→ 3 个 PR 全部合入 main**；第十二轮 2026-09-24（§17，收尾超时遗留的在途 PR #32 → 实测第十轮的重启请求已按硬期限落地 → 修复"配置没送到 doctor"的接线缺口 + API Key 来源语义）；第十三轮 2026-09-25（§18，0 open issue / 0 open PR → 安全扫描发现并落地 3 处真实缺陷 = PTY 会话 id 路径穿越 · 发布物携带 `__pycache__` 字节码 · 安装器选项注入，并开启 Dependabot 告警）；**第十四轮 2026-09-26（§19）：0/0 → 先闭环第十三轮唯一的未闭环观测（gen-21 重启逐字命中），再落地 3 个 PR = 明文传输的 VLM API Key 可见化 · 插件自建 IPC 对象权限收紧（PTY 会话文件 / sidecar UDS / 安装器脚本）· Dependabot 版本更新；并把跨五轮未处理的部署配置项升级为 issue #40；**第十五轮 2026-09-29（§20）：open issue #40 → step 2 评估（合理、必要，但配置在仓库外且需运维决定）→ **承接上一轮时间窗被截断留下的在途分支** `fix/workspace-path-hygiene` 并落地 `fix(common)`：自愈探针用**原始文本**比对存在性，把**存活但写成 `~/…`** 的工作区判为缺失、剔除该段、并在只剩它时**静默切换到 `/opt/ros/<distro>`** —— 恰是本轮文档新推荐的路径形式；闭环第十四轮的 gen-22 观测（逐字命中）；实测线上 **6 处**死链（issue #40 少算 1 处）；本轮**无 GitHub API token**，改用一次性 `ci/probe-*` 分支取得 CI（Node 22/24 双绿）后删除**；**第十六轮 2026-09-30（§21，本轮）：open issue #40 → step 2 复核（逐字确认**仍然准确**、更正为**实测 6 处**死链、结论仍交运维）→ **上一轮唯一的运维缺口已消失：`gh` 有了 token**，于是第一个动作就是把第十五轮卡住的在途分支**开成 PR #48、CI 双绿后合入 main**（第一次拿到**真实** PR CI，不再需要 `ci/probe-*` 代跑）；随后落地 3 个 PR = `fix(packaging)` 发布面 `__pycache__` 守卫（**此前只有"碰巧出现过"的那 3 个包有守卫**，实测 moveit 可复现泄漏 `.pyc`）+ `ci(security)` **CodeQL 代码扫描基线**（第十四/十五轮连续两次建议、本轮首次落地）+ `fix(security)` 首个基线 **29 条告警**中的**2 处真实缺陷**（`ros2_interface_create` 的 TOCTOU 可被符号链接穿出 · 自愈探针的自动探测路径未加引号）；Dependabot 积压 6 → 4（#47 合入并替掉失败的 #44）**；**第十七轮 2026-10-01（§22，本轮）：open issue #40 → step 2 第三次复核（事实逐字不变、结论仍交运维、故不再重复评论）→ 把第十六轮**有意不修**的 3 条 ReDoS 告警**先测量再修**：走真实入口实测后只有 **1 条真实可达**（`parseTopicList`，n=4000 阻塞 **14.8 s**，k=2.11；并发现**第二种**形状 `[`×n+` ]x]` 在 n=20000 阻塞 **697 ms**）、1 条被调用方的 `trim()`/`split('\n')` **消掉而不可达**、1 条**不可复现**（贪婪 `.*` 一步到 `$`，不回溯）→ 三条全部改为**可证明线性**的扫描 + `chars.ts` 逐码点字符类 + **差分等价测试**（穷举 + 10 万条随机/解析器，**0 分歧**），PR #55 CI/CodeQL **5/5 绿**后合入；**闭环第十六轮唯一的遗留观测**（gen-24：`lifecycleState: running`、无残留 `deferDeadline`、`pendingResume: false`）；Dependabot 积压 4 → 3（#43 vitest 4→5 dev-only 合入；#42/#45/#46 抬的是 **type-only peer 下界**，而 CI 装的是**该 PR 自己抬上去的 devDependency** ⇒ **结构上无法评估下界**，升级为 **issue #56**）；CodeQL open **13 → 10**；发布面用**预先种入 `.pyc` + 摘守卫正向对照**复测 9/9 CLEAN；并更正第十六轮快照表里与 §21.8 矛盾的"main 344"（实测 **347**）**。
 
 本文件记录 dsh-ros2 插件的一次完整日常维护循环：**查 issue → 评估建议 → 分支开发 → 验证 → 推送 → 交付维护文档**。每次维护在下方追加一节。
 
@@ -3199,3 +3199,362 @@ dsh-ros2-common -> ../../../../Desktop/embody_agent_ws/dsh-ros2/packages/common
      本机 `pnpm audit` **必须带 `--registry=https://registry.npmjs.org`**；
      **`gh` 已有 token，不再需要 `ci/probe-*` 代跑**——但**若它再次消失**，§20.3 的应急做法仍然有效。
   6. **安全扫描请用全文件 glob**：**别再按 `*.py` 过滤**（§21.6 的方法学纠正）。
+
+---
+
+## 22. 维护记录（2026-10-01 04:17 CST / UTC 2026-09-30 20:17 · 第十七轮：open issue #40 → step 2 复核 → 把第十六轮**有意不修**的 3 条 ReDoS 告警**先测量再修**：实测只有 **1 条真实可达**（`parseTopicList`，n=4000 阻塞 **14.8 s**）、1 条**不可达**、1 条**不可复现** → 三条全部改为**可证明线性**的扫描并自带**差分等价测试**；闭环第十六轮遗留的 gen-24 重启观测；Dependabot 积压 4 → 3，并把跨两轮的"依赖下界策略"升级为 **issue #56**）
+
+> 本轮结论：起始 **1 open issue（#40）** / **4 open PR（#42/#43/#45/#46，全部 Dependabot）**、
+> `main = 5f5f71f`、工作树干净。
+> 本轮**唯一**的 issue 仍是那个**故意 open 的决策跟踪单** #40（第十六轮已复核过一轮），
+> 因此工作量落在两处：**第十六轮明确留待独立改动的那 3 条 ReDoS**，
+> 以及**已经攒了 5 天的 Dependabot 积压**。
+> **本轮最有价值的一条不是"修了 3 条告警"，而是"先测量，发现只有 1 条该修"**——
+> 第十六轮的分诊把它们统一判成"真实但低危"，本轮逐条**走真实入口**实测后，
+> 结论变成了 **可达 1 条 / 不可达 1 条 / 不可复现 1 条**（§22.3.1）。
+> 另一条同样是"测量推翻直觉"：Dependabot 的 3 个 PR **CI 全绿、全部可合并**，
+> 但它们的绿色**结构上无法证明它们想证明的事**（§22.4）。
+
+### 22.0 仓库快照（本轮起始/结束）
+
+| 项 | 起始 | 结束 |
+| --- | --- | --- |
+| 当前分支 | `main`（= `origin/main`，工作树干净） | `main`（= `origin/main`；本轮分支 `fix/parser-redos-linear` 已合入并保留） |
+| `main` | `5f5f71f` | **`f3ec14e`**（#55、#43 合入） |
+| open issue / open PR | **1 / 4**（#40 / #42/#43/#45/#46） | **2 / 3**（#40 + **新 #56** / #42/#45/#46） |
+| vitest 用例 | `main` **347**（346 过 + 1 pty-skip） | `main` **355**（354 过 + 1 pty-skip） |
+| CodeQL **open** 告警 | **13** | **10** |
+| 运行中的 dsh | 启动于 **2026-09-30 04:34:53 CST**（= 第十六轮 gen-24 的产物） | 同进程；`lib/` 已于本轮 **2026-10-01 04:11** 重建，**gen-25 重启请求已登记待执行**（§22.5） |
+
+**第十六轮请求的 gen-24 已确认落地**（本轮开工时读到的状态文件）：
+
+```json
+{ "generation": 24, "lifecycleState": "running", "goalId": null,
+  "pendingResume": false, "resumeAttempt": 0, "deferDeadline": 0,
+  "updatedAt": 1790714105130 }
+```
+
+`lifecycleState: running` + `deferDeadline: 0` + `pendingResume: false` ⇒
+**没有残留的 defer 期限、没有待恢复的会话**，即第十六轮那句"由 phoenix 在会话空闲的安全点执行"
+**已经执行完并且干净收尾**；进程启动时间 `04:34:53` 与状态文件 `updatedAt`（= `04:35:05`）相差 12 s，
+两者互相印证。**这正是第十六轮 §21.8 列为"待运维"的第 3 条**（"复核 gen-24 重启后的现场"），
+本轮闭环。
+
+### 22.1 Issue 检查（step 1）
+
+```text
+gh issue list --state open   → 1   （#40）
+gh pr list --state open      → 4   （#42/#43/#45/#46，全部 Dependabot）
+git rev-list --left-right --count main...origin/main → 0  0
+git status --porcelain       → （空）
+```
+
+**⇒ 存在未处理的 issue（#40）→ 转入 step 2。** 与第十五/十六轮是**同一个** issue，**没有新增**。
+
+**一个复用的绕行方式**（第十六轮 §21.1 记过，本轮再次确认有效）：
+`gh issue view` 在 `gh` 2.45.0 上因 Projects classic 弃用而失败（`GraphQL: Projects (classic) is being deprecated…`），
+用 `gh api repos/StvLi/dsh-ros2/issues/40` **正常返回**。
+
+### 22.2 建议评估（step 2）——issue #40 的合理性与必要性（第三次复核）
+
+第十六轮已复核过一轮。本轮**再逐字核对事实是否仍然成立**，结论**与第十五/十六轮一致**：
+
+| 复核项 | 本轮实测 |
+| --- | --- |
+| 5 处活配置行是否仍在 | ✅ **仍在**（33/37/41/45/49），第 29 行注释仍在 |
+| `grep -c '/tmp/vlm_ws'` | **6**（5 活 + 1 注释）—— 与第十六轮**逐字相同**，无自愈式消失 |
+| 第 63 行那条 | ✅ **仍在**：`rosSetup: "source /home/stvli/Desktop/bar_ws/install/setup.bash &&"` |
+| 两个路径是否存在 | `/tmp/vlm_ws` **MISSING**；`/home/stvli/Desktop/bar_ws` **MISSING** |
+| 自愈是否仍然有效 | ✅ 成立，见下 |
+
+运行中进程的**实时证据**（本轮 `ros2_env_check` 原文，非推断）：
+
+```json
+"setup": {
+  "prefix": "source /home/stvli/lite_delivery_aio/install/setup.bash && ",
+  "sourcePath": "/home/stvli/lite_delivery_aio/install/setup.bash",
+  "explicit": true, "sessionOverride": null,
+  "missingSources": ["/tmp/vlm_ws/install/setup.bash"]
+},
+"probe": { "exitCode": 0, "timedOut": false, "durationMs": 2101, "stderrTail": "" },
+"note": "配置的 rosSetup 链中有 source 路径不存在：/tmp/vlm_ws/install/setup.bash；已剔除该段，改用其余 1 段…"
+```
+
+**⇒ 结论不变（第三次）：合理、必要，但配置在仓库外、属于正在运行的部署，且改动需一次优雅重启才生效——
+那是会重启"正在跑这个维护任务的进程"的动作，因此是运维决定，不是本任务可以单方面执行的编辑。**
+issue #40 继续 open **是有意的**（决策跟踪单，不是被遗忘的缺陷）。
+本轮**没有**再往该 issue 上重复评论（第十六轮那份逐字清单仍然准确、没有过期），
+只把它在本轮文档里的表述缩短为"第三次复核、结论不变"，避免制造无信息量的通知。
+
+### 22.3 开发管理（git · step 3）
+
+**分支**：`fix/parser-redos-linear`（1 个提交）→ **PR #55**，**CI + CodeQL 全绿后合入 `main`**。
+
+| PR | 分支 | 提交 | CI |
+| --- | --- | --- | --- |
+| **#55** | `fix/parser-redos-linear` | `fix(common)` | ✅ `check (22)` / `check (24)` / `analyze (js-ts)` / `analyze (python)` / `CodeQL` **5/5 全绿** |
+| **#43** | `dependabot/npm_and_yarn/vitest-5.0.1` | `chore(deps)` | ✅ 双绿（见 §22.4） |
+
+#### 22.3.1 先测量，再决定修什么——3 条告警里只有 1 条真的该修
+
+第十六轮把这三条统一判为"**真实但低危 → 有意不修**"，并写明"改写成可证明线性应当**单独一个改动**"。
+本轮采纳"单独一个改动"，但**先做了第十六轮没做的事：把三条都跑一遍**。
+方法学上有两点刻意为之：
+
+1. **测真实入口，不测裸正则。** `parseTopicList` 会先 `parseLines()`（`split('\n').map(trim)`），
+   所以"正则单独跑得慢"不等于"这条路径跑得慢"。裸正则的结论可能被调用方**已有的 trim/split 消掉**。
+2. **每条都用工程代价可控的方式取时间**：每个规模用**子进程 + 上限**跑，避免一次爆炸把整个测量脚本挂死
+   （第一次就是这么挂的，**挂死本身就是证据**）。
+
+| 站点 | CodeQL 点名的 pump | 走**真实入口**的实测 | 定性 |
+| --- | --- | --- | --- |
+| `parse.ts:19` `parseTopicList` | `![` + 空格 + 非 `]` | n=500 **184 ms** → n=1000 234 ms → n=2000 **1.9 s** → n=4000 **14.8 s**（**k=2.11**，三次） | **真实、可达** |
+| `parse.ts:19` **第二种形状**（本轮新发现） | — | `'['×n + ' ]x]'` → n=20000 **697 ms**（**k=2.00**，二次） | **真实、可达** |
+| `parse.ts:70` `parseNodeInfo` | `!:` + 空格 | **只有末尾带 `\n` 才超线性**（k=2.08）；而 `parseNodeInfo` 自己先 `split('\n')` 再 `trim()` → 实测 **0.18 ms 线性** | **不可达**（被调用方消掉） |
+| `toolkit.ts:238` `parseSafetyEcho` | `0:` + 空格 | 点名的 pump 与另外两种形状**全部线性**（最小 0.006 ms）——贪婪 `.*` 一步到 `$`，**不发生回溯** | **不可复现** |
+
+**两条结论值得单独说：**
+
+- **`js/polynomial-redos` 的告警不都是真的。** `toolkit.ts:238` 那条在**本轮所有构造下都跑不出超线性**：
+  `\s*` 与 `.*` 确实重叠，但 `.*` 贪婪地吃掉余下全部、`$` 立刻成立，**引擎根本不需要枚举那个重叠**。
+  这与"重叠 ⇒ 一定慢"的直觉相反，**只有测了才知道**。
+- **"低危"不等于"两条都低危"。** `parseTopicList` 是**同步**正则：14.8 s 阻塞的是**整个 host 事件循环**，
+  不只是那一个工具。而它**确实可达**——本仓自己的代码注释就写明 RMW 会把日志打到 **stdout**
+  （`parseJsonOrRaw` 的 docstring：FastDDS 的 shared-memory transport 错误就打在 stdout），
+  而这些 stdout 正是被这个解析器吃的。
+
+两条 pump 都**熬过了 `parseLines()` 的 trim**（一条以非空格 `x` 结尾、一条无首尾空格），
+所以它们是**真入口可达**的，不是"理论上正则慢"。
+
+#### 22.3.2 修复：线性扫描 + **差分等价测试**（`fix(common)`，PR #55）
+
+三条全部改成**单趟扫描**，公开 API 与返回值形状不变：
+
+| 文件 | 改动 |
+| --- | --- |
+| `packages/common/src/chars.ts`（新增） | 把 `\s` / `\w` **逐码点写死**。JS 的 `\s` 比 ASCII 宽（U+00A0 / U+2000–200A / U+2028 / U+2029 / U+202F / U+205F / U+3000 / U+FEFF）——**只按 ASCII 白空格写会静默改变行为** |
+| `packages/common/src/parse.ts` | `scanTopicLine` / `scanNodeEntry` 取代两条正则 |
+| `packages/common/src/toolkit.ts` | `scanSafetyLine` 取代第三条 |
+| `packages/common/tests/parser-linear.spec.ts`（新增） | 把**三条旧正则原样留作 oracle**，与扫描做**差分**比较 |
+
+**等价性是被断言的，不是"看着像"：**
+
+- 三个解析器各自在**穷举语料**（对抗性字母表上长度 ≤5 的全部字符串，9,330 条）
+  \+ **10 万条随机串**上与旧正则逐条比对 → **0 处分歧**；
+- 开发期还用**更宽的语料**复核过（长度 ≤6、8 字符表 = **299,592** 条穷举 + 40 万随机 → **0 处分歧**）；
+- `chars.ts` 的两个字符类**从引擎重新推导**并全码点比对（`\s` 扫 0..0x10FFFF、`\w` 扫 0..0xFFFF）→ 0 分歧。
+  **这一步是等价性论证的地基**：只要字符类与引擎一致，"白空格分歧"这一类就不可能发生。
+
+**线性是被断言且有界的：** n=20,000 的两条 pump 与嵌套括号形状都在**亚毫秒**量级完成，
+测试用**有界断言**（<100 ms / <1000 ms）守住——旧实现比这个界**高若干个数量级**，
+所以它既不会在负载高的 runner 上 flake，又能在二次路径回来时**明确失败**。
+实测对比：n=4000 时 旧 **14,847 ms** vs 新 **0.288 ms**；新实现 n=1,048,576 字符 **3.7 ms**（k=0.44）。
+
+**一个过程记录：** 本轮的扫描**第一版仍有 O(n²)**——候选括号的"区间内是否还有 `]`"用了逐候选内层扫描。
+是**测试自己在写测试时抓出来的**（嵌套括号形状那条跑了 699 ms，逼近 1000 ms 的界）。
+改为"最后一个 `]` 的位置"一次预取（`lastIndexOf`）+ 每候选 O(1) 比较后降到亚毫秒。
+**题外但重要**：那次 699 ms 里其实**大部分是 oracle（旧正则）自己的耗时**——
+顺手量到旧正则在这个形状上是 **k=2.00、n=20000 时 697 ms**，
+于是又发现上面表格里的**第二种可达 pump**。**把 oracle 放进计时区间本身是个错误**，
+已改成"小时 n 比等价、大 n 只计新实现"。
+
+#### 22.3.3 一处更正：§21.0 的"main 344"与 §21.8 的"main 347"矛盾，实测是 **347**
+
+第十六轮文档内部对不齐：§21.0 的快照表"结束"列写 `main 344；#51 分支 347`，
+而 §21.8 写"用例 `main` **323 → 347**（346 过 + 1 pty-skip）"。
+
+**本轮实测给了裁决依据**：`main` 在**本轮任何改动之前**的用例总数是
+**355 − 8（本轮新增）= 347**（346 过 + 1 pty-skip），**与 §21.8 逐字吻合**。
+⇒ **表里的 344 是过期值**：它抓的是 **#51 合入之前**的 `main`（#51 分支 347、main 344，
+差的正是 #51 自己带进来的 3 条），而"结束"列本应写**全部合入之后**的 347。
+**记在这里，方法与"29 条分诊表自身算术对不上"（§21.3.3 更正记录）一致：
+快照表的数字必须能被独立重算出来。**
+
+### 22.4 Dependabot 积压处理（4 → 3）——"全绿且可合并"不等于"该合并"
+
+起始 4 个（#42/#43/#45/#46，均开于 2026-09-25）。本轮**没有采用"绿了就合"**，
+而是先看清它们**各自改的是什么**。结论：**1 个合并、3 个交回决策**。
+
+| PR | 动作 | 依据 |
+| --- | --- | --- |
+| **#43** `vitest 4.1.11 → 5.0.2` | ✅ **合入** | **dev-only**（8 个包的 `devDependencies`）。工具链由 CI 直接执行，**`check (22)` / `check (24)` 双绿就是对它最恰当的验证**——这个门禁**测的正是被测对象本身** |
+| #42 `cordis ^4.0.1 → ^4.0.4` | ⏸️ **不默认合并** | 它抬的是 **peer 下界**（见下） |
+| #46 `dsh-skill 0.1.0-rc.6 → 0.1.0-rc.8` | ⏸️ **不默认合并** | 同上，且**精确 prerelease pin** 本身是脆弱点 |
+| #45 `@types/node ^24 → ^26` | ⏸️ **不默认合并** | 第十六轮已交运维；本轮**并入同一个决策单**，不再零散 defer |
+
+#### 22.4.1 为什么这 3 个的"绿"**结构上无法**证明它们想证明的事
+
+**每个包同时声明两处，Dependabot 一起改：**
+
+```json
+"peerDependencies": { "@deepseek-ai/cordis": "^4.0.1", "@deepseek-ai/dsh-skill": "0.1.0-rc.6" },
+"devDependencies":  { "@deepseek-ai/cordis": "4.0.1",  "@deepseek-ai/dsh-skill": "0.1.0-rc.6" }
+```
+
+即本仓的惯例是**"至少支持 X，且恰好对着 X 开发"**。而 `peerDependencies` 是**下界**——
+**抬下界是收窄声明支持范围**。
+
+**关键在于 CI 装的是什么**：CI 执行 `pnpm install --frozen-lockfile`，装的是
+**这个 PR 自己刚抬上去的那个 `devDependency`**。所以
+**`check (22)` 绿的意思是"代码和 4.0.4 能一起工作"，而不是"4.0.4 是正确的下界"。**
+**一个门禁只有在真的测那件事时，绿才有信息量**（§21.3.4 已就"偶发红的门禁"讲过同一枚硬币的另一面）。
+
+**这两个 peer 其实是 type-only**（本轮实测，`lib/` 里**零**运行时导入）：
+
+```text
+$ grep -c "@deepseek-ai/cordis" packages/*/lib/*.js   →  0 个文件
+src:  import type { Context } from '@deepseek-ai/cordis'
+      import type { SkillRegistration } from '@deepseek-ai/dsh-skill'
+```
+
+⇒ 它是一份**编译期契约**：跑起来的进程不会因此坏掉，但**声明的支持范围会变**。
+
+**线上实际提供什么（本轮实测）：**
+
+| 包 | 运行中的 harness 实际提供 | 仓库当前 pin（peer / devDep） |
+| --- | --- | --- |
+| `@deepseek-ai/cordis` | **4.0.2** | `^4.0.1` / `4.0.1` |
+| `@deepseek-ai/dsh-skill` | **0.1.5-rc.1** | `0.1.0-rc.6` / `0.1.0-rc.6` |
+
+⇒ **#42 会把下界抬到部署之上**（部署是 4.0.2，`^4.0.4` 不满足它）；
+**#46 抬到的 rc.8 仍然低于 harness 的 0.1.5-rc.1，什么也没修**——
+而"精确 prerelease pin 与真实 harness 脱节"这件事本身**早就被记在代码注释里**
+（`packages/core/src/index.ts`："`snapshot()` is newer than this bundle's pinned `@deepseek-ai/dsh-skill` peer"）。
+
+#### 22.4.2 升级为 issue #56，而不是第二次静默 defer
+
+第十五→十六轮对 #40 的做法给出了本仓的既定模式：**同一个决策被反复 defer 时，升级成 issue**。
+`@types/node` 的下界问题在第十六轮已被 defer 过一次，本轮 #42/#46 又是同一类，
+所以本轮把它们**合并成一张可决策的单子** → **issue #56**
+（列出三种可选策略：下界=最低支持 / 跟随 harness / 跟随最新，并指出选完后
+`dependabot.yml` 可能需要一条 `ignore` 规则来阻止每周重开）。
+三个 PR 上各留一条评论指向 #56，并写明**它们是有意保持 open 的决策跟踪单**。
+**下一轮若 #56 仍未决策，按同样标准：这是有意的 open，不是新缺陷。**
+
+### 22.5 dsh-phoenix 持续更新/测试循环（step 4）
+
+**接线核对**（与第十五/十六轮一致，未变）：`dsh-phoenix` 以 `link:` 装入 web profile；
+`dsh-ros2` 及 6 个子包同样以 `link:` 指向本仓 checkout 的 `packages/*`：
+
+```text
+dsh-ros2        -> ../../../../Desktop/embody_agent_ws/dsh-ros2/packages/dsh-ros2
+dsh-ros2-common -> ../../../../Desktop/embody_agent_ws/dsh-ros2/packages/common
+dsh-ros2-core   -> …/packages/core     dsh-ros2-moveit  -> …/packages/moveit
+dsh-ros2-profile-> …/packages/profile  dsh-ros2-safety  -> …/packages/safety
+dsh-ros2-vision -> …/packages/vision
+```
+
+**触发面**（本轮再次从 `dsh-phoenix/README.md` 核对，未变）：phoenix 订阅 `tools/result`，
+只对 **`cordis_run`** 反应，**不**监听 profile 清单/lockfile（README 明说这是**行为边界、不是架构保证**）。
+本会话工具表里**仍然没有** phoenix 自己的重启工具，故沿用文档化触发面。
+
+**本轮实测到的落差（这就是 step 4 要处理的东西）：**
+
+| 量 | 值 |
+| --- | --- |
+| 运行中 dsh 进程启动 | **2026-09-30 04:34:53** |
+| `packages/common/lib/{parse,toolkit,chars}.js` 重建 | **2026-10-01 04:11:22**（本轮 `pnpm run typecheck` / `test` 会先 build） |
+
+**`lib/` 比进程新 ⇒ 进程里跑的仍是本次修复**之前**那份 `dsh-ros2-common`。**
+`common` **不是 bundle**，而 `bundleDriftReport()` 只比 `package.json` 的 **version**
+（本轮 `common` 版本号未变）——所以这份落差**在进程内不可见**，
+这正是第十六轮 §21.7 第 6 条记的观测盲区。**必须重启才生效。**
+
+**已确认（状态文件原文，2026-10-01 04:17:05 CST）：**
+
+```json
+{ "generation": 25, "lifecycleState": "deferred", "goalId": null,
+  "pendingResume": false, "resumeAttempt": 0,
+  "deferDeadline": 1790800325124, "updatedAt": 1790799425124, "coalesced": false }
+```
+
+`deferDeadline − updatedAt = 900000 ms`，**正好是文档化的 900 s 硬期限**——
+与第十四/十五/十六轮逐字一致。`coalesced: false`（本轮只有一次激活，没有被合并）。
+
+**两个沿用第十六轮教训的细节：**
+
+1. **用真正空实现的 `apply()`**——第十六轮记过：受限 `ctx` **不暴露 `logger`**
+   （`sandbox ctx does not expose "logger"`），而**phoenix 的触发面是 `cordis_run` 这次调用本身**，
+   不是 `apply()` 做了什么。⇒ 空实现**既足够又是最小失败面**。**本轮直接照做，无需再试错一次。**
+2. **运行中验收的边界（与第十六轮相同，如实记录）**：本次修复**是行为保持的**，
+   新旧实现在**输出上不可区分**（这正是等价测试要保证的），所以在**重启后的进程里**
+   也**无法**通过观察某个工具的输出确认新代码已加载——它只会在**对抗输入**下表现为"不卡住"，
+   而那个输入**无法从会话内部注入**。
+   ⇒ **本轮的验收停在库层**（等价 + 计时，§22.3.2），
+   运行中生效则依赖 gen-25。**这是一处诚实降级，不是遗漏。**
+
+### 22.6 安全扫描（step 5）
+
+| 面 | 结果 |
+| --- | --- |
+| 供应链（`pnpm audit --prod --audit-level high`，`--registry=https://registry.npmjs.org`） | ✅ **No known vulnerabilities found** |
+| 供应链（**含 dev** 的完整 `pnpm audit`） | ✅ **No known vulnerabilities found** |
+| 硬编码密钥（`sk-` / `AIza` / `ghp_` / `gho_` / `xox` / `BEGIN … PRIVATE KEY`） | ✅ **0**（工作树 `git grep`；命中全在维护文档里对这些模式的**描述文字**，已排除） |
+| **静态分析（CodeQL）** | ✅ **13 → 10 open**；降幅**恰好**是 3 条 `js/polynomial-redos` → 0，**没有出现新规则、也没有新增同类实例**（§22.3.2） |
+| 发布面（9 包 `pnpm pack` **且预先种入 14 个 `.pyc`**） | ✅ **9/9 CLEAN**；**并做了正向对照**：把 `moveit` 的 `files` 守卫摘掉后，`package/scripts/__pycache__/probe.cpython-312.pyc` **确实被打进 tarball** ⇒ 这个"全 CLEAN"不是空结论 |
+| Python 执行面（**全文件 glob**，29 个文件 = 23 个 `.py` + **6 个无扩展名 shebang 脚本**） | ✅ `shell=True` / `os.system` / `eval(` / `exec(` / `pickle` / `yaml.load` **全部 0**；19 处 `subprocess.*` **全部 argv 数组**（逐条抽查多行调用，无 shell 字符串） |
+| TS 命令面 | ✅ **无 `execSync` / 无 `shell: true` / 无 `eval(` / 无 `new Function(`**；`execFile` ×14、`spawn` ×2、`spawnSync` ×1（全部 argv）。8 处 `bash -lc` 逐条核对：5 处硬编码/常量、其余经 `shq()` 引用（`buildSafetyMonitorCommand` / `gui.ts` outputPath / 安装器下载链 / `pgrep` 的 `[p]attern` 单引号转义） |
+| 既有防线回归（第十三/十四/十六轮） | ✅ 全部仍在：`safe_sid()` 双层守卫、PTY `DIR_MODE 0o700` / `FILE_MODE 0o600`、sidecar UDS `chmod 0o600`、安装器 `umask 077` + `chmod 700`、`ros2_interface_create` 的 `flag: 'wx'`（`O_EXCL`）、**7 个发布 Python 的包**统一 `!**/__pycache__` + `!**/*.pyc` |
+
+**方法学沿用第十六轮的纠正**：Python 扫描**没有**按 `*.py` 过滤——本仓有 **6 个无扩展名的 Python 脚本**
+（`safety_monitor` / `safety_vlm_arbitrate` / `vision_bringup` / `vlm_node` / `vlm_bridge_node` / `vlm_bridge_call`），
+按扩展名过滤会**静默漏掉它们**。本轮按"`.py` **或** 首行 `#!/usr/bin/env python3`"取全集，得 **29** 个。
+
+### 22.7 本轮发现
+
+1. **【已修·真实·可达·本轮最有价值】`parseTopicList` 的正则是可复现的三次 ReDoS**
+   （§22.3.1）：`![` + 空格 + 非 `]` ⇒ n=4000 时 **14.8 s**（k=2.11）；
+   **还有第二种形状** `[`×n + ` ]x]` ⇒ n=20000 时 **697 ms**（k=2.00）。
+   **两条都熬过 `parseLines()` 的 trim，所以是从真实入口可达的**；同步执行 ⇒ 阻塞**整个事件循环**。
+   已改为单趟扫描（n=4000：**0.288 ms**，↓5 万倍）。
+2. **【未修·有意·有据】另外两条告警经实测**不**该按"真实缺陷"处理**：
+   `parseNodeInfo` 的超线性**只在字符串含 `\n` 时出现**，而它的调用方**先按 `\n` 切分并 trim**（实测 0.18 ms 线性）；
+   `parseSafetyEcho` 在点名的 pump 及另外两种形状下**全部线性**（贪婪 `.*` 一步到 `$`，不回溯）。
+   **两条仍被一并改成扫描**——因为代价极小，且"重叠量词"这一类**在周围模式变化时可能重新变成真的**。
+   **⇒ 第十六轮"3 条都真实但低危"的结论被本轮实测细化为"1 真实 / 1 不可达 / 1 不可复现"。**
+3. **【已闭环·运行时】第十六轮的 gen-24 已干净落地**（§22.0）：`lifecycleState: running`、
+   `deferDeadline: 0`、`pendingResume: false`，进程启动时间与 `updatedAt` 相差 12 s 互相印证。
+4. **【方法学·新增】"CodeQL 报了 ReDoS" ≠ "跑得慢"。** `toolkit.ts:238` 的重叠是真的，
+   但**引擎一步就到 `$`，根本不枚举那个重叠**。**只测裸正则还不够**——
+   必须走**真实入口**，因为调用方的 `trim()` / `split('\n')` 可以把 pump 直接消掉（`parse.ts:70` 就是这种）。
+5. **【已修·一致性】§21.0 快照表"main 344"与 §21.8"main 347"矛盾，实测 347**（§22.3.3）：
+   344 是 **#51 合入之前**的 `main`。**快照表的数字必须能被独立重算。**
+6. **【新·决策单】Dependabot 的"绿"结构上无法评估 peer 下界**（§22.4）：
+   CI 装的是**这个 PR 自己抬上去的 devDependency**。实测这三个 peer **都是 type-only**
+   （`lib/` 里零运行时导入），而**线上 harness 提供 cordis 4.0.2 / dsh-skill 0.1.5-rc.1**，
+   仓库 pin 的是 `^4.0.1` / `0.1.0-rc.6`——**#42 会把下界抬到部署之上，#46 抬完仍低于 harness**。
+   升级为 **issue #56**（三种策略可选），避免第三次静默 defer。
+7. **【过程·自纠】本轮的扫描第一版仍有 O(n²)**，是**写测试时被测试自己抓出来的**（嵌套形状 699 ms 逼近 1000 ms 界）；
+   修复后亚毫秒。**顺带暴露一个测量错误**：把 oracle（旧正则）放进了计时区间，
+   而那次 699 ms 里大部分是 **oracle 自己**的耗时——改正的同时**发现了第 2 种可达 pump**（发现 1）。
+8. **【正向对照】发布面"9/9 CLEAN"做了反向验证**（§22.6）：摘掉 `moveit` 的守卫后 `.pyc` **确实**进了 tarball，
+   证明这个结论**不是空跑**。**"全绿"只有在能被证伪时才算证据**——与 §21.3.4 的门禁哲学同源。
+
+### 22.8 结论与下一步建议
+
+- **交付**：**2 个 PR 合入 `main`**——**#55**（`fix(common)`：3 处解析器改线性扫描 + `chars.ts` +
+  差分等价测试，CI/CodeQL **5/5 绿**）、**#43**（`chore(deps)`：vitest 4 → 5，dev-only）。
+  `main` **`5f5f71f` → `f3ec14e`**；用例 **347 → 355**（354 过 + 1 pty-skip）；
+  **CodeQL open 告警 13 → 10**（降幅恰好是 3 条 ReDoS，无新规则）。
+- **线上价值**：掐掉一条**可从 stdout 日志噪声触发、会阻塞整个 host 事件循环 14.8 s（n=4000）**的路径；
+  同时把"哪条告警是真的"这件事**从判断变成了测量**。
+- **末端动作**：改动已构建进 `lib/`；按文档化触发面（`cordis_run`）激活一个**空实现**的动态包，
+  **已确认 phoenix 登记 `gen 25`**（`lifecycleState: deferred`、硬期限 900 s、
+  `coalesced: false`），由 phoenix 在会话空闲的安全点执行优雅重启（§22.5）。
+- **待运维（本轮无法完成的两件事）**：
+  1. **决定 issue #40**：按第十六轮 §21.2 的**6 处**逐字清单修改部署配置（含第 63 行），随后优雅重启。
+  2. **决定 issue #56**：peer/类型下界策略三选一；选完后可能需要在 `dependabot.yml` 加 `ignore`，
+     否则 #42/#45/#46 会每周重开。
+- **下次维护建议**：
+  1. **先看 #56 是否已决策**，再决定 #42/#45/#46 的处置——**别再第三次 defer**。
+  2. **复核 gen-25 后的现场**：确认 `lifecycleState: running`、无残留 `deferDeadline`；
+     **但不要指望从工具输出确认新解析器已加载**（行为保持 ⇒ 输出不可区分，§22.5）。
+  3. **CodeQL 只需确认没有反弹**（当前 10 条全部落在已分诊的两类：2 `file-access-to-http` 设计如此、
+     8 `insecure-temporary-file` 全在测试/校验脚本的私有 `mkdtemp` 下）；若冒出**新规则**或**同规则新实例**，
+     优先分诊新的。
+  4. **维持验收线**：`typecheck + test + build` 全绿 → push → **立刻开 PR 等 CI**；
+     `pnpm audit` **必须带 `--registry=https://registry.npmjs.org`**（本机默认 registry 在本沙箱内不可用）。
+  5. **安全扫描继续用全文件 glob**，并且**报告"干净"时要附一个能证伪它的对照**
+     （本轮 §22.6 的正向对照；"全绿"本身不是证据）。
+  6. **测量优先于分类**：本轮把"3 条真实的 ReDoS"变成"1 条真实"，
+     靠的是**走真实入口实测**而不是读告警——这类"先量再判"应固化为习惯。
