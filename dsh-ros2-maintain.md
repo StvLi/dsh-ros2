@@ -3558,3 +3558,533 @@ dsh-ros2-vision -> …/packages/vision
      （本轮 §22.6 的正向对照；"全绿"本身不是证据）。
   6. **测量优先于分类**：本轮把"3 条真实的 ReDoS"变成"1 条真实"，
      靠的是**走真实入口实测**而不是读告警——这类"先量再判"应固化为习惯。
+
+## 23. 维护记录（2026-10-10 10:41 CST / UTC 2026-10-10 02:41 · 第十八轮：2 open issue（#40 + 新 #56）→ step 2 把 #56 的三个选项**逐条实测**，三个都不能直接用，于是落成第四条策略（peer 对宿主诚实 / devDep 可安装 / 类型钉 engines 下界）+ **让 Dependabot 不再每周重开**；**接手一个被中断会话留在工作树里的在途实现**（先逐条复算再提交，并补上它谎称已完成的那一半）；Dependabot 积压 5 → 0（另有 1 个中途新建、当场处理；#60 TypeScript 7 **先测 emit 再合**）；安全扫描**发现并修复 1 条新的 high（dev-only）**；闭环 gen-25；并**修正了自己刚写进 main 的一个过宽结论**）
+
+> 本轮结论：起始 **2 open issue（#40 + 新 #56）** / **5 open PR（#42/#46/#58/#59/#60，全部 Dependabot）**、
+> `main = 1c9ea44`，而**工作树不干净**——里面有 **10 个未提交改动**，来自一个被中断的会话（§23.3.1）。
+> 本轮交付：**5 个 PR 合入**（#61/#60/#63/#62/#64）、**4 个 PR 关闭**（#42/#46/#58/#59）、
+> **issue #56 关闭**、**issue #40 有意保留**。`main 1c9ea44 → 450487b`。
+> **用例 355 不变**（354 过 + 1 pty-skip）；**CodeQL open 10 不变**；
+> `pnpm audit` **prod 与含 dev 都干净**（起始时含 dev 有 **1 条 high**，是本轮唯一的真实增量）。
+> **本轮最有价值的两条**都不是"改了代码"，而是**推翻既有材料**：
+> **① 在途文档声称已加的 `dependabot ignore` 根本不存在**（§23.3.1），
+> **② 我上一轮刚合进 main 的"选项 2 不可安装"，本轮复算时失败的包名变了、且结论**过宽**（§23.3.3）。
+
+### 23.0 仓库快照（本轮起始/结束）
+
+| 项 | 起始 | 结束 |
+| --- | --- | --- |
+| 当前分支 | `main`（= `origin/main`），但**工作树有 10 个未提交改动** + 1 个未跟踪文件 | `main`（= `origin/main` `450487b`），工作树**干净** |
+| `main` | `1c9ea44` | **`450487b`** |
+| open issue / open PR | **2 / 5**（#40 + #56 / #42/#46/#58/#59/#60） | **1 / 0**（仅 #40，**有意保留**） |
+| vitest 用例 | **355**（354 过 + 1 pty-skip） | **355**（逐字相同） |
+| CodeQL **open** 告警 | **10**（8 `insecure-temporary-file` + 2 `file-access-to-http`） | **10**（同规则同数量，**无新规则、无新实例**） |
+| `pnpm audit` | prod **干净** / 含 dev **1 high（新）** | **两者都干净** |
+| TypeScript | `5.6.2` | **`7.0.2`** |
+| 运行中的 dsh | 启动于 **2026-10-10 10:40:59**（= gen-25 的产物） | **同进程**；`lib/` 本轮用 TS 7 重建，但 **JS 逐字节相同 ⇒ 本轮不重启**（§23.5） |
+
+### 23.1 Issue 检查（step 1）
+
+```text
+gh issue list --state open   → 2   （#40、#56）
+gh pr list --state open      → 5   （#42/#46/#58/#59/#60，全部 Dependabot）
+git rev-list --left-right --count main...origin/main → 0  0
+git status --porcelain       → 11 行（10 个 M + 1 个 ??）   ← 与历轮都不同
+```
+
+**⇒ 存在未处理的 issue（#40、#56）→ 转入 step 2。**
+其中 **#56 是本轮新增的可决策项**，且第十五/十六/十七轮已为它写下"**别再第三次 defer**"。
+
+**又一个复用的绕行方式，而且比上一轮更彻底（本轮新发现）：**
+`gh auth status` 报 **`The token in …/hosts.yml is invalid`**（十六轮记过同一现象），
+但 `gh auth token` **取出的 token 是好的**——`GET /user` 返回 `StvLi`、
+`x-oauth-scopes: admin:public_key, gist, read:org, repo, workflow`、`x-ratelimit-limit: 5000`。
+
+```console
+$ gh auth status        # X Failed to log in to github.com account StvLi … token is invalid
+$ T=$(gh auth token); curl -s -H "Authorization: Bearer $T" https://api.github.com/user
+{"login":"StvLi", …}    # ← 同一个 token，REST 可用
+```
+
+**⇒ 本轮的 PR 创建/评论/关闭/合并全部走 `gh` 并显式带上 `GH_TOKEN=$(gh auth token)`，一路正常。**
+`gh auth status` 这个**假阴性**会让人误判"本机没有 token、只能推分支不能开 PR"（第十五轮就是这么降级的），
+值得单独记一条：**状态命令的自检结论也要能被反证。**
+
+### 23.2 建议评估（step 2）——issue #56 的合理性与必要性
+
+**#56 是一张决策跟踪单，不是被遗忘的缺陷。** 它记录的问题是：
+三个 Dependabot PR（#42/#46/#45）动的是**声明出来的下界**（peer range），而不只是开发工具版本，
+而 **CI 结构上无法裁决这件事**——CI 装的就是"这个 PR 自己抬上去的那个 devDependency"。
+
+issue 原文给了三个选项。本轮把**三个都实测了一遍**，结论是**三个都不能直接用**：
+
+| 选项 | 实测结论 | 证据 |
+| --- | --- | --- |
+| **1. 下界 = 最低支持**（peer 不动，只动 devDep） | **不可表达** | 对预发布版，"保持下界"和"覆盖宿主"互斥。node-semver 只在"比较器与它共享 `[major,minor,patch]`"时才接受预发布，所以**以 `0.1.0-rc.6` 为根的每一个区间（连 `*` 在内）都拒绝 `0.1.5-rc.1`** |
+| **2. 跟随 harness**（peer/devDep 都提到宿主版本） | **在本工作区不可安装** | `pnpm install` 直接失败（原文见 §23.3.3，本轮**复算过，且修正了一处过宽表述**） |
+| **3. 照 Dependabot 合并**（跟随最新） | **没有收益** | #42 会把下界抬到 `^4.0.4` 而**宿主是 4.0.2**（悬在部署之上）；#46 抬到 `0.1.0-rc.8` **仍低于**宿主的 `0.1.5-rc.1`；#58 的 `@types/node ^26` 会把类型面抬到 `engines` 下界（22）之上 |
+
+#### 23.2.1 选项 1"不可表达"的复算（本轮亲自跑过，不转述）
+
+```console
+$ node -e "…semver…"
+0.1.0-rc.6           sat(0.1.0-rc.6)= true   sat(0.1.5-rc.1)= false
+^0.1.0-rc.6          sat(0.1.0-rc.6)= true   sat(0.1.5-rc.1)= false
+>=0.1.0-rc.6 <0.2.0  sat(0.1.0-rc.6)= true   sat(0.1.5-rc.1)= false
+*                    sat(0.1.0-rc.6)= false  sat(0.1.5-rc.1)= false
+^0.1.5-rc.1          sat(0.1.0-rc.6)= false  sat(0.1.5-rc.1)= true
+```
+
+**⇒ 选项 1 写不出它自己想要的那个区间**：想同时覆盖"开发用的 rc.6"和"宿主给的 rc.1"，
+semver 上没有解。**而 `^0.1.5-rc.1` 恰好只覆盖宿主那一侧**——这就是最终采用的 peer。
+
+#### 23.2.2 结论：三个选项之外，落成"规则 A / B / C"
+
+| 规则 | 内容 | 一句话理由 |
+| --- | --- | --- |
+| **A · peer** | 声明必须**被真正装载它的宿主满足** | peer 是"宿主契约"，不是"我开发时用的版本"；声明一个宿主没有的区间 = 假契约 |
+| **B · devDep** | 必须**能被 pnpm 解析安装**；装不到宿主版本时停在最后一个可安装版本，并把漂移写进文档 | 装不上的 pin 会让 `pnpm install` 失败，把"策略"变成"故障" |
+| **C · 运行时替身类型包** | `@types/node` 钉 **`engines` 下界**，不追最新 | 用最老受支持运行时做类型检查，才能拦住"只在新运行时存在"的 API |
+
+落地结果（7 个 bundle 包 + `common`/`sidecar` 只动类型）：
+
+```jsonc
+"peerDependencies": {
+  "@deepseek-ai/cordis":    "^4.0.2",      // 规则 A：宿主就是 4.0.2
+  "@deepseek-ai/dsh-skill": "^0.1.5-rc.1"  // 规则 A：宿主就是 0.1.5-rc.1
+},
+"devDependencies": {
+  "@deepseek-ai/cordis":    "4.0.2",       // = peer 下界（稳定版，可安装）
+  "@deepseek-ai/dsh-skill": "0.1.0-rc.6",  // **唯一可安装**的编译靶面，故意低于 peer
+  "@types/node":            "^22.19.0"     // 规则 C：= engines 下界
+}
+```
+
+**"peer 与 devDep 故意不一致"是证明 1/2 的直接后果，不是笔误**，
+方向上是**保守**的：编译面比宿主更旧 ⇒ 只可能"少用"类型，不可能"用了宿主没有的类型"。
+
+**#40 的第四次复核（结论不变）**：`grep -c '/tmp/vlm_ws'` 仍为 **6**（5 活 + 1 注释）、
+两个路径（`/tmp/vlm_ws`、`/home/stvli/Desktop/bar_ws`）**仍都 MISSING**，
+且本轮**又拿到一份新的活体证据**（§23.5 的 `ros2_env_check` 原文里 `missingSources` 仍在）。
+**#40 继续 open 是有意的**：配置文件在仓库外、属于正在运行的部署、
+改动需一次优雅重启（即重启"正在跑这个维护任务的进程"），因此是运维决定。
+本轮同样**没有**再往 issue 上重复评论，只在本文件里缩短记录，避免制造无信息量的通知。
+
+### 23.3 开发管理（git · step 3）
+
+| PR | 分支 | 提交 | CI |
+| --- | --- | --- | --- |
+| **#61** | `fix/peer-floor-policy` | `chore(deps)` + `ci(dependabot)` + `docs`（3 个） | ✅ `check (22)` / `check (24)` / `analyze (js-ts)` / `analyze (python)` / `CodeQL` **5/5 全绿** |
+| **#64** | `docs/correct-option2-reproduction` | `docs` | ✅ 同上 5/5 |
+| **#60** | `dependabot/npm_and_yarn/typescript-7.0.2` | `chore(deps)` | ✅ `check (22)` / `check (24)`（CodeQL **按设计跳过**，见 §23.4.3） |
+| **#63** | `fix/dev-audit-source-map-js` | `fix(deps)` | ✅ 5/5 |
+| **#62** | `dependabot/npm_and_yarn/vitest-5.0.3` | `chore(deps)` | ✅ `check (22)` / `check (24)` |
+
+#### 23.3.1 起始工作树里有一份**被中断会话的在途实现**——先复算，再提交
+
+本轮开工时 `git status` 有 10 个改动 + 1 个未跟踪文件：9 个 `package.json`、
+`pnpm-lock.yaml`、以及未跟踪的 `docs/dependency-policy.md`（201 行），
+分支是 `fix/peer-floor-policy`，**但一个提交都没有**。文件时间戳是 10:39–10:40，
+而本进程启动于 10:40:58 —— 即**上一轮 dsh 进程被重启时打断的工作**（§23.5 的 journal 里有三次重启）。
+
+**处理原则：不因为"文档说它绿"就替它背书。** 逐条复算：
+
+| 文档声称 | 本轮复算 | 结果 |
+| --- | --- | --- |
+| 宿主提供 cordis `4.0.2` / dsh-skill `0.1.5-rc.1` / dsh-tools `0.1.5-rc.1` | `createRequire('~/.dsh/profiles/web/package.json')` 直读 | ✅ 逐字吻合 |
+| 仓库自己解析到 `4.0.1` / `0.1.0-rc.6` | 从 `packages/core` 解析根读取 | ✅ 吻合（cordis 4.0.2 是本地已改后） |
+| 两个 peer 是 **type-only** | `grep` 统计 built `lib/` 里的真实 import | ✅ cordis/dsh-skill **0 个文件**；dsh-tools **7 个文件**（运行期真的用） |
+| 改后 `typecheck + test + build` 全绿、354 过 + 1 skip | 亲自跑 | ✅ 全绿，且 **355 = 347 + 8** 与 §22.3.3 的裁决一致 |
+| 改后 `pnpm install --frozen-lockfile` 仍可解 | 亲自跑 | ✅ 通过（peer 区间**不进 lockfile 的 importers**，所以只有 devDep 变化是 lockfile 可见的） |
+| **`dependabot.yml` 已加 `ignore`（"见该文件内的注释"）** | `git diff .github/dependabot.yml` / `git status` | ❌ **根本不存在**——见下 |
+
+**⇒ 最后一行是这份在途工作唯一真实的缺口**：文档用现在时描述了一个**没做的动作**。
+这正是"复算"而不是"转述"的价值所在——**如果我只读文档，main 上会留下一个
+'策略已防复发'的假象，而三个 PR 下周照旧重开。**
+
+#### 23.3.2 补上缺的那一半：`dependabot ignore`（PR #61 的第 2 个提交）
+
+```yaml
+    ignore:
+      - dependency-name: "@deepseek-ai/cordis"
+      - dependency-name: "@deepseek-ai/dsh-skill"
+      - dependency-name: "@deepseek-ai/dsh-tools"
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+```
+
+设计上的两点刻意：
+
+1. **前三个是"全忽略"**——它们要跟随的是 **harness**，不是 npm 的最新版；harness 升级时**手工**一起改。
+   （`ignore` 只挡**版本更新**，**安全告警与自动安全修复不受影响**，已写进文件注释。）
+2. **`@types/node` 只挡 major**——22.x 的 patch/minor 照常流入，23/24/25/26 被挡住。
+
+**验证方式是"能被证伪"而不是"看着像"**：`yaml.safe_load` 解析出 `ignore` 的四条规则原文，
+且**任何语法/字段错误都会让 GitHub 在 push 时直接报错**（本轮 push 成功即为一次真实校验）。
+
+#### 23.3.3 修正一处**过宽**的结论（PR #64）——它在上一节刚被合进 main
+
+§22（上一轮）留下的在途文档里有一条"证明 2 · 选项 2 不可安装"，带一段 2026-10-01 的报错原文：
+
+```text
+[ERR_PNPM_NO_MATCHING_VERSION] No matching version found for
+  @deepseek-ai/dsh-scope@>=0.1.5 <0.2.0-0
+```
+
+本轮**复算**它时，**同一个工作区里失败的包换成了 `@deepseek-ai/dsh-llm`**：
+
+```console
+$ pnpm install            # 把 8 个包的 devDep 提到 dsh-skill@0.1.5-rc.1 之后
+[ERR_PNPM_NO_MATCHING_VERSION] No matching version found for
+  @deepseek-ai/dsh-llm@>=0.1.5 <0.2.0-0 while fetching it from https://registry.npmjs.org/
+```
+
+**换的是名字，不是机制**：`dsh-skill@0.1.5-rc.1` 自己声明 `dsh-llm: ^0.1.5-rc.1`，
+而 pnpm 把它规范化成 **`>=0.1.5 <0.2.0-0`（预发布标记被丢掉）**，
+于是要求一个**从不存在**的稳定版 0.1.5——而 `0.1.5-rc.1/rc.2/rc.3` 全都发布过。
+（`node-semver` 不会丢：它给的是 `>=0.1.5-rc.1 <0.2.0-0`。**两者不一致，本轮两边都实测了。**）
+
+**更重要的是边界被写宽了。** 同一个 `dsh-skill@0.1.5-rc.1` 在**空目录**里安装是**成功的**
+（会装出 `dsh-llm@0.1.5-rc.3`）：
+
+```console
+$ mkdir /tmp/floor-probe && cd /tmp/floor-probe   # 空目录，同样的 devDep
+$ pnpm install
++ @deepseek-ai/dsh-skill 0.1.5-rc.1
+Done in 4.2s          # ← 成功
+```
+
+⇒ 准确的说法是"**选项 2 在*本工作区*不可安装**"，而不是"这个依赖图不可解析"。
+**把失败条件写宽一度，就会变成一个不经检验也会被引用的错误结论**——所以这处值得单独一个 PR 去收窄。
+
+绕开方案（`autoInstallPeers: false`）本轮**测到底**，而且比原文说的更硬：
+
+```console
+$ pnpm install            # autoInstallPeers: false
+Packages: +5 -26          # 装上了，同时拆掉 26 个包
+$ pnpm run build
+packages/core/src/index.ts(92,55): error TS2339: Property 'name' does not exist on type 'ToolDefinition'.
+packages/profile/src/index.ts(33,55): error TS2339: （同上）
+$ pnpm -r test
+Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'vite' imported from …/vitest@5.0.3…
+```
+
+**`TS2339` 这条是本轮的新证据，不是"更好的报错"**：它证明那两个"仅类型"的 peer
+**在编译期真的被用到**——关掉自动安装，harness 的类型消失，`ToolDefinition.name` 立刻解析不了。
+**这正是规则 A 的另一面**：peer 区间既然是编译期契约，它就必须**真的**被宿主满足。
+
+### 23.4 Dependabot 积压处理（5 → 0，另有 1 个在本轮中途新建并当场处理）
+
+| PR | 提议 | 处置 | 依据 |
+| --- | --- | --- | --- |
+| **#42** | cordis peer `^4.0.1` → `^4.0.4` | ❌ **关闭**（评论指向 #56/#61） | 宿主是 4.0.2；`^4.0.2` 已包含 4.0.4，抬 floor 纯属把契约悬到部署之上 |
+| **#46** | dsh-skill `0.1.0-rc.6` → `0.1.0-rc.8`（精确） | ❌ **关闭** | rc.8 仍是**精确预发布 pin**，且仍**低于**宿主 `0.1.5-rc.1`，什么都没修 |
+| **#58** | `@types/node` `^24` → `^26` | ❌ **关闭** | `engines` 下界是 22；按 26 检查会放行 Node-26-only API。**#61 反向把它降到 `^22.19.0`，零类型错误** |
+| **#59** | dsh-tools `0.1.0-rc.6` → `0.1.0-rc.8` | ❌ **关闭** | dsh-tools 是**运行期**依赖（7 个 built 文件 import 它），跟随 harness；rc.8 既非宿主版本也无缺陷证据 |
+| **#60** | typescript `5.6.2` → `7.0.2` | ✅ **合入** | **先测 emit**，见 §23.4.1 |
+| **#62** | vitest `5.0.2` → `5.0.3` | ✅ **合入** | dev-only 工具链，CI 直接执行它——与第十七轮 #43（vitest 4→5）同一判据 |
+
+#### 23.4.1 TypeScript 7：**先测 emit，再决定**——因为 `tsc` 会生产发布物
+
+第十七轮为 vitest 定下的判据是"**dev-only 且 CI 直接执行它 ⇒ 绿就是对它最恰当的验证**"。
+**但这条判据不能平移到 TypeScript 上**：`tsc` 的产物 `lib/` **就是发布到 npm 的东西**，
+而 CI 只会说"它能构建"，**不会说"产出的字节没变"**。所以本轮**实测**：
+
+```text
+对比产物文件数：                78
+逐字节相同：                    71
+不同的 .js（运行期行为）：        0      ← 一个都没有
+不同的 .d.ts：                   7
+```
+
+那 7 个声明文件的差异**只有一处**——推断类型里字符串字面量的**引号风格**：
+
+```diff
+-export declare const inject: readonly ["tools", "skills", "approval", "jobs"];
++export declare const inject: readonly ['tools', 'skills', 'approval', 'jobs'];
+-    readonly type: "object";
++    readonly type: 'object';
+```
+
+（6 个 `lib/types/index.d.ts` + `common/lib/types/toolkit.d.ts`。）**语义完全等价**，
+不改变任何使用方的类型检查。再加上 `check (22)` / `check (24)` 全绿、编译器自身 `engines: >=16.20.0`，
+**"运行时不变、发布面只差引号"是被测量出来的，不是被类比的。**
+
+方法上也刻意区分了两种证据：**CI 覆盖"能不能跑"，emit 对比覆盖"产物变没变"**——
+它们回答的不是同一个问题，缺一个都不能下结论。
+
+#### 23.4.2 **差点被一次"绿"的重基把安全修复冲掉**
+
+`#63`（安全修复）合入后，`#62` 的分支仍停在 `2e89fec`（**在 #63 之前**），
+其 lockfile 里 `source-map-js` 还是**有漏洞的 1.2.1**、`pnpm-workspace.yaml` 里**没有 override**：
+
+```text
+#62 分支 head 68583b4：pnpm-workspace.yaml 无 source-map-js；lockfile source-map-js@1.2.1
+main 7f30efa（= #63 之后）：      有 override；                lockfile source-map-js@1.2.2
+```
+
+而 GitHub 当时照样显示 **`MERGEABLE` / `CLEAN`**——`mergeable` 只说"**没有文本冲突**"，
+**不说"合进去以后结果是对的"**。于是本轮**在本地把这个 merge 真跑了一遍**再决定：
+
+```console
+$ git checkout -b tmp/verify-62 main && git merge --no-commit --no-ff origin/dependabot/npm_and_yarn/vitest-5.0.3
+$ cat pnpm-workspace.yaml          # → override 还在
+$ grep source-map-js pnpm-lock.yaml # → source-map-js@1.2.2
+$ pnpm install --frozen-lockfile    # → 通过
+$ pnpm audit                        # → No known vulnerabilities found
+$ pnpm run test                     # → 8 个包全过
+```
+
+**⇒ 三方合并保住了修复**（`pnpm-workspace.yaml` 的 override 是 main 独有的改动，
+分支没碰它，所以保留），验证通过才在 GitHub 上合并；合并后**又在 main 上复查了一遍**
+override 与 `source-map-js@1.2.2` 仍在。**"CI 绿"在这里恰恰是最不重要的那个信号。**
+
+#### 23.4.3 一个 PR 的"绿"结构上测不到什么（承接第十七轮同一枚硬币）
+
+- **#60（TS 7）的 CodeQL 显示 `skipping`，不是失败**：`codeql.yml` 里有一行
+  `if: github.actor != 'dependabot[bot]'`，因为 Dependabot 触发的运行只拿到**只读 token**，
+  SARIF 上传必然失败、会**让每一个依赖 PR 常红**。真正的分析由 **push 到 main 的那次**承担
+  （本轮 `main` 上 `7f30efa` / `450487b` 的 CodeQL 都跑了）。**⇒ 这一条是设计，不是缺口**，
+  但**只有读了 workflow 才知道**，看 `gh pr checks` 的 `skipping` 会得出相反印象。
+- **#62（vitest）的绿是在"没有 override 的树上"取得的**（它的分支基线早于 #63），
+  而 `pnpm audit --prod` 本来就看不见这条 dev-only 告警 —— 所以它的绿**既没被污染、也没覆盖到**那个面。
+
+### 23.5 dsh-phoenix 持续更新/测试循环（step 4）
+
+**接线核对（未变）**：`dsh-phoenix` 与 7 个 `dsh-ros2-*` 包都以 `link:` 指向本仓 checkout：
+
+```text
+dsh-phoenix      -> ../../../../Desktop/embody_agent_ws/dsh-phoenix
+dsh-ros2         -> …/dsh-ros2/packages/dsh-ros2      dsh-ros2-common -> …/packages/common
+dsh-ros2-core    -> …/packages/core    dsh-ros2-moveit  -> …/packages/moveit
+dsh-ros2-profile -> …/packages/profile dsh-ros2-safety  -> …/packages/safety
+dsh-ros2-vision  -> …/packages/vision
+```
+
+`dsh-ros2-state` / `dsh-ros2-sidecar` **仍不在 web profile 里，且这不是缺口**（本轮专门查过）：
+聚合包 `dsh-ros2` 的 `cordis.patch.yml` 只插 6 个 bundle，`dsh-ros2-state` 需要一条
+`/tmp/dsh-ros2-sidecar.sock` 的 UDS 且**自带独立安装说明**（README：`npm install dsh-ros2-state dsh-ros2-sidecar`），
+活体自检也确认 `declaredBy: dsh-ros2` 的 `missing: []`——**是有意的可选组件**。
+
+#### 23.5.1 gen-25 已闭环——而且**只有 journal 能定时刻**
+
+第十七轮登记了 gen-25（`lifecycleState: deferred`、硬期限 900 s）。本轮开工时状态文件是：
+
+```json
+{ "generation": 25, "lifecycleState": "running", "goalId": null,
+  "pendingResume": false, "resumeAttempt": 0, "deferDeadline": 0,
+  "updatedAt": 1791600069925 }
+```
+
+**`running` + `deferDeadline: 0` + `pendingResume: false` ⇒ 没有残留 defer、没有待恢复会话。**
+而真正把"**什么时候**重启的、是否优雅"钉死的是 journal：
+
+```text
+Oct 01 04:17:05  [dsh-phoenix] restart requested (gen 25): plugin-change
+Oct 01 04:22:05  [dsh-phoenix] soft defer deadline reached; agent still busy — restart will be forced at the hard deadline (policy=auto)
+Oct 01 04:22:38  [dsh-phoenix] agent idle; executing deferred restart (gen 25)
+Oct 01 04:22:39  systemd: Stopped dsh-web.service
+Oct 01 04:22:47  systemd: Started dsh-web.service      ← 停机 8 s
+Oct 01 04:22:50  [dsh-phoenix] loaded (graceful restart + client reconnect + lifecycle)
+```
+
+**⇒ 第十七轮的 gen-25 是**当场**闭环的**（请求 → 等 agent 空闲 5 min 33 s → 8 s 停机 → 干净回归）。
+
+**一条方法学更正（本轮差点读错）**：状态文件的 `updatedAt` 是 **1791600069925 = 2026-10-10 10:41:09**，
+而进程启动于 **10:40:59**——如果只看状态文件，会得出"**gen-25 请求后拖了 9 天才重启**"这种结论（错的）。
+实际上 **`updatedAt` 是"本次启动时重写"的时间戳，不是"重启发生的时刻"**：
+今天上午 10:27/10:29/10:31/10:40 各有一次 systemd 重启（环境准备），
+每次启动 phoenix 都会把状态重新落盘成 `running`，而 `generation` 仍是 25（没有新请求）。
+**⇒ 定时刻要看 journal，状态文件只回答"当前处于哪个生命周期状态"。**
+
+#### 23.5.2 本轮**不需要重启**——这是测量结论，不是省事
+
+本轮所有改动都是**依赖声明与文档**：`peerDependencies` / `devDependencies` /
+`dependabot.yml` / `docs`。唯一的构建产物变化来自 TS 7，而它**已经测过**：
+
+```text
+.js 逐字节不同：0 / 55     ⇒ 运行中被加载的那些 JS，字节没变
+```
+
+⇒ 运行中进程（10:40:59 启动）里跑的 `lib/*.js` 与本轮重建后的**逐字节相同**，
+**没有任何"新代码等着被加载"**。因此本轮**不触发重启**——把"重启"当作仪式来做，
+只会打断正在跑本任务的会话而不带来任何东西。（**这与第十七轮不同**：那一轮改的是解析器行为，
+`lib/` 与进程不一致是**真实的**落差，所以当时必须重启。）
+
+#### 23.5.3 活体冒烟测试：在**运行中的进程里**调一个 dsh-ros2 工具
+
+（`ros2_env_check`，本会话实时返回的原文，节选）
+
+```json
+{"ok":true,"tool":"ros2_env_check",
+ "data":{"setup":{"prefix":"source /home/stvli/lite_delivery_aio/install/setup.bash && ",
+                  "missingSources":["/tmp/vlm_ws/install/setup.bash"]},
+         "probe":{"exitCode":0,"timedOut":false,"durationMs":2014},
+         "bundles":{"loaded":[…6 个…],"stale":false,"unresolved":[],"declaredBy":"dsh-ros2",
+                    "missing":[],"undeclared":[],
+                    "drift":[{"name":"dsh-ros2-core","loaded":"0.1.5","installed":"0.1.5","drifted":false}, …]},
+         "surface":{"totalTools":81,"totalSkills":9},
+         "skillCatalogue":{"available":true,"complete":true,"missing":[]}}}
+```
+
+三条独立价值：
+
+1. **插件族在运行期是活的**：6 个 bundle 全部 `drifted: false`、`stale: false`、
+   `missing: []`、`undeclared: []`，**81 个工具 + 9 个技能**。
+2. **skill 目录 `available: true, complete: true, missing: []`**——这直接回应了 §22.4 留下的疑问：
+   仓库那条"精确预发布 pin"（`dsh-skill@0.1.0-rc.6`）与宿主（`0.1.5-rc.1`）的落差
+   **在运行期没有造成任何缺失**，与"这两个 peer 是 type-only"的测量一致。
+3. **#40 的第四次活体证据**：`missingSources: ["/tmp/vlm_ws/install/setup.bash"]` 仍在，
+   自愈仍在按文档描述的方式剔除该段。
+
+### 23.6 安全扫描（step 5）
+
+| 面 | 结果 |
+| --- | --- |
+| 供应链（`pnpm audit --prod --audit-level high`） | ✅ **No known vulnerabilities found**（起始与结束都干净） |
+| 供应链（**含 dev** 的完整 `pnpm audit`） | ⚠️→✅ 起始 **1 high（新）** → 修复后 **No known vulnerabilities found**（§23.6.1） |
+| 硬编码密钥（`sk-` / `AIza` / `ghp_` / `gho_` / `github_pat_` / `xox` / `npm_` / `BEGIN … PRIVATE KEY`） | ✅ 跟踪文件中 **0**（排除维护文档里对这些模式的**描述文字**） |
+| **静态分析（CodeQL）** | ✅ **10 → 10**；规则与数量**逐条不变**（8 `js/insecure-temporary-file` + 2 `js/file-access-to-http`）⇒ **无新规则、无同规则新实例**（与 §22.8 的预期一致） |
+| 依赖面**新增**的部分 | ✅ 只有 TS 7 的平台包（`@typescript/typescript-*`），且它们**不进发布物**（`files` 只含 `lib`/`cordis.patch.yml`/README/LICENSE） |
+| 既有防线回归（第十三/十四/十六/十七轮） | ✅ 全部仍在：`safe_sid()` 双层守卫、PTY `DIR_MODE 0o700`/`FILE_MODE 0o600`、sidecar UDS `chmod 0o600`、安装器 `umask 077`、`ros2_interface_create` 的 `O_EXCL`、7 个发布 Python 包的 `!**/__pycache__` 守卫 |
+
+#### 23.6.1 本轮真实增量：一条 **high**，但**只在 dev 图里**——而且 Dependabot 自己也修不动它
+
+```text
+GHSA-68fv-2mgg-jv7q · source-map-js >=1.0.0 <1.2.2
+"allows event-loop denial of service through indexed source-map section offsets"
+唯一路径： vitest > @vitest/mocker > vite > postcss > source-map-js
+```
+
+**可达性是被写明的，不是被暗示的**：`pnpm audit --prod` 干净，
+CI 的 `--prod --audit-level high` 门禁**永远看不到它**。它是**真实树里的真实告警**，
+只是**不在发布的那棵树上**。
+
+修复比看起来小：`postcss@8.5.26` 本来就声明 `source-map-js: ^1.2.1`，
+而 **1.2.2 满足这个区间**——只是 lockfile 的 pin 早于 1.2.2。
+**pnpm 不会重新解析一个"已满足父区间"的传递 pin**：
+
+```text
+$ pnpm update source-map-js                  → Already up to date
+$ pnpm update source-map-js --latest         → Already up to date
+$ pnpm update source-map-js --depth 99       → Already up to date
+```
+
+所以把 floor 显式写出来，而不是手改 lockfile：
+
+```yaml
+overrides:
+  'postcss>source-map-js': '^1.2.2'    # 作用域限定在 postcss，不会误伤未来其它使用方
+```
+
+**两个必须记下的细节：**
+
+1. **pnpm 11 不再读 `package.json` 里的 `pnpm` 字段**——它会 `[WARN] The "pnpm" field in
+   package.json is no longer read by pnpm` **然后静默忽略**。本轮第一次就是把它写进了
+   `package.json`，`pnpm install` 退出码 0、**lockfile 一个字节都没变**；
+   移到 `pnpm-workspace.yaml` 之后才真正生效（那里本来就有 `onlyBuiltDependencies` / `allowBuilds`）。
+   **"退出码 0"再次不构成"改动生效了"。**
+2. **Dependabot 自己的 updater 也确认了同一件事**（并给出了它为什么永远不会开 PR）：
+
+```text
+security_update_not_possible { dependency-name: source-map-js,
+  latest-resolvable-version: 1.2.1, lowest-non-vulnerable-version: 1.2.2,
+  conflicting-dependencies: [] }
+```
+
+   **`conflicting-dependencies: []`** ——没有任何声明挡住 1.2.2，可它**解析不到**。
+   这正是"等自动化 PR 来修"这条路在本例中**不存在**的原因，也是为什么必须显式写 floor。
+
+验收（含**能证伪它的对照**）：
+
+```console
+$ pnpm audit                       → No known vulnerabilities found   （起始：1 high）
+$ pnpm audit --prod                → No known vulnerabilities found
+$ pnpm install --frozen-lockfile   → 通过
+$ pnpm run test                    → 354 passed + 1 skipped（不变）
+$ grep source-map-js pnpm-lock.yaml → 1.2.1  →  1.2.2
+```
+
+**"test 而不是只 install"是刻意的**：vitest 正是这个依赖的使用者，
+跑测试等于**真的用了一次修好的版本**。
+
+#### 23.6.2 仓库外的一条发现（如实记录，未改）
+
+本机 `~/.npmrc` 里存在一条**明文 npm token**（`//registry.npmjs.org/:_authToken=…`）。
+它**不在仓库里**（`git grep` 为 0 命中，也不在 `git status --ignored` 里的任何 `.env`/密钥文件），
+所以它不是本仓的缺陷；但它是这台机器上一条**以明文落盘的凭据**，值得由运维决定是否改用
+`~/.npmrc` 之外的凭据存储。**本文件不复制该值**（连前缀都不写）。
+
+### 23.7 本轮发现
+
+1. **【最有价值·已修】在途文档描述了一个"没做的动作"。** 上一轮留在工作树里的
+   `docs/dependency-policy.md` 用现在时写着"`dependabot.yml` 已加 `ignore`（见该文件内的注释）"，
+   而 `.github/dependabot.yml` **根本没有 `ignore` 字段**（§23.3.1）。
+   **只读文档就会把一个假象签进 main**：策略看上去已防复发，而三个 PR 下周照旧重开。
+   已补上并做了可证伪的校验（§23.3.2）。
+2. **【已修·方法学】我上一轮刚合进 main 的结论"过宽"了一档。** "选项 2 不可安装"在**空目录里可复现失败是假的**——
+   同一个 `dsh-skill@0.1.5-rc.1` 在空目录里**装得成功**；失败是**本工作区**（lockfile + peer 自动安装路径）特有的。
+   同时失败报错里的包名已从 `dsh-scope` 漂到 `dsh-llm`（机制不变）。
+   收窄为"在本工作区不可安装"并单开 PR #64（§23.3.3）。
+   **⇒ 一条写宽一度的结论，比一条写错的结论更危险**：它不会被反驳，只会被引用。
+3. **【已修·真实·可测量】`source-map-js@1.2.1` 的 high 告警（GHSA-68fv-2mgg-jv7q）**，
+   dev-only（§23.6.1）。**Dependabot 自己的 updater 报告 `security_update_not_possible`
+   且 `conflicting-dependencies: []`** ⇒ 自动化 PR **不会来**，必须显式写 floor。
+4. **【已修·工具链陷阱】pnpm 11 **静默忽略** `package.json` 的 `pnpm` 字段。**
+   第一次的 override 写在 `package.json` 里：`pnpm install` **退出码 0**、**lockfile 零变化**、**告警仍在**。
+   移到 `pnpm-workspace.yaml` 才生效。**"退出码 0"再次被证明不等于"生效"。**
+5. **【已闭环·运行时】第十七轮的 gen-25 已干净落地**，journal 原文见 §23.5.1
+   （请求 04:17:05 → 空闲 04:22:38 → 停机 8 s → 04:22:50 回归）。
+   **并纠正一个读法**：状态文件的 `updatedAt`（10:41:09）是"本次启动重写"的时刻，
+   **不是**重启发生的时刻——只看它会得出"拖了 9 天"的错误结论。
+6. **【方法学·新增】"dev-only 且 CI 直接执行它"这条判据不能平移给编译器。**
+   `tsc` 生产发布物，所以"CI 绿"只证明"能构建"，不证明"产物没变"。
+   本轮为此**实测 emit**：78 个文件中 `.js` **0 个不同**，7 个 `.d.ts` **只差引号风格**（§23.4.1）。
+7. **【新·并发风险】一次"绿且可合并"的重基**差点把安全修复冲掉（§23.4.2）。
+   GitHub 的 `MERGEABLE`/`CLEAN` 只说"**没有文本冲突**"。
+   本轮**在本地把 merge 真跑一遍**（frozen install + audit + test）才合并，合并后又在 main 复查。
+8. **【方法学·新增】`gh auth status` 会假阴性。** 它报 token invalid，
+   而同一个 `gh auth token` 拿到的 token 有 `repo`+`workflow`、5000/h，REST 全部可用。
+   第十五轮正是因为这个假象降级成"只能推分支、不能开 PR"。
+   **状态命令的自检结论也要能被反证**（本轮所有 PR 操作都带 `GH_TOKEN=$(gh auth token)` 正常完成）。
+9. **【新·被排除的伪发现】`dsh-ros2-state`/`dsh-ros2-sidecar` 不在运行中 profile 里，
+   但这不是缺口**（§23.5）：它们是可选组件，聚合包的 patch 只插 6 个 bundle，
+   活体自检 `missing: []`。**记下来是为了避免下一轮把它当"新发现"再报一次。**
+
+### 23.8 结论与下一步建议
+
+- **交付**：**5 个 PR 合入 `main`**——
+  **#61**（`chore(deps)`+`ci(dependabot)`+`docs`：依赖下界策略 + `ignore` + 文档，CI/CodeQL **5/5 绿**）、
+  **#64**（`docs`：收窄"选项 2"的结论，5/5 绿）、
+  **#60**（`chore(deps)`：TypeScript 5.6.2 → **7.0.2**，先测 emit 再合）、
+  **#63**（`fix(deps)`：`source-map-js` → 1.2.2，修掉 1 条 high，5/5 绿）、
+  **#62**（`chore(deps)`：vitest → 5.0.3，dev-only）。
+  另有 **4 个 Dependabot PR 关闭**（#42/#46/#58/#59，全部带走依据评论），**issue #56 关闭**。
+  `main` **`1c9ea44` → `450487b`**；用例 **355 不变**；CodeQL **10 不变**；
+  `pnpm audit` **prod 与含 dev 都干净**。
+- **线上价值**：把"声明给宿主的契约"从**猜**变成**测**（`peer ^4.0.2` / `^0.1.5-rc.1` = 宿主实际提供的），
+  并把类型面从"最新的 Node 26"降到"真正支持的最老 Node 22"——**后者零类型错误**这件事本身
+  就是"仓库没有用 Node-24+ 独有 API"的证明。
+- **明确没有做的事（以及理由）**：
+  1. **没有重启 dsh**——本轮 `lib/*.js` 逐字节未变（TS 7 的 emit 已测），没有新代码待加载（§23.5.2）。
+  2. **没有动 #40 的部署配置**——仓库外、属于运行中的部署、需一次优雅重启，是运维决定（§23.2.2 末）。
+- **待运维**：
+  1. **决定 issue #40**：按 §21.2 的 **6 处**逐字清单修改部署配置（含第 63 行），随后优雅重启。
+- **下次维护建议**：
+  1. **先看 #56 已关闭、`dependabot.yml` 的 `ignore` 是否真的挡住了复发**——
+     若下周仍冒出 cordis/dsh-skill/dsh-tools/@types/node-major 的版本 PR，说明 `ignore` 的
+     `dependency-name` 匹配或 `update-types` 写错了，那是一条**新的**、可复现的缺陷。
+     同时复核 #61 选定的 peer 下界是否仍等于**当时**的 harness 版本（harness 一升就要手工跟）。
+  2. **接手在途工作树时的默认动作**：**先 `git status`，再逐条复算文档里的每个断言**，
+     特别是"已加/已改/已验证"这类**完成时**表述——本轮的价值正来自这里（§23.3.1）。
+  3. **`pnpm audit` 要跑两遍**：`--prod`（CI 门禁的那一遍）**和**含 dev 的完整版。
+     本轮的唯一 high 只有后者看得见。**报告"干净"时附一个能证伪它的对照。**
+  4. **动编译器/打包器大版本时，先测 emit 差异**（`lib/` 逐文件哈希 + 语义 diff），
+     再谈 CI 绿不绿——"CI 绿"证明的不是"产物没变"（§23.4.1）。
+  5. **合并任何 Dependabot PR 前，确认它的基线是否已包含最近的安全修复**；
+     `MERGEABLE` 不等于"合进去是对的"，必要时**在本地把 merge 跑一遍**再合（§23.4.2）。
+  6. **`gh` 的操作一律显式带 `GH_TOKEN=$(gh auth token)`**，不要相信 `gh auth status`（§23.7 第 8 条）。
+  7. **测量优先于分类、复算优先于转述**：本轮的每一处修正（不存在的那一半、过宽的结论、
+     被子合并冲掉的修复、静默失效的 override）都来自"**把文档里的动词重新执行一遍**"，
+     而不是读它。这类"先量再判"应继续固化为习惯。
