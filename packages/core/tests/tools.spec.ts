@@ -783,7 +783,7 @@ describe('ros2_install interactive flow (mock installer, no network)', () => {
 })
 
 describe('tool inventory', () => {
-  it('exposes the core tool set (59)', async () => {
+  it('exposes the core tool set (61)', async () => {
     const names = createRos2Tools({ run: makeRun(() => ({ stdout: '' })) }).map((t) => t.name)
     expect(names).toContain('ros2_pkg_list')
     expect(names).toContain('ros2_colcon_list')

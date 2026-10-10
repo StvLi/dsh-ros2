@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![ROS2](https://img.shields.io/badge/ROS2-Jazzy-orange)]()
 ![Node](https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-brightgreen)
-![Tools](https://img.shields.io/badge/tools-79-blue)
+![Tools](https://img.shields.io/badge/tools-83-blue)
 
 > **版本对应关系**：npm 上的 `dsh-ros2@0.1.0` 就是本仓库当前版本（monorepo 布局）。
 > GitHub 的 `v0.8.0 ~ v0.15.0` 标签是已废弃的旧单体布局历史，从未发布到 npm。
@@ -76,9 +76,11 @@ dsh plugin --profile <profile> add dsh-ros2-core
 **方式二：直接 npm 安装**（同一批包；也用于安装可选附加包）
 
 ```bash
-# 聚合包（自动拉取 dsh-ros2-common/core/profile/moveit/safety/vision）
+# 聚合包（自动拉取 dsh-ros2-common/core/profile/moveit/safety/vision，共 81 个工具）
 npm install dsh-ros2
-# 可选附加：sidecar 数据面守护进程 + 控制面状态客户端
+# 可选附加：sidecar 数据面守护进程 + 控制面状态客户端。
+# `dsh-ros2-state` 不在聚合包的 patch 里；它自带的 2 个工具
+# （state_get / state_snapshot）使工具总数从 81 达到 83：
 npm install dsh-ros2-state dsh-ros2-sidecar
 ```
 
@@ -492,8 +494,10 @@ Node 需 `^22.19 || >=24`。
 ```bash
 pnpm install
 pnpm run typecheck   # tsc --noEmit
-pnpm run test        # vitest（304 例；另有 10 个 sidecar Python 场景 + 6 个 zero-pose 自检 + 29 项档案名/路径/TF 解析自检）
+pnpm run test        # vitest（361 例；另有 11 个 sidecar Python 场景 + 6 个 zero-pose 自检 + 29 项档案名/路径/TF 解析自检）
 pnpm run build       # tsc -> lib/ + lib/types/
+pnpm run audit       # 供应链门禁：运行时依赖图 high+（与 CI 完全同一条命令）
+pnpm run audit:all   # 再加上 CI 门禁有意排除的 dev-only 工具链
 ```
 
 CI（`.github/workflows/ci.yml`）：push 到 `main` / PR 时在 Node 22 与 24 上跑 typecheck/test/build，并校验 `pnpm pack` 产物包含补丁层（`cordis.patch.yml`）与构建产物。

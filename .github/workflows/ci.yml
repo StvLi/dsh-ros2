@@ -27,8 +27,15 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       # Supply-chain gate: the runtime dependency graph must be free of
-      # high/critical advisories (dev-only tooling such as vitest is out of scope).
-      - run: pnpm audit --prod --audit-level high
+      # high/critical advisories (dev-only tooling such as vitest is out of
+      # scope — `pnpm run audit:all` is the local, dev-inclusive companion).
+      #
+      # Run through the script so CI and a maintainer run the identical command.
+      # The advisory endpoint is only served by registry.npmjs.org; a mirror
+      # that lacks it (registry.npmmirror.com does) makes plain `pnpm audit`
+      # exit 1 with ERR_PNPM_AUDIT_ENDPOINT_NOT_EXISTS. Failing closed is right,
+      # failing for the wrong reason is not.
+      - run: pnpm run audit
       - run: pnpm run typecheck
       - run: pnpm run test
       - run: pnpm run build

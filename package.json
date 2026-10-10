@@ -6,7 +6,9 @@
   "scripts": {
     "typecheck": "pnpm run build && pnpm -r typecheck",
     "test": "pnpm run build && pnpm -r test",
-    "build": "pnpm -r build"
+    "build": "pnpm -r build",
+    "audit": "pnpm audit --prod --audit-level high --registry https://registry.npmjs.org/",
+    "audit:all": "pnpm audit --registry https://registry.npmjs.org/"
   },
   "engines": {
     "node": "^22.19.0 || >=24.0.0"
