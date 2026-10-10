@@ -730,9 +730,20 @@ function makeRos2InstallTool(deps: CoreToolDeps) {
         const sid = `ros2install-${Date.now()}`
         const dir = ptyDir()
         const helper = ptyHelperPath()
-        const start = await execFileP('python3', [helper, 'start', sid, 'bash', boot, '--dir', dir])
+        const start = await execFileP('python3', [helper, '--dir', dir, 'start', sid, 'bash', boot])
         if (!start.ok) {
-          return toolError('ros2_install', command, 'SESSION_START_FAILED', start.stderr.trim() || 'PTY 会话启动失败（需要 python3）')
+          // The helper separates "this host cannot give us a pty at all" (exit
+          // 3 + a machine-readable marker) from every other start failure: the
+          // two need different fixes — one is the environment, the other is
+          // python3 or the script itself. Reporting a start that silently did
+          // nothing as success is what this branch exists to prevent.
+          const detail = start.stderr.trim()
+          if (detail.includes('PTY_UNAVAILABLE')) {
+            return toolError('ros2_install', command, 'PTY_UNAVAILABLE',
+              `无法分配伪终端（pty），未启动任何会话：${detail.replace(/^PTY_UNAVAILABLE:\s*/, '')}。` +
+              '该环境下交互式安装不可用——请换一台可分配 pty 的机器/容器，或直接在终端运行安装脚本。')
+          }
+          return toolError('ros2_install', command, 'SESSION_START_FAILED', detail || 'PTY 会话启动失败（需要 python3）')
         }
         return okResult('ros2_install', command, {
           started: true, session: sid, action,
@@ -758,15 +769,20 @@ function makeRos2InstallTool(deps: CoreToolDeps) {
       const dir = ptyDir()
       if (action === 'send') {
         const input = String(params.input ?? '')
-        // No --dir here: nargs=REMAINDER in the helper greedily captures every
-        // token after the session id, so only the `--`-separated input is sent;
-        // the helper's default dir ($TMPDIR/dsh-ros2/pty) matches ptyDir().
-        const r = await execFileP('python3', [helper, 'send', session, '--', input])
+        // `--dir` must precede the action: the helper's `rest` is a REMAINDER,
+        // so a flag written after the session id is captured verbatim. Written
+        // after, `--dir` was delivered to the installer as an argument instead
+        // of selecting the directory.
+        const r = await execFileP('python3', [helper, '--dir', dir, 'send', session, '--', input])
         if (!r.ok) return toolError('ros2_install', command, 'SEND_FAILED', r.stderr.trim())
         return okResult('ros2_install', command, { session, action, sent: input, hint: '继续用 status 查看菜单响应' })
       }
       if (action === 'status') {
-        const r = await execFileP('python3', [helper, 'status', session, '--dir', dir])
+        const r = await execFileP('python3', [helper, '--dir', dir, 'status', session])
+        // A helper that refuses its own arguments (exit 2) must not be read as
+        // "state unknown": that would turn a wiring regression into a silent
+        // no-output session.
+        if (!r.ok) return toolError('ros2_install', command, 'STATUS_FAILED', r.stderr.trim() || '读取 PTY 会话状态失败')
         const lines = r.stdout.split('\n').filter((l) => l.length > 0)
         const stateLine = lines.find((l) => l.startsWith('STATE '))
         const state = stateLine ? stateLine.replace('STATE ', '') : 'unknown'
@@ -774,7 +790,8 @@ function makeRos2InstallTool(deps: CoreToolDeps) {
         return okResult('ros2_install', command, { session, action, state, output })
       }
       if (action === 'stop') {
-        const r = await execFileP('python3', [helper, 'stop', session, '--dir', dir])
+        const r = await execFileP('python3', [helper, '--dir', dir, 'stop', session])
+        if (!r.ok) return toolError('ros2_install', command, 'STOP_FAILED', r.stderr.trim() || '停止 PTY 会话失败')
         return okResult('ros2_install', command, { session, action, stopped: true })
       }
       return toolError('ros2_install', command, 'BAD_ACTION', `未知 action: ${action}`)

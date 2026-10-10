@@ -501,7 +501,8 @@ describe('PTY helper append semantics', () => {
  *
  * No pty skip needed: `run_start` creates the directory and all three session
  * files *before* it ever calls `pty.openpty()`, so the modes are observable even
- * where pty allocation is unavailable.
+ * where pty allocation is unavailable — and on that path `main()` now creates
+ * them too, before exiting 3.
  */
 describe('PTY session objects are owner-only', () => {
   const helperPath = fileURLToPath(new URL('../scripts/pty_session.py', import.meta.url))
@@ -513,12 +514,21 @@ describe('PTY session objects are owner-only', () => {
     try {
       // Worst case on purpose: under umask 000 the previous code produced
       // 0777 directories and 0666 session files.
-      execFileSync('bash', ['-c', 'umask 000; exec python3 "$PTY_HELPER" start mode1 /bin/sleep 5'], {
-        env, stdio: 'pipe', timeout: 15000,
-      })
+      //
+      // `start` now exits 3 (PTY_UNAVAILABLE) where no pty can be allocated, so
+      // the exit code is deliberately NOT asserted: both outcomes are correct
+      // here. What matters is that the session objects exist either way — on
+      // success the daemon child creates them, on PTY_UNAVAILABLE the parent
+      // does, before exiting.
+      try {
+        execFileSync('bash', ['-c', 'umask 000; exec python3 "$PTY_HELPER" start mode1 /bin/sleep 5'], {
+          env, stdio: 'pipe', timeout: 15000,
+        })
+      } catch (e) {
+        expect(String((e as { stderr?: Buffer }).stderr ?? '')).toContain('PTY_UNAVAILABLE')
+      }
       const dir = path.join(tmp, 'dsh-ros2', 'pty')
       const inFile = path.join(dir, 'mode1.in')
-      // `start` daemonises, so the session files are created by the child.
       for (let i = 0; i < 50 && !existsSync(inFile); i++) {
         await new Promise((resolve) => setTimeout(resolve, 100))
       }
@@ -541,6 +551,143 @@ describe('PTY session objects are owner-only', () => {
       } catch {
         // nothing to stop — the assertion above already ran
       }
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+})
+
+/**
+ * A session that never started must not look alive.
+ *
+ * `start` used to daemonise *before* touching the pty, and the daemon's stdio is
+ * /dev/null: on a host that cannot allocate one, `pty.openpty()` raised inside
+ * that child, the traceback went nowhere, and the parent had already printed
+ * `started session … (pid N)` and exited 0. `state=running` was written before
+ * the allocation, so `status` then answered `STATE running` with no output —
+ * forever — and the tool reported `started: true` on top of that.
+ */
+describe('PTY failure is reported, not disguised as a running session', () => {
+  const helperPath = fileURLToPath(new URL('../scripts/pty_session.py', import.meta.url))
+
+  it('exits 3 with PTY_UNAVAILABLE where no pty can be allocated, and status says failed', () => {
+    // Only meaningful where allocation actually fails; on a host with ptys the
+    // interactive flow below covers the other side of the same contract.
+    if (ptyUsable) return
+    const tmp = mkdtempSync(path.join(tmpdir(), 'dsh-pty-nopty-'))
+    const dir = path.join(tmp, 'sessions')
+    try {
+      let status: number | undefined
+      let stderr = ''
+      try {
+        execFileSync('python3', [helperPath, '--dir', dir, 'start', 'p1', 'bash', '/bin/true'], {
+          stdio: 'pipe', timeout: 15000,
+        })
+      } catch (e) {
+        status = (e as { status?: number }).status
+        stderr = String((e as { stderr?: Buffer }).stderr ?? '')
+      }
+      expect(status, 'start must not exit 0 when no session could be started').toBe(3)
+      expect(stderr).toContain('PTY_UNAVAILABLE')
+      // The failure is recorded rather than left as `running`…
+      expect(readFileSync(path.join(dir, 'p1.meta'), 'utf8')).toContain('state=failed')
+      expect(readFileSync(path.join(dir, 'p1.out'), 'utf8')).toContain('PTY_UNAVAILABLE')
+      // …and `status` surfaces it instead of reporting a phantom session.
+      const out = execFileSync('python3', [helperPath, '--dir', dir, 'status', 'p1'], { encoding: 'utf8', timeout: 10000 })
+      expect(out).toContain('STATE failed')
+      expect(out).not.toContain('STATE running')
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  it('reports STATE unknown for a session that never existed', () => {
+    const tmp = mkdtempSync(path.join(tmpdir(), 'dsh-pty-ghost-'))
+    try {
+      const out = execFileSync('python3', [helperPath, '--dir', tmp, 'status', 'ghost'], { encoding: 'utf8', timeout: 10000 })
+      expect(out).toContain('STATE unknown')
+      expect(out).not.toContain('STATE running')
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+})
+
+/**
+ * Flags must precede the action.
+ *
+ * `rest` is `nargs=REMAINDER`, so every token after the session id is captured
+ * verbatim and a flag written there is not a flag at all. The tool used to send
+ * `start <sid> bash <installer> --dir <dir>`, which (a) delivered `--dir <dir>`
+ * to the *installer script* — a downloaded, sudo-capable script — and (b)
+ * silently ignored the requested directory, so the session files landed under
+ * $TMPDIR instead. `status <sid> --all` silently never enabled `--all` either.
+ */
+describe('PTY helper flag contract', () => {
+  const helperPath = fileURLToPath(new URL('../scripts/pty_session.py', import.meta.url))
+
+  it('honours --dir placed before the action, and does not fall back to $TMPDIR', () => {
+    const tmp = mkdtempSync(path.join(tmpdir(), 'dsh-pty-flagdir-'))
+    const env = { ...process.env, TMPDIR: tmp }
+    const requested = path.join(tmp, 'requested')
+    try {
+      try {
+        execFileSync('python3', [helperPath, '--dir', requested, 'start', 'd1', 'bash', '/bin/true'], {
+          env, stdio: 'pipe', timeout: 15000,
+        })
+      } catch {
+        // PTY_UNAVAILABLE on this host — the parent still creates the objects.
+      }
+      expect(existsSync(path.join(requested, 'd1.meta'))).toBe(true)
+      // The pre-fix invocation wrote them under $TMPDIR/dsh-ros2/pty instead.
+      expect(existsSync(path.join(tmp, 'dsh-ros2', 'pty', 'd1.meta'))).toBe(false)
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects a flag written after the session id instead of ignoring it', () => {
+    const tmp = mkdtempSync(path.join(tmpdir(), 'dsh-pty-flagtail-'))
+    try {
+      let status: number | undefined
+      let stderr = ''
+      try {
+        execFileSync('python3', [helperPath, 'status', 's1', '--dir', tmp], { stdio: 'pipe', timeout: 10000 })
+      } catch (e) {
+        status = (e as { status?: number }).status
+        stderr = String((e as { stderr?: Buffer }).stderr ?? '')
+      }
+      expect(status).toBe(2)
+      expect(stderr).toContain('BEFORE the action')
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  it('never hands the helper its own flags as installer arguments', () => {
+    // Stub pty allocation (this host may have none) so the REAL argument path
+    // and the REAL run_start execute, and let the "installer" record its argv.
+    const tmp = mkdtempSync(path.join(tmpdir(), 'dsh-pty-argv-'))
+    const script = path.join(tmp, 'installer.sh')
+    const seen = path.join(tmp, 'argv.txt')
+    writeFileSync(script, `printf '%s\\n' "$@" > ${JSON.stringify(seen)}\necho ran\n`)
+    try {
+      const probe = [
+        'import importlib.util, socket, sys, time',
+        `spec = importlib.util.spec_from_file_location("pty_session", ${JSON.stringify(helperPath)})`,
+        'm = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)',
+        `m.DIR = ${JSON.stringify(tmp)}`,
+        'm.pty_probe = lambda: None',
+        'def fake_openpty():',
+        '    a, b = socket.socketpair(); return a.fileno(), b.fileno()',
+        'm.pty.openpty = fake_openpty',
+        // Exactly what the Tool sends: flags BEFORE the action.
+        `sys.argv = ["pty_session.py", "--dir", ${JSON.stringify(tmp)}, "start", "arg1", "bash", ${JSON.stringify(script)}]`,
+        'm.main(); time.sleep(0.8)',
+      ].join('\n')
+      execFileSync('python3', ['-c', probe], { stdio: 'pipe', timeout: 15000 })
+      const argv = existsSync(seen) ? readFileSync(seen, 'utf8').split('\n').filter(Boolean) : []
+      expect(argv, 'the installer must receive no helper flag').toEqual([])
+    } finally {
       rmSync(tmp, { recursive: true, force: true })
     }
   })
@@ -614,6 +761,25 @@ describe('ros2_install interactive flow (mock installer, no network)', () => {
 
     await t.execute({ action: 'stop', session }, execStub)
   }, 30000)
+
+  // The mirror image of the test above, for hosts that mount devpts with
+  // ptmxmode=000 (this maintenance host does). `start` used to answer
+  // `started: true` here while the daemon died on `pty.openpty()` and its
+  // traceback went to /dev/null — a no-op reported as a running installer.
+  it.skipIf(ptyUsable)('reports PTY_UNAVAILABLE instead of a started session where no pty exists', async () => {
+    const run = makeRun((bin) =>
+      bin === 'bash' ? { ok: true, stdout: '', exitCode: 0 } : { ok: false, stdout: '', exitCode: 127 })
+    const approval = async () => 'allowed-once'
+    const t = createRos2Tools({ run, approval }).find((x) => x.name === 'ros2_install')
+    if (!t) throw new Error('ros2_install not registered')
+
+    const started = (await t.execute(
+      { action: 'start', installer: new URL('./fixtures/mock_fishros.sh', import.meta.url).pathname },
+      execStub,
+    )) as ToolResult
+    expect(started.ok).toBe(false)
+    expect(started.error?.code).toBe('PTY_UNAVAILABLE')
+  }, 20000)
 })
 
 describe('tool inventory', () => {
