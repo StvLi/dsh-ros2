@@ -4,3 +4,14 @@ onlyBuiltDependencies:
   - esbuild
 allowBuilds:
   esbuild: true
+# pnpm 11 no longer reads settings from package.json's "pnpm" field, so
+# overrides live here.
+overrides:
+  # Dev-only security floor. postcss@8.5.26 asks for `source-map-js@^1.2.1`,
+  # and 1.2.2 — the first release fixing GHSA-68fv-2mgg-jv7q (event-loop DoS
+  # via indexed source-map section offsets) — already satisfies that range.
+  # The lockfile simply predates 1.2.2 and `pnpm update` will not re-resolve a
+  # transitive pin, so the floor is stated explicitly instead of hand-editing
+  # the lockfile. Scoped to postcss so it cannot silently constrain a future,
+  # unrelated consumer of source-map-js.
+  'postcss>source-map-js': '^1.2.2'
