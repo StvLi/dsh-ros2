@@ -33,3 +33,22 @@ updates:
     open-pull-requests-limit: 5
     commit-message:
       prefix: "chore(deps)"
+    # Version updates are ignored for packages whose correct version is set by
+    # the HOST, not by npm. The rule and its measurements live in
+    # docs/dependency-policy.md (decided in issue #56); this list is the
+    # mechanical half, so the same three PRs do not reopen every week.
+    ignore:
+      # Host-supplied contracts. Declaring a floor above what the running
+      # harness provides is a false contract, and CI cannot tell us otherwise:
+      # it installs the very version the Dependabot PR raises the floor to, so
+      # a green run means "the code builds against 4.0.4", never "4.0.4 is the
+      # right floor". Bump these by hand when the harness moves.
+      - dependency-name: "@deepseek-ai/cordis"
+      - dependency-name: "@deepseek-ai/dsh-skill"
+      - dependency-name: "@deepseek-ai/dsh-tools"
+      # Runtime stand-in types must track the `engines` floor (^22.19.0), not
+      # the newest major: typing against a newer Node lets a Node-26-only API
+      # pass typecheck and then TypeError on the oldest supported runtime.
+      # Patch/minor inside 22.x are still allowed through.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
