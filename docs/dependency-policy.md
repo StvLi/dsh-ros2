@@ -88,30 +88,72 @@ $ node -e "const s=require('semver'); for (const r of ['0.1.0-rc.6','^0.1.0-rc.6
 
 ### 证明 2 · 选项 2（跟随 harness）在本工作区**不可安装**
 
-选项 2 要把 devDep 提到宿主版本。实测 `pnpm install` 直接失败：
+> **测量时间：2026-10-10（第十八轮重新实测）。** 本节第一次写下时（2026-10-01）记录的
+> 报错里失败的包是 `@deepseek-ai/dsh-scope`；今天在**同一个工作区**复现时，报错里的包
+> 换成了 `@deepseek-ai/dsh-llm`。**换的是名字，不是机制**：pnpm 会挑它先撞上的那个
+> 只有预发布版的 peer。下面是今天的原文。
+
+选项 2 要把 devDep 提到宿主版本（`dsh-skill@0.1.5-rc.1`）。`pnpm install` 直接失败：
 
 ```console
-$ pnpm install            # devDep 提到 dsh-skill@0.1.5-rc.1 之后
+$ pnpm install            # 把 8 个包的 devDep 提到 dsh-skill@0.1.5-rc.1 之后
+packages/core:
 [ERR_PNPM_NO_MATCHING_VERSION] No matching version found for
-  @deepseek-ai/dsh-scope@>=0.1.5 <0.2.0-0 while fetching it from https://registry.npmjs.org/
+  @deepseek-ai/dsh-llm@>=0.1.5 <0.2.0-0 while fetching it from https://registry.npmjs.org/
+  The latest release of @deepseek-ai/dsh-llm is "0.0.1-rc.1" …
 ```
 
-注意两点：`@deepseek-ai/dsh-scope@0.1.5-rc.1` **在 npm 上是存在的**，
-但 pnpm 把 `^0.1.5-rc.1` 规范化成 `>=0.1.5 <0.2.0-0`（丢了预发布标记），于是找不到任何**稳定** 0.1.5。
+关键在于这个区间**不是**包的声明。`dsh-skill@0.1.5-rc.1` 自己写的是 `^0.1.5-rc.1`：
+
+```console
+$ node -e "…dsh-skill/package.json…"      # peerDependencies
+{ "@deepseek-ai/cordis": "^4.0.2",
+  "@deepseek-ai/dsh-llm": "^0.1.5-rc.1",
+  "@deepseek-ai/dsh-scope": "^0.1.5-rc.1" }
+```
+
+而 `0.1.5-rc.1/rc.2/rc.3` **在 npm 上确实存在**（`dist-tags.latest` 却是 `0.0.1-rc.1`）。
+pnpm 把 `^0.1.5-rc.1` 规范化成了 **`>=0.1.5 <0.2.0-0`**——**预发布标记被丢掉了**，
+于是它只接受**稳定版** 0.1.5，而稳定版 0.1.5 从不存在。
 这是证明 1 那个语义陷阱在**依赖解析器**里的同一个形状。
 
-试着绕开——关掉 peer 自动安装（`auto-install-peers=false`）确实能让 `dsh-skill@0.1.5-rc.1` 装上，
-但**会把真正需要的包一起拆掉**：
+**一处必须写清楚的边界（本轮实测的修正）**：同一个 `dsh-skill@0.1.5-rc.1` 在
+**空目录**里 `pnpm install` **是成功的**（会装出 `dsh-llm@0.1.5-rc.3`）。
+差别在于工作区已有的 lockfile / peer 自动安装路径。
+⇒ 准确的结论是"**选项 2 在*本工作区*不可安装**"，而不是"这个依赖图本身不可解析"。
+把失败条件写宽一度，就会变成一个不经检验也会被引用的错误结论。
+
+试着绕开——关掉 peer 自动安装（`autoInstallPeers: false`）**确实**能让 `dsh-skill@0.1.5-rc.1` 装上：
 
 ```console
-$ ./node_modules/.bin/vitest run          # auto-install-peers=false
-Error: Cannot find package '@deepseek-ai/dsh-scope' imported from
-  …/.pnpm/@deepseek-ai+dsh-tools@0.1.0-rc.6…/dsh-tools/lib/index.js
+$ pnpm install            # autoInstallPeers: false
+Packages: +5 -26          # 装上了，但同时拆掉了 26 个包
+Done in 7.6s
+$ ls node_modules/.pnpm | grep dsh-skill
+@deepseek-ai+dsh-skill@0.1.5-rc.1_@deepseek-ai+cordis@4.0.2
 ```
 
-`@deepseek-ai/dsh-tools` 在**运行期真的 import** 了 `dsh-scope` / `dsh-llm` / `dsh-session` 等 9 个 harness 包；
-它们平时是靠 peer 自动安装补齐的。顺带暴露出一个**既有的隐性依赖**：vitest 的 `vite` peer
-也是靠自动安装补上的（关掉后 `ERR_MODULE_NOT_FOUND`）。
+代价是**工具链当场断掉**，而且断在两个方向上：
+
+```console
+$ pnpm run build          # 类型面
+packages/core/src/index.ts(92,55): error TS2339:
+  Property 'name' does not exist on type 'ToolDefinition'.
+packages/profile/src/index.ts(33,55): error TS2339: （同上）
+packages/dsh-ros2-state build: Failed
+
+$ pnpm -r test            # 运行面
+Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'vite' imported from
+  …/vitest@5.0.3…/vitest/dist/chunks/index.DpLw24bj.js
+```
+
+**`TS2339` 这条比原文举的例子更有信息量**：它证明那两个"仅类型"的 peer
+**在编译期是真的被用到的**——关掉自动安装，harness 的类型就没了，`ToolDefinition`
+上的 `name` 立刻解析不了。这正是规则 A 的另一面：peer 区间是编译期契约，
+所以它**必须**被宿主真正满足。运行面则印证了 vitest 的 `vite` peer 也是靠自动安装补上的。
+
+`@deepseek-ai/dsh-tools` 在**运行期真的 import** 了 `dsh-scope` / `dsh-llm` / `dsh-session` 等
+harness 包（见文末「残留观察」第 2 条）；它们平时就是靠 peer 自动安装补齐的。
 
 **⇒ harness 的依赖图在本工作区里无法独立解析。选项 2 需要额外声明约 10 个 harness 包才能成立，
 代价大于收益。**
