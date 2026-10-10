@@ -16,8 +16,27 @@ Commands:
   send  <id> <text>     append <text> to the input queue (auto newline unless
                         text ends with '\\n')
   status <id>           print new output since last status (or all with --all)
-                        plus a final line: STATE <running|exited> [exit=<n>]
+                        plus a final line: STATE <running|exited|failed|unknown>
+                        [exit=<n>]  (`failed` = the pty could not be allocated,
+                        `unknown` = no such session — neither is `running`)
   stop  <id>            terminate the pty child (SIGTERM then SIGKILL)
+
+Flags (`--dir`, `--all`) must come BEFORE the action, because `<cmd...>` after
+`start <id>` is captured verbatim by `nargs=REMAINDER`:
+
+  pty_session.py --dir /tmp/x start s1 bash /tmp/installer.sh
+  pty_session.py --dir /tmp/x status s1
+
+`status`/`stop` reject trailing arguments instead of ignoring them: a flag
+written after the session id is not parsed as a flag, so silently dropping it
+would report success for a directory that was never used.
+
+Exit codes:
+  0  ok
+  2  usage error (bad session id, missing command, trailing arguments)
+  3  PTY_UNAVAILABLE — the host cannot allocate a pty, so no session was
+     started. `start` writes the session files with `state=failed` before
+     exiting, and `status` then reports `STATE failed` rather than `running`.
 """
 import argparse
 import os
@@ -138,6 +157,20 @@ def meta_read(sid):
     return m
 
 
+def pty_probe():
+    """Return a pty, or raise OSError — in the CALLER's process.
+
+    `start` daemonises, and the daemon redirects its stdio to /dev/null, so an
+    OSError raised inside it is invisible: the parent has already printed
+    `started session … (pid N)` and exited 0. Probing here — in the parent,
+    before forking — turns "out of pty devices" into a loud, non-zero exit that
+    the tool can report, instead of a session that looks alive and never was.
+    """
+    master, slave = pty.openpty()
+    os.close(master)
+    os.close(slave)
+
+
 def run_start(sid, cmd, args):
     ensure_private_dir(DIR)
     out_path, in_path, _ = paths(sid)
@@ -145,7 +178,7 @@ def run_start(sid, cmd, args):
         pass
     with open_private(in_path, "w") as _f:
         pass
-    meta_write(sid, "running")
+    meta_write(sid, "starting")
     # child pid holder
     child = [None]
 
@@ -167,8 +200,17 @@ def run_start(sid, cmd, args):
         child[0] = pid
         return pid
 
-    # master/slave
-    master, slave = pty.openpty()
+    # master/slave. `main()` probes this in the parent before forking, so this
+    # failure is normally reported there with exit 3; this guard covers the race
+    # where the probe won and this allocation lost, and keeps the failure
+    # visible instead of dying silently into the daemon's /dev/null stdio.
+    try:
+        master, slave = pty.openpty()
+    except OSError as e:
+        meta_write(sid, "failed")
+        with open_private(out_path, "ab") as f:
+            f.write(("PTY_UNAVAILABLE: %s\n" % e).encode("utf-8", "replace"))
+        return
     # master must be non-blocking: select() may report it ready while read()
     # would block, which would starve the input-forwarding path.
     try:
@@ -282,14 +324,25 @@ def run_status(sid, all_out):
         if not text.endswith("\n"):
             sys.stdout.write("\n")
     m = meta_read(sid)
-    if m["state"] == "exited":
+    state = m.get("state", "unknown")
+    if state == "exited":
         print("STATE exited exit=%s" % m.get("exit", "?"))
-    else:
+    elif state == "running":
         print("STATE running")
+    else:
+        # `unknown` (no such session) and `failed` (the pty could not be
+        # allocated) are NOT running. Reporting every non-`exited` state as
+        # `running` is what let a session that never started look alive.
+        print("STATE %s" % state)
 
 
 def run_stop(sid):
     _, _, meta_path = paths(sid)
+    # A session whose start failed has no daemon and no child to signal;
+    # waiting for it to reach `exited` would just burn the poll budget.
+    if meta_read(sid).get("state") == "failed":
+        print("stopped")
+        return
     with open_private(meta_path, "w") as f:
         f.write("state=stopping\n")
     # give the daemon a moment, then hard-kill the child if needed
@@ -310,12 +363,17 @@ def run_stop(sid):
 
 def main():
     global DIR
+    # Options are declared BEFORE the positionals on purpose: `rest` is a
+    # REMAINDER, so everything after `sid` is captured verbatim and a flag
+    # written there is not a flag at all. `start s1 bash boot --dir X` used to
+    # hand `--dir X` to the installer AND silently ignore the requested dir;
+    # `status s1 --all` silently never enabled `--all`. Flags come first.
     ap = argparse.ArgumentParser()
+    ap.add_argument("--dir", default=DIR)
+    ap.add_argument("--all", action="store_true")
     ap.add_argument("action", choices=["start", "send", "status", "stop"])
     ap.add_argument("sid")
     ap.add_argument("rest", nargs=argparse.REMAINDER)
-    ap.add_argument("--dir", default=DIR)
-    ap.add_argument("--all", action="store_true")
     args = ap.parse_args()
     DIR = args.dir
     # Fail fast and loudly, before forking: `start` runs in a child that ends
@@ -324,6 +382,13 @@ def main():
         print("unsafe session id %r: only [A-Za-z0-9._-], no separator or '..'"
               % (args.sid,), file=sys.stderr)
         sys.exit(2)
+    if args.action in ("status", "stop") and args.rest:
+        # Reject rather than ignore: a swallowed `--dir` still exits 0 and
+        # reports success, for a directory that was never the one read from.
+        print("%s takes no arguments after the session id (got %r); flags such "
+              "as --dir/--all must come BEFORE the action"
+              % (args.action, " ".join(args.rest)), file=sys.stderr)
+        sys.exit(2)
     if args.action == "start":
         rest = args.rest
         if rest and rest[0] == "--":
@@ -331,6 +396,25 @@ def main():
         if not rest:
             print("start requires a command", file=sys.stderr)
             sys.exit(2)
+        # Fail fast and loudly for the same reason as `safe_sid` above: the
+        # daemon's stdio is /dev/null, so "out of pty devices" vanished there
+        # while this process printed `started session …` and exited 0. The
+        # session files are still created (with state=failed) so the failure is
+        # observable from `status` and their modes stay testable.
+        try:
+            pty_probe()
+        except OSError as e:
+            ensure_private_dir(DIR)
+            out_path, in_path, _ = paths(args.sid)
+            for p in (out_path, in_path):
+                with open_private(p, "w") as _f:
+                    pass
+            meta_write(args.sid, "failed")
+            with open_private(out_path, "ab") as f:
+                f.write(("PTY_UNAVAILABLE: %s\n" % e).encode("utf-8", "replace"))
+            print("PTY_UNAVAILABLE: cannot allocate a pty (%s); no session started"
+                  % e, file=sys.stderr)
+            sys.exit(3)
         # daemonize: fork a background session process and return immediately
         pid = os.fork()
         if pid == 0:
