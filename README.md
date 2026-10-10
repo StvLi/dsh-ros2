@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![ROS2](https://img.shields.io/badge/ROS2-Jazzy-orange)]()
 ![Node](https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-brightgreen)
-![Tools](https://img.shields.io/badge/tools-79-blue)
+![Tools](https://img.shields.io/badge/tools-83-blue)
 
 > **版本对应关系**：npm 上的 `dsh-ros2@0.1.0` 就是本仓库当前版本（monorepo 布局）。
 > GitHub 的 `v0.8.0 ~ v0.15.0` 标签是已废弃的旧单体布局历史，从未发布到 npm。
@@ -60,8 +60,9 @@ All tools run plain `ros2` / `colcon` / `rosdep` CLI commands on the host; L1 ne
 
 ### Install the plugins (9 npm packages, since the monorepo split)
 
-Install the domain bundles you need — or the **`dsh-ros2` aggregate** for the
-full 83 tools + 9 skills (its patch inserts all domain ids). All packages are
+Install the domain bundles you need — or the **`dsh-ros2` aggregate**, which
+mounts core/profile/moveit/safety/vision (81 tools + the 9 skills). Add the
+optional `dsh-ros2-state` for the family's full 83 tools. All packages are
 published to npm at **0.1.0** (see [docs/versioning.md](docs/versioning.md) for
 the GitHub ↔ npm version correspondence).
 
@@ -79,9 +80,11 @@ dsh plugin --profile <profile> add dsh-ros2-core
 optional add-ons):
 
 ```bash
-# the aggregate (pulls dsh-ros2-common/core/profile/moveit/safety/vision)
+# the aggregate (mounts dsh-ros2-common/core/profile/moveit/safety/vision = 81 tools)
 npm install dsh-ros2
-# optional add-ons — the sidecar data plane + its control-plane state client:
+# optional add-ons — the sidecar data plane + its control-plane state client.
+# `dsh-ros2-state` is NOT part of the aggregate's patch; its own 2 tools
+# (state_get / state_snapshot) are what take the family from 81 to 83:
 npm install dsh-ros2-state dsh-ros2-sidecar
 ```
 
@@ -515,8 +518,10 @@ pnpm via `pnpm/action-setup@v6`). Node `^22.19 || >=24` is required.
 ```bash
 pnpm install
 pnpm run typecheck   # tsc --noEmit
-pnpm run test        # vitest (304 cases; plus 10 sidecar + 6 zero-pose + 29 robot-profile Python checks)
+pnpm run test        # vitest (361 cases; plus 11 sidecar + 6 zero-pose + 29 robot-profile Python checks)
 pnpm run build       # tsc -> lib/ + lib/types/
+pnpm run audit       # supply-chain gate: runtime graph, high+ (the exact command CI runs)
+pnpm run audit:all   # ... plus the dev-only tooling that CI's gate deliberately excludes
 ```
 
 CI (`.github/workflows/ci.yml`): on push to `main` / PRs, runs typecheck/test/build on Node 22 and 24, and validates that the `pnpm pack` artifact contains the patch layer (`cordis.patch.yml`) and the build output.

@@ -14,7 +14,7 @@ routes to them.
 
 | | before | after |
 | --- | --- | --- |
-| tools (verb-shaped, plus a few aggregates) | 83 across 6 bundles | 83 |
+| tools (verb-shaped, plus a few aggregates) | 81 across the 6 installed bundles | 81 |
 | skills (procedure-shaped, one carrier per journey) | 4 | 9 |
 
 That was ~21 tools per skill, with 5 of the 8 journeys having no carrier at all
@@ -92,12 +92,13 @@ A rename can no longer silently break a journey. Verified to have teeth — the
 negative check
 
 ```text
-journey "bringup" entry tool: expected [ 'ros2_graph', …(82) ] to include 'ros2_env_check_RENAMED'
+journey "bringup" entry tool: expected [ 'ros2_graph', …(80) ] to include 'ros2_env_check_RENAMED'
 ```
 
 fails the suite. Assertion 4 caught real drift in the round that introduced it:
 README and the aggregate metadata advertised **79 tools** while the tree
-shipped **83**, and core's description advertised 59 against an actual 61.
+shipped **83** (the 81-tool bundle surface plus the optional
+`dsh-ros2-state`'s 2), and core's description advertised 59 against an actual 61.
 
 ## 5. L3 scope — two mechanisms, and a correction to the RFC
 
