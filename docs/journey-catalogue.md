@@ -86,7 +86,13 @@ is the single source of truth;
 3. **no journey is uncovered and no shipped skill is uncatalogued** — the
    carrier set equals the skill set;
 4. the **advertised counts and skill lists match the tree** (README,
-   README_CN, package descriptions).
+   README_CN, package descriptions);
+5. the **aggregate advertises the surface it mounts**, measured from its
+   declared `dependencies` — 81 tools, i.e. the family's 83 minus the optional
+   `dsh-ros2-state` — and the first tool count in every package `README.md`
+   equals that package's real count. Issue #68: nothing checked the published
+   per-package READMEs, so three had drifted (core 33 against 61, vision 5
+   against 7, the aggregate 51 against 81).
 
 A rename can no longer silently break a journey. Verified to have teeth — the
 negative check

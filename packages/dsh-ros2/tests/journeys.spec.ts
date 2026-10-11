@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { BUNDLE_DIRS, JOURNEYS, type Bundle } from './journey-catalogue.js'
+import { BUNDLE_DIRS, BUNDLE_PACKAGES, JOURNEYS, type Bundle } from './journey-catalogue.js'
 
 /**
  * The composition invariant for the journey catalogue (issue #19, slice 3).
@@ -53,6 +53,25 @@ const allTools = [...toolsByBundle.values()].flat()
 const allSkills = [...skillsByBundle.values()].flat().map((skill) => skill.name)
 const carriers = JOURNEYS.flatMap((journey) => journey.carriers)
 
+function readJson(relative: string): { description: string; dependencies?: Record<string, string> } {
+  return JSON.parse(readFileSync(fileURLToPath(new URL(relative, import.meta.url)), 'utf8'))
+}
+
+/** The aggregate package's own metadata and the surface its dependencies mount. */
+const aggregate = readJson('../../dsh-ros2/package.json')
+const mountedBundles = BUNDLES.filter((bundle) => Object.keys(aggregate.dependencies ?? {})
+  .includes(BUNDLE_PACKAGES[bundle]))
+const aggregateToolCount = mountedBundles.flatMap((bundle) => toolsByBundle.get(bundle) ?? []).length
+const aggregateSkillCount = mountedBundles.flatMap((bundle) => skillsByBundle.get(bundle) ?? []).length
+
+/** The first `N tools` a reader meets in a package README, if it advertises one. */
+function advertisedToolCount(relative: string): number | undefined {
+  const path = fileURLToPath(new URL(relative, import.meta.url))
+  if (!existsSync(path)) return undefined
+  const found = /(\d+)\s+tools?\b/.exec(readFileSync(path, 'utf8'))
+  return found === null ? undefined : Number(found[1])
+}
+
 describe('journey catalogue — composition invariant', () => {
   it('gives every journey an L1 entry point and primitives that exist as tools', () => {
     for (const journey of JOURNEYS) {
@@ -94,12 +113,15 @@ describe('journey catalogue — composition invariant', () => {
     expect(toolCount).toBe(83)
     expect(coreToolCount).toBe(61)
     expect(skillCount).toBe(9)
+    // Issue #68: the aggregate advertises what it mounts, not the family total.
+    expect(aggregateToolCount).toBe(81)
+    expect(toolCount - aggregateToolCount).toBe((toolsByBundle.get('dsh-ros2-state') ?? []).length)
 
-    const aggregate = JSON.parse(readFileSync(
-      fileURLToPath(new URL('../../dsh-ros2/package.json', import.meta.url)), 'utf8',
-    )) as { description: string }
-    expect(aggregate.description).toContain(toolCount + ' tools')
-    expect(aggregate.description).toContain(skillCount + ' skills')
+    expect(aggregate.description).toContain(aggregateToolCount + ' tools')
+    expect(aggregate.description).toContain(aggregateSkillCount + ' skills')
+    // The one claim installers read: it must not promise the family total.
+    expect(aggregate.description, 'the aggregate advertises the family total as its own surface (#68)')
+      .not.toContain(toolCount + ' tools')
 
     const core = JSON.parse(readFileSync(
       fileURLToPath(new URL('../../core/package.json', import.meta.url)), 'utf8',
@@ -118,5 +140,22 @@ describe('journey catalogue — composition invariant', () => {
     for (const skill of allSkills) {
       expect(readmeCn, 'README_CN.md does not list skill ' + skill).toContain(skill)
     }
+  })
+
+  it('keeps every package README\'s advertised tool count honest (issue #68)', () => {
+    // The published per-package READMEs were the unguarded gap the aggregate's
+    // own metadata opened: core shipped `src/tools.ts` with 61 tools while its
+    // README still advertised 33, vision 5 against 7, and the aggregate 51
+    // against the 81 it mounts. A number a reader meets first has to be real.
+    for (const bundle of BUNDLES) {
+      const advertised = advertisedToolCount('../../' + BUNDLE_DIRS[bundle] + '/README.md')
+      if (advertised === undefined) continue
+      expect(advertised, bundle + '/README.md advertises a stale tool count')
+        .toBe((toolsByBundle.get(bundle) ?? []).length)
+    }
+    expect(advertisedToolCount('../../dsh-ros2/README.md'), 'dsh-ros2/README.md advertises a stale tool count')
+      .toBe(aggregateToolCount)
+    expect(advertisedToolCount('../../dsh-ros2/README.md'), 'the aggregate README promises the family total')
+      .not.toBe(allTools.length)
   })
 })
