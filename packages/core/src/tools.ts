@@ -994,7 +994,7 @@ function makeGuiObserveTool(deps: CoreToolDeps) {
 function makeGuiInteractTool(deps: CoreToolDeps) {
   return defineTool({
     name: 'ros2_gui_interact',
-    description: 'Unified xdotool interaction on the host display: action=click (mouse click/scroll: button 1 left, 2 middle, 3 right, 4 scroll up, 5 scroll down; count repeats), action=drag (press-drag-release: RViz2 view control, left-drag orbit / middle-drag pan / right-drag zoom), action=key (key combos like "ctrl+shift+r" or typed text). With windowTitle the pointer/coordinates are relative to that window (default: its center); without it they are absolute (drag start defaults to the current pointer). Requires xdotool.',
+    description: 'Unified xdotool interaction on the host display: action=click (mouse click/scroll: button 1 left, 2 middle, 3 right, 4 scroll up, 5 scroll down; count repeats), action=drag (press-drag-release: RViz2 view control, left-drag orbit / middle-drag pan / right-drag zoom), action=key (key combos like "ctrl+shift+r" or typed text). With windowTitle the pointer/coordinates are relative to that window (default: its center); without it they are absolute (drag start defaults to the current pointer). Confined to allowlisted application windows (default rviz2/rqt/rqt_graph, see `guiAllowedApplications`); interaction outside that allowlist — including omitting windowTitle — requires approval. Requires xdotool.',
     parameters: {
       action: { type: 'string', enum: ['click', 'drag', 'key'], description: 'Interaction kind: click | drag | key.' },
       windowTitle: { type: 'string', default: '', description: 'Optional window title substring; activates it first and makes coordinates window-relative.' },
@@ -1016,15 +1016,36 @@ function makeGuiInteractTool(deps: CoreToolDeps) {
       delayMs: { type: 'number', default: 0, description: 'Key delay between keys in ms.' },
     },
     output: { schema: resultSchema, render: renderResult },
-    async execute(args) {
+    async execute(args, exec) {
       const params = args as Record<string, unknown>
       const action = String(params.action ?? '')
       if (!deps.gui) return toolError('ros2_gui_interact', `xdotool ${action}`, 'GUI_UNAVAILABLE', 'GUI 管理器未启用')
+      // Confine interaction to allowlisted application windows. xdotool can type
+      // arbitrary text into whatever window is focused, so an unconfined target
+      // is a host-level input-injection path (a terminal receives keystrokes) —
+      // it must not run silently. Anything outside the allowlist asks the user
+      // first; with no approval service that is a denial (`requestApproval` is
+      // fail-closed), so this can never widen the surface on its own.
+      const windowTitle = strOrUndefined(params.windowTitle)
+      const target = await deps.gui.classifyInteraction(windowTitle)
+      if (target.kind === 'not-found') {
+        return toolError('ros2_gui_interact', `xdotool ${action}`, 'INTERACT_FAILED', target.reason)
+      }
+      if (target.kind === 'unconfined') {
+        const approval = await requestApproval(
+          deps,
+          exec,
+          'ros2_gui_interact',
+          `将向非白名单目标发送 X11 输入（${target.reason}）。动作：${action}。` +
+            '注意：按键/文本会进入目标窗口，若为终端等同于在该主机执行命令。是否继续？',
+        )
+        if (!approval.allowed) return deniedResult('ros2_gui_interact', `xdotool ${action}`, approval.outcome)
+      }
       if (action === 'click') {
         const button = numOrUndefined(params.button) ?? 1
         const command = `xdotool click ${button}`
         const result = await deps.gui.click({
-          windowTitle: strOrUndefined(params.windowTitle),
+          windowTitle,
           x: numOrUndefined(params.x),
           y: numOrUndefined(params.y),
           button,
@@ -1041,7 +1062,7 @@ function makeGuiInteractTool(deps: CoreToolDeps) {
           return toolError('ros2_gui_interact', command, 'INVALID_INPUT', '需要 toX/toY 终点坐标')
         }
         const result = await deps.gui.drag({
-          windowTitle: strOrUndefined(params.windowTitle),
+          windowTitle,
           fromX: numOrUndefined(params.fromX),
           fromY: numOrUndefined(params.fromY),
           toX,
@@ -1064,7 +1085,7 @@ function makeGuiInteractTool(deps: CoreToolDeps) {
           return toolError('ros2_gui_interact', command, 'INVALID_INPUT', '需要 keys 或 text')
         }
         const result = await deps.gui.key({
-          windowTitle: strOrUndefined(params.windowTitle),
+          windowTitle,
           keys,
           text,
           delayMs: numOrUndefined(params.delayMs),

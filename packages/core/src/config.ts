@@ -23,6 +23,12 @@ export const Config = z.object({
    * e.g. "scrot {output}". Empty = Pillow ImageGrab (python3 + pillow).
    */
   screenshotCommand: z.string().default(''),
+  /**
+   * Application names whose windows `ros2_gui_interact` may drive without
+   * approval. Empty keeps the built-in allowlist (rviz2 / rqt / rqt_graph);
+   * interaction outside it always asks first.
+   */
+  guiAllowedApplications: z.array(z.string()).default([]),
 })
 
 export interface CoreConfig {
@@ -34,4 +40,5 @@ export interface CoreConfig {
   display: string
   screenshotDir: string
   screenshotCommand: string
+  guiAllowedApplications: string[]
 }

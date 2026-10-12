@@ -103,6 +103,7 @@ export function apply(ctx: Context, config: CoreConfig): void {
     display: config.display,
     screenshotDir: config.screenshotDir,
     screenshotCommand: config.screenshotCommand,
+    allowedApplications: config.guiAllowedApplications,
     env: config.rosLogDir.length > 0 ? { ROS_LOG_DIR: config.rosLogDir } : undefined,
   })
 

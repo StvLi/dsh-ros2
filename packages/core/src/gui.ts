@@ -52,6 +52,11 @@ export interface GuiManagerOptions {
   env?: Record<string, string>
   screenshotDir?: string
   screenshotCommand?: string
+  /**
+   * Application names whose windows `ros2_gui_interact` may drive WITHOUT
+   * approval. Empty/omitted = `DEFAULT_ALLOWED_APPLICATIONS`.
+   */
+  allowedApplications?: string[]
 }
 
 export interface WindowInfo {
@@ -62,6 +67,45 @@ export interface WindowInfo {
   height: number
   title: string
 }
+
+/**
+ * Applications whose windows GUI interaction is confined to by default
+ * (`docs/safety-todo.md` §17, acceptance criterion #11).
+ */
+export const DEFAULT_ALLOWED_APPLICATIONS = ['rviz2', 'rqt', 'rqt_graph'] as const
+
+/**
+ * Whether a window title belongs to an allowlisted application.
+ *
+ * Matching is a case-insensitive SUBSTRING test because real titles carry
+ * decoration (`rviz2 - RViz`, `rqt_graph - ...`).
+ *
+ * This is a convenience control, NOT a security boundary: any process on the
+ * display can set its own window title, so a match does not prove the window's
+ * identity. The boundary is the approval gate in `ros2_gui_interact`; this
+ * function only decides whether that gate is needed.
+ */
+export function isAllowedWindowTitle(title: string, allowed: readonly string[]): boolean {
+  const haystack = title.toLowerCase()
+  return allowed.some((app) => {
+    const needle = app.trim().toLowerCase()
+    return needle.length > 0 && haystack.includes(needle)
+  })
+}
+
+/**
+ * Outcome of resolving an interaction target against the allowlist.
+ *
+ * - `confined`   — resolved to an allowlisted application window: no approval.
+ * - `not-found`  — a `windowTitle` was given but matched no window: the action
+ *                  cannot run, so report it rather than ask for approval.
+ * - `unconfined` — absolute/focused-window interaction, or a resolved window
+ *                  outside the allowlist: approval before any xdotool event.
+ */
+export type GuiTargetAssessment =
+  | { kind: 'confined'; window: WindowInfo }
+  | { kind: 'not-found'; reason: string }
+  | { kind: 'unconfined'; reason: string }
 
 export interface ClickOptions {
   /** Window title substring; activates it first and makes x/y window-relative. */
@@ -109,9 +153,13 @@ export interface KeyOptions {
 export class GuiManager {
   private readonly sessions = new Map<string, GuiSession>()
   private readonly options: GuiManagerOptions
+  private readonly allowedApplications: readonly string[]
 
   constructor(options: GuiManagerOptions = {}) {
     this.options = options
+    this.allowedApplications = options.allowedApplications && options.allowedApplications.length > 0
+      ? options.allowedApplications
+      : DEFAULT_ALLOWED_APPLICATIONS
   }
 
   start(spec: {
@@ -191,6 +239,41 @@ export class GuiManager {
     const windows = await this.listWindows()
     if (needle.length === 0) return windows[0]
     return windows.find((w) => w.title.toLowerCase().includes(needle))
+  }
+
+  /** The application allowlist this manager was configured with. */
+  allowedWindowApplications(): readonly string[] {
+    return this.allowedApplications
+  }
+
+  /**
+   * Resolve an interaction target and decide whether it is confined to an
+   * allowlisted application window.
+   *
+   * The check runs against the RESOLVED window's title, never the caller's
+   * `windowTitle`, so passing an allowlisted name cannot vouch for a different
+   * window. Interaction with no `windowTitle` acts on absolute coordinates or
+   * whatever is focused — it is never "confined", so it always needs approval.
+   */
+  async classifyInteraction(windowTitle?: string): Promise<GuiTargetAssessment> {
+    const wanted = windowTitle?.trim()
+    if (!wanted) {
+      return {
+        kind: 'unconfined',
+        reason: '未指定 windowTitle：交互落在绝对坐标或当前焦点窗口上，无法确认目标是白名单应用',
+      }
+    }
+    const window = await this.findWindow(wanted)
+    if (!window) {
+      return { kind: 'not-found', reason: `未找到窗口（标题包含 "${wanted}"）；可用 ros2_gui_list 查看窗口` }
+    }
+    if (!isAllowedWindowTitle(window.title, this.allowedApplications)) {
+      return {
+        kind: 'unconfined',
+        reason: `目标窗口 "${window.title}"（${window.id}）不在 GUI 白名单 [${this.allowedApplications.join(', ')}] 内`,
+      }
+    }
+    return { kind: 'confined', window }
   }
 
   async capture(opts: { windowTitle?: string; output?: string }): Promise<{ ok: true; path: string } | { ok: false; error: string }> {
