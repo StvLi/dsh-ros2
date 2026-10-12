@@ -4991,8 +4991,24 @@ systemctl --user show dsh-web -p Environment
 
 **本轮需不需要重启？——需要，且理由是"真的改了运行时"**：`packages/core/lib/*.js` 已变，
 而运行中的进程（PID 1736）加载的是**旧** `lib/`——**不重载则新审批门在这个 dsh 里不生效**。
-按既有最小失败面（一个空实现的动态 plugin + `cordis_run`）在**文档写完后作为本轮最后一个动作**登记 **gen-28**；
-只登记、不假装已落地，落地确认留给下一轮开工时的 journal（与第二十轮的读法一致）。
+按既有最小失败面（一个空实现的动态 plugin + `cordis_run`）在**文档定稿后作为本轮最后一个动作**登记 **gen-28**
+（`rsttrg-1/pkg-1`，空 `apply()`，不注册任何 service/event/tool/timer ⇒ 无副作用需要回收）；
+只登记、不假装已落地，落地确认留给下一轮开工时的 journal（与第二十轮的读法一致）。登记**当场**即可验证：
+
+```text
+Oct 13 04:15:11  [dsh-phoenix] cordis tool: cordis_run
+Oct 13 04:15:14  [dsh-phoenix] restart requested (gen 28): plugin-change
+```
+
+```json
+{ "generation": 28, "lifecycleState": "deferred", "goalId": null,
+  "pendingResume": false, "resumeAttempt": 0,
+  "deferDeadline": 1791837014380, "updatedAt": 1791836114380, "coalesced": false }
+```
+
+`deferDeadline − updatedAt = 900000 ms` ⇒ **正好是文档化的 900 s 硬期限**（与第十四～二十轮逐字一致），
+`coalesced: false`（本轮只有一次激活）。**落地（`executing deferred restart (gen 28)` → 新进程 `loaded`）
+留给下一轮开工时的 journal 确认**，并按 §26.7 待运维第 1 条**实测一次审批门**。
 
 ### 26.5 本轮发现
 
