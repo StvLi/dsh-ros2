@@ -47,7 +47,7 @@ GPT 的核心方向**采纳**：把当前"审批即执行"升级为
 | 14 | 轨迹文件安全 | **做** | schema/名字/时间戳单调/限位/指纹/档案兼容，确定性；"DSH 托管目录"建议晚做（软变更） | 早 |
 | 15 | Profile 安全配置扩展 | **做** | `safety` 段新增 `maxStateAgeMs`/`validationTtlMs`/`workspace`/`execution.maxDurationMs`/`require*`，safety set/validate 同步 | 早 |
 | 16 | 急停边界 | **做（文档）** | `docs/safety.md` 明确"DSH 非功能安全系统"；不造假 E-stop；急停接口保持预留 | 早 |
-| 17 | L3 GUI 安全 | **做（轻）** | `ros2_gui_interact` 默认白名单（rviz2/rqt/rqt_graph）+ 窗口标题校验 | 晚 |
+| 17 | L3 GUI 安全 | **已做（轻）** | `ros2_gui_interact` 默认白名单（rviz2/rqt/rqt_graph）+ 按解析后窗口标题校验 + 白名单外审批 | 晚（已落地） |
 | 18 | 审计日志 | **半做** | 工具层追加 JSONL（`~/.dsh-ros2/audit/`，含动作/指纹/校验/审批/执行/验证），不建新服务；绝不记密钥 | 晚 |
 | 19 | 密钥安全 | **半做** | 现状已符合（env/密钥管理、不落日志）；补回归测试 | 晚 |
 | 20 | 测试 | **做** | 校验器 PASS/FAIL 用例（对齐 GPT §20，排除 collision 等冗余项）+ 工具流测试 | 早 |
@@ -99,7 +99,7 @@ GPT 的核心方向**采纳**：把当前"审批即执行"升级为
 | 项 | 说明 |
 | --- | --- |
 | **C++ 实时安全验证节点（架构演进，用户建议）** | 当前 `safety_monitor` 为 rclpy（Python）——GIL 与 GC 停顿限制硬实时性上限。后续用 **C++（rclcpp）** 重写持续运行的监视/校验热路径（同 `rviz_offscreen_node` 模式）：ROS2 接口不变（`/safety/state`、`/safety/event`、`/safety/heartbeat`、`/safety/lock_active`、get_state/unlock/set_lock 服务），profile 与工具层**零改动**；`safety_core.py` 保留为参考实现 + CI 单测（`--selftest`）；C++ 侧复用同套检查器语义（tracking/stall/feedback_loss/watchdog/torque + 锁存状态机），控制频率提到 1kHz 级、定时确定性更好（配 PREEMPT_RT 更佳）。技术路线：`safety/src/safety_monitor_node.cpp`（rclcpp，与 offscreen 同构建模式）→ 纯逻辑头文件 `safety_monitor_core.hpp`（无 ROS 依赖、可单测）→ 双实现并行验证（Python 参考 vs C++ 生产，结果一致性对拍）→ 工具/技能零改动切换。 |
-| L3 GUI 白名单（§17） | `ros2_gui_interact` 默认 `allowedApplications: [rviz2, rqt, rqt_graph]` + 窗口标题校验；需改动时审批 |
+| L3 GUI 白名单（§17） | **已落地**（2026-10-13 维护轮）：`ros2_gui_interact` 默认 `allowedApplications: [rviz2, rqt, rqt_graph]`（配置项 `guiAllowedApplications`）+ 按**解析后的**窗口标题校验；白名单之外（含不传 `windowTitle`）**先审批**，fail-closed。白名单是便利性控制（标题可伪造），审批门才是边界 —— 见 `docs/safety.md` §4。 |
 | 审计 JSONL（§18） | `~/.dsh-ros2/audit/motion-YYYYMMDD.jsonl`，工具层追加（动作/指纹/校验/审批/执行/验证），无密钥 |
 | workspace box 默认启用（§3） | 校验器已支持，按机器人填 box 后开启 |
 | 轨迹托管目录（§14） | `trajectoryOut` 默认落 `~/.dsh-ros2/trajectories/` |
@@ -138,7 +138,7 @@ GPT 的核心方向**采纳**：把当前"审批即执行"升级为
 | 8. 执行看门狗 | 本仓库最小（§2-6）+ 既有 monitor |
 | 9. 执行后验证 | 本仓库最小（终态关节）+ 下游（EE 位姿） |
 | 10. 安全结果在审批前可见 | 本仓库（§1-7） |
-| 11. GUI 能力限制 | 晚批（§3） |
+| 11. GUI 能力限制 | 本仓库（§3，2026-10-13 已落地） |
 | 12. 关键安全条件自动化测试 | 本仓库（§2-8） |
 | 13. docs/safety.md 边界 | 本仓库（§2-7） |
 

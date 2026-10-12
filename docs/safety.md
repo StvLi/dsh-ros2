@@ -72,7 +72,11 @@ REQUEST → NORMALIZE → PLAN → VALIDATE → APPROVAL → FINGERPRINT CHECK �
   `safety.forensics.dump_dir`（默认 `~/.dsh-ros2/safety-events/`）。
 - `moveit_move` 结果携带 `validation`（校验摘要 + 指纹）与 `verification`（终态
   验证）——可重建"请求了什么 / 校验了什么 / 审批了什么 / 执行了什么 / 实际如何"。
-- 晚批（0.15+）将增加 JSONL 审计（`~/.dsh-ros2/audit/`）与 GUI 白名单；本版不做。
+- 晚批将增加 JSONL 审计（`~/.dsh-ros2/audit/`），**本版未做**。
+- GUI 白名单（§17）**已落地**：`ros2_gui_interact` 默认只免审批驱动
+  `rviz2` / `rqt` / `rqt_graph`（可用 `guiAllowedApplications` 配置）；其余目标——
+  包括不传 `windowTitle`（作用于焦点窗口）——一律先审批，且 fail-closed。
+  注意白名单只是便利性控制（窗口标题可被任意进程伪造），**审批门才是边界**。
 
 ---
 

@@ -20,7 +20,7 @@
 | --- | --- | --- |
 | **L1** | Read-only diagnostics: package/workspace/dependency checks, node/topic/service/action/param/interface enumeration, one-shot topic sampling, TF tree queries, whole-graph topology JSON, `ros2doctor`, bag summaries, MoveIt discovery, robot-profile load, safety-state read & VLM semantic arbitration | Pure read-only, no approval |
 | **L2** | Approval-gated management: `colcon build` (background job), `rosdep install`, message skeleton generation, `param set`, bounded `bag record`, one-click ROS2 install, launch management, rosbag replay, MoveIt motion, zero-pose calibration, robot registration & topology learning, **safety_monitor start / human-gated lock / unlock** | Writes always ask first (fail-closed) |
-| **L3** | Visualization: RViz2 / rqt lifecycle management, screenshots, multimodal vision description, xdotool-level window interaction | Local session operations |
+| **L3** | Visualization: RViz2 / rqt lifecycle management, screenshots, multimodal vision description, xdotool-level window interaction | Local session operations; interaction is confined to an application allowlist and asks first outside it |
 | **L4** | Realtime vision: parallel VLM ROS2 node + image-topic acquisition (headless; `vision_bringup` periodically refreshes per-topic bridges), plus **RViz2 offscreen rendering** (OGRE kernel → `/rviz/scene` topic) | Pure software/GPU rendering, no display needed |
 
 All tools run plain `ros2` / `colcon` / `rosdep` CLI commands on the host; L1 never modifies anything, L2 always asks first.
@@ -231,9 +231,11 @@ GUI lifecycle + screenshots + multimodal vision ("see first, then move") + xdoto
 | `ros2_screenshot` | Capture the screen or one window to a PNG |
 | `ros2_vision_describe` | Describe an image with the configured multimodal model (Gemini / OpenAI / mock) |
 | `ros2_gui_observe` | Ensure a GUI is running → screenshot → return the multimodal description (the "see it" workflow) |
-| `ros2_gui_interact` | unified xdotool interaction: `action=click` (click/scroll, `button` 4/5 = scroll), `action=drag` (press-drag-release: RViz2 orbit/pan/zoom), `action=key` (combos like `ctrl+shift+r` or typed text) |
+| `ros2_gui_interact` | unified xdotool interaction: `action=click` (click/scroll, `button` 4/5 = scroll), `action=drag` (press-drag-release: RViz2 orbit/pan/zoom), `action=key` (combos like `ctrl+shift+r` or typed text). **Confined to an application allowlist** (default `rviz2` / `rqt` / `rqt_graph`, configurable via `guiAllowedApplications`); any other target — including omitting `windowTitle`, which acts on whatever is focused — **requires approval** |
 
-Interaction recipes (model-facing): orbit the RViz2 view with `ros2_gui_interact {action: "drag", windowTitle: "rviz2", button: 1, toX: <dx>, toY: <dy>}`, zoom with `action: "drag", button: 3`, reload a display config with `ros2_gui_interact {action: "key", keys: "ctrl+shift+r"}`. When `wmctrl` cannot enumerate windows (e.g. no window manager on the display), window-relative interaction reports "window not found" — fall back to absolute screen coordinates. Interaction is local to the host session (no approval, same as other L3 tools).
+Interaction recipes (model-facing): orbit the RViz2 view with `ros2_gui_interact {action: "drag", windowTitle: "rviz2", button: 1, toX: <dx>, toY: <dy>}`, zoom with `action: "drag", button: 3`, reload a display config with `ros2_gui_interact {action: "key", keys: "ctrl+shift+r"}`. When `wmctrl` cannot enumerate windows (e.g. no window manager on the display), window-relative interaction reports "window not found" — fall back to absolute screen coordinates, which now **asks for approval** because it targets whatever window is focused.
+
+**Why the allowlist**: `action=key` types arbitrary text into the targeted window, so an unrestricted target is a host-level input-injection path (typing into a terminal runs commands). The allowlist is a convenience control — any process can retitle its own window, so a title match is not proof of identity; the **approval gate is the boundary**, and it fails closed (no approval service = denial). See [`docs/safety.md`](docs/safety.md).
 
 ### L4 realtime vision (parallel VLM over ROS2, headless image topics)
 
@@ -448,6 +450,7 @@ knowledge base improves with every session and every diagnosis gets faster.
 | `display` | string | `''` | DISPLAY override for GUI/screenshot tools |
 | `screenshotDir` | string | `''` | Screenshot output dir (default `$TMPDIR/dsh-ros2`) |
 | `screenshotCommand` | string | `''` | Custom screenshot command; `{output}` is replaced with the PNG path |
+| `guiAllowedApplications` | string[] | `[]` | Applications `ros2_gui_interact` may drive without approval; empty = `rviz2` / `rqt` / `rqt_graph` |
 | `vision.provider` | string | `'mock'` | `mock` \| `gemini` \| `openai` |
 | `vision.apiKey` | string | `''` | Your API key (user-supplied; never logged) |
 | `vision.model` | string | `''` | Model override (e.g. `gemini-2.5-flash`, `gpt-4o-mini`) |
@@ -547,7 +550,7 @@ Release workflow (npm & GitHub Releases): see [`PUBLISH.md`](PUBLISH.md).
 | [`docs/compatibility.md`](docs/compatibility.md) | Compatibility baseline |
 | [`docs/safety.md`](docs/safety.md) | Safety boundary: six layers (agent permission / human approval / motion validation / execution monitoring / post-execution verification / physical robot safety), fail-closed & degradation policy, "DSH is not a functional-safety system" |
 | [`docs/safety-handover.md`](docs/safety-handover.md) | Handover for downstream robot-adaptation agents: generic framework/interfaces vs body-specific data sources/algorithms, profile `safety` schema, interfaces |
-| [`docs/safety-todo.md`](docs/safety-todo.md) | GPT review decisions + batches: 0.14.1 done (deterministic validation), 0.15+ (GUI whitelist / audit / C++ real-time node ...) |
+| [`docs/safety-todo.md`](docs/safety-todo.md) | GPT review decisions + batches: 0.14.1 done (deterministic validation), GUI allowlist landed (§17), still pending (audit JSONL / C++ real-time node ...) |
 | [`docs/test-robot-state-vision.md`](docs/test-robot-state-vision.md) | End-to-end real-robot tests: pipeline, realtime, mesh/TF binding fix & verification, 4-channel joint analysis (with images) |
 | [`docs/test-gpu-passthrough.md`](docs/test-gpu-passthrough.md) | GPU passthrough verification: hardware, troubleshooting, results, usage |
 | [`CHANGELOG.md`](CHANGELOG.md) | Version history (Keep a Changelog) |
