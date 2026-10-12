@@ -1,8 +1,10 @@
 # dsh-ros2 日常维护文档（Maintenance Log）
 
 > 仓库：`StvLi/dsh-ros2` · 本地代码：`/home/stvli/Desktop/embody_agent_ws/dsh-ros2`（git remote `git@github.com:StvLi/dsh-ros2.git`）
-> 维护日期：2026-10-12（最近一轮） · 维护者：DSH scheduled-run agent（StvLi 仓）
+> 维护日期：2026-10-13（最近一轮） · 维护者：DSH scheduled-run agent（StvLi 仓）
 > 维护轮次：第一轮 2026-09-03（§0–§7）；第二轮 2026-09-04（§8）；第三轮 2026-09-05（§9，安全修复）；第四轮 2026-09-05（§10，无 open issue → 安全检查 → 两项维护卫生修复）；第五轮 2026-09-06（§11，无 open issue → 安全检查 → 落地 `ros2_install` 注入修复）；第六轮 2026-09-11（§12，无 open issue → 安全检查 → 落地 `safety_monitor` / `zero_pose_semantics` 注入修复 + vitest 4 升级 + CI 最小权限）；第七轮 2026-09-13（§13，open issue #19 → journey skills + 组合不变量）；第八轮 2026-09-14（§14，3 个 open issue → #21 修复并真机复核、#22 落地但保留 open、#19 完成验收测量）；第九轮 2026-09-21（§15）：open issue #22 → 补齐"会话技能目录对账"（其唯一未实现项）+ 修复 `ros2_env_check` 的"报告 ≠ 执行"缺陷（第八轮存疑项的真因）+ 安全复测；**第十轮 2026-09-22（§16，本轮）：补齐第九轮"在途无 PR"的缺口（PR #27，CI 首跑即抓出"本地绿、CI 红"）→ 在运行中进程里验收并关闭 issue #22 → 定位并修复线上故障真因（`rosSetup` 只校验第一段）→ 3 个 PR 全部合入 main**；第十二轮 2026-09-24（§17，收尾超时遗留的在途 PR #32 → 实测第十轮的重启请求已按硬期限落地 → 修复"配置没送到 doctor"的接线缺口 + API Key 来源语义）；第十三轮 2026-09-25（§18，0 open issue / 0 open PR → 安全扫描发现并落地 3 处真实缺陷 = PTY 会话 id 路径穿越 · 发布物携带 `__pycache__` 字节码 · 安装器选项注入，并开启 Dependabot 告警）；**第十四轮 2026-09-26（§19）：0/0 → 先闭环第十三轮唯一的未闭环观测（gen-21 重启逐字命中），再落地 3 个 PR = 明文传输的 VLM API Key 可见化 · 插件自建 IPC 对象权限收紧（PTY 会话文件 / sidecar UDS / 安装器脚本）· Dependabot 版本更新；并把跨五轮未处理的部署配置项升级为 issue #40；**第十五轮 2026-09-29（§20）：open issue #40 → step 2 评估（合理、必要，但配置在仓库外且需运维决定）→ **承接上一轮时间窗被截断留下的在途分支** `fix/workspace-path-hygiene` 并落地 `fix(common)`：自愈探针用**原始文本**比对存在性，把**存活但写成 `~/…`** 的工作区判为缺失、剔除该段、并在只剩它时**静默切换到 `/opt/ros/<distro>`** —— 恰是本轮文档新推荐的路径形式；闭环第十四轮的 gen-22 观测（逐字命中）；实测线上 **6 处**死链（issue #40 少算 1 处）；本轮**无 GitHub API token**，改用一次性 `ci/probe-*` 分支取得 CI（Node 22/24 双绿）后删除**；**第十六轮 2026-09-30（§21，本轮）：open issue #40 → step 2 复核（逐字确认**仍然准确**、更正为**实测 6 处**死链、结论仍交运维）→ **上一轮唯一的运维缺口已消失：`gh` 有了 token**，于是第一个动作就是把第十五轮卡住的在途分支**开成 PR #48、CI 双绿后合入 main**（第一次拿到**真实** PR CI，不再需要 `ci/probe-*` 代跑）；随后落地 3 个 PR = `fix(packaging)` 发布面 `__pycache__` 守卫（**此前只有"碰巧出现过"的那 3 个包有守卫**，实测 moveit 可复现泄漏 `.pyc`）+ `ci(security)` **CodeQL 代码扫描基线**（第十四/十五轮连续两次建议、本轮首次落地）+ `fix(security)` 首个基线 **29 条告警**中的**2 处真实缺陷**（`ros2_interface_create` 的 TOCTOU 可被符号链接穿出 · 自愈探针的自动探测路径未加引号）；Dependabot 积压 6 → 4（#47 合入并替掉失败的 #44）**；**第十七轮 2026-10-01（§22，本轮）：open issue #40 → step 2 第三次复核（事实逐字不变、结论仍交运维、故不再重复评论）→ 把第十六轮**有意不修**的 3 条 ReDoS 告警**先测量再修**：走真实入口实测后只有 **1 条真实可达**（`parseTopicList`，n=4000 阻塞 **14.8 s**，k=2.11；并发现**第二种**形状 `[`×n+` ]x]` 在 n=20000 阻塞 **697 ms**）、1 条被调用方的 `trim()`/`split('\n')` **消掉而不可达**、1 条**不可复现**（贪婪 `.*` 一步到 `$`，不回溯）→ 三条全部改为**可证明线性**的扫描 + `chars.ts` 逐码点字符类 + **差分等价测试**（穷举 + 10 万条随机/解析器，**0 分歧**），PR #55 CI/CodeQL **5/5 绿**后合入；**闭环第十六轮唯一的遗留观测**（gen-24：`lifecycleState: running`、无残留 `deferDeadline`、`pendingResume: false`）；Dependabot 积压 4 → 3（#43 vitest 4→5 dev-only 合入；#42/#45/#46 抬的是 **type-only peer 下界**，而 CI 装的是**该 PR 自己抬上去的 devDependency** ⇒ **结构上无法评估下界**，升级为 **issue #56**）；CodeQL open **13 → 10**；发布面用**预先种入 `.pyc` + 摘守卫正向对照**复测 9/9 CLEAN；并更正第十六轮快照表里与 §21.8 矛盾的"main 344"（实测 **347**）**。；**第十九轮 2026-10-11（§24，本轮）：open issue #40 → step 2 第五次复核（事实逐字不变、结论仍交运维）→ **把 §5「已知限制」里从第一轮躺到现在的 PTY 幻影会话修掉**：实测旧行为比原文更严重（无 pty 时 `start` 退出 0 并打印 `started session … (pid N)`，`status` **永远**报 `STATE running`，**连不存在的会话 id 也报 running**）⇒ 在父进程 fork 前探测 pty、失败写 `state=failed` 并退出 3、工具返回明确的 `PTY_UNAVAILABLE`；顺带查出**同一个 REMAINDER 解析缺陷**把 `--dir` 当参数投喂给下载来的 sudo 安装脚本（安装器 argv 实测 `["--dir", <dir>]`，修后为 `[]`），且 `--all` 名义存在却不可达 ⇒ 改为"flag 必须在 action 之前"并对 `status`/`stop` 的多余参数**报错而非静默忽略**；**安全扫描发现本地审计门禁在这台机器上根本跑不起来**（`~/.npmrc` 指向的镜像没有 advisory 端点⇒ 前几轮"本地复算供应链"实际无法复现）⇒ 把权威 registry 钉进 `pnpm run audit` / `audit:all` 并让 CI 调用同一条命令；文档计数全面漂移的修正**其中一次被仓库自己的组合不变量测试当场打回**（README 的 83 是"全家族六包"、聚合包只挂 81 ⇒ 改回 83，并在安装步骤把两个数分别说清）→ 并把它升格为 **issue #68**；2 个 PR（#66/#67）CI/CodeQL **5/5 绿**后合入，`main 66a139a → 7dc553f`**。**第二十轮 2026-10-12（§25，本轮）：2 open issue（#40 + #68）→ **issue #68 落地**（`fix(metadata)`：聚合包按"它实际挂的东西"宣称 81、家族 83 仍是家族的数）→ 顺带扫出**同一类缺陷的更大缺口**：三个**已发布**的 per-package `README.md` 从未被任何不变量读过（core 33 对 61、vision 5 对 7、聚合 51+4 对 81+9），已修并把"每个包 README 的第一个工具计数必须等于实测"写进组合不变量（**可证伪**：换回修复前文件即报 `expected 33 to be 61`）→ **issue #40 第六次复核后经运维确认、本轮真正落地**（备份 + 删 5 条死段尾 + 删第 63 行整条 `rosSetup`，YAML 校验通过，行为与自愈后的实际链逐字等价，等 gen-27 重启生效）→ 安全扫描审计/密钥/发布面/CodeQL 全不变（10 条 open 同规则同数量）、**远程已合并分支 16 → 1**（15 条全部是 main 的祖先）→ 1 个 PR（#70）CI/CodeQL **5/5 绿**后合入，`main 7dc553f → 316c142`，**open issue 归零**。**
+>
+> **第二十一轮 2026-10-13（§26，本轮）：0 open issue / 0 open PR → 走 step 5；先闭环上一轮唯一的未闭环观测（gen-27 逐字落地于 10-12 12:40:48，且 `ros2_env_check` 不再报 `missingSources` = issue #40 的最终判据达成）→ 安全扫描沿用同口径全绿（audit prod/含 dev 干净、CodeQL 10 不变、密钥 0、发布面 9/9 CLEAN、Python/TS 执行面与既有防线逐条回归）→ **但真正的高价值发现不是扫描器给的**：把"每个能执行/输入的接口"与"审批面"对照后，发现 `ros2_gui_interact` 可以在**无审批、无目标限制**下把任意按键/文本送进**任意窗口**（选中终端即宿主机命令执行），而更窄的 `ros2_run`/`ros2_service_call` 反而都要审批；且这本是仓库**自己**在 `docs/safety-todo.md` §17 / 验收 #11 决定过、却一直未落地的事（README 还反过来写着"no approval, same as other L3 tools"）→ 落地 `fix(security)`：默认应用白名单（rviz2/rqt/rqt_graph，可配 `guiAllowedApplications`）+ 按**解析后**窗口标题判定 + 白名单外（含不传 `windowTitle`）**先审批**且 fail-closed；用例 **362 → 371**（+9，且删掉 gate 块会让 3 条断言当场变红）；PR #73 CI/CodeQL **5/5 绿**后合入，`main 845f04f → 4ab647c`，并登记 gen-28 让这**真实的运行时变更**（`lib/` 变了）在跑着的 dsh 里生效。**
 
 本文件记录 dsh-ros2 插件的一次完整日常维护循环：**查 issue → 评估建议 → 分支开发 → 验证 → 推送 → 交付维护文档**。每次维护在下方追加一节。
 
@@ -158,17 +160,29 @@ dsh-phoenix 已在 web profile 安装并生效：
 | `~/.npmrc` 指向无 advisory 端点的镜像 | 本机默认 registry 是 `registry.npmmirror.com`，裸敲 `pnpm audit` 会 `ERR_PNPM_AUDIT_ENDPOINT_NOT_EXISTS`（fail closed） | 一律走 `pnpm run audit` / `audit:all`（已把权威 registry 钉进脚本，CI 调同一条命令） |
 | `docs/feedback-env-recovery.md:97` | 为历史反馈记录（截图数字 166 / core 89→94），非用户入口 | 保留为历史快照 |
 | sidecar / state | sidecar 为“纯模板框架”（reducer 未实现），state 是控制面客户端，且**故意不在聚合包依赖里**（issue #68 的决定） | 符合设计，无动作 |
+| **GUI 白名单只是便利性控制，不是边界**（第二十一轮新增） | `ros2_gui_interact` 现在按**解析后的**窗口标题比对白名单，但任何进程都能改自己的窗口标题 ⇒ 标题匹配**不能证明**窗口身份。真正的边界是审批门（fail-closed）。 | 无动作（已如实写进代码注释 + README + `docs/safety.md`）；若将来要硬边界，需按 xdotool 的 `_NET_WM_PID` 校验属主进程，属新设计 |
+| **未加审批的相邻写面**（第二十一轮如实登记，未修） | `ros2_gui_close`（对自己启动的会话发 SIGTERM/SIGKILL）、`ros2_screenshot` / `ros2_image_snapshot`（`output` 接受任意绝对路径，写入内容固定为 PNG/JPEG） | 前者只作用于**自己跟踪的**会话；后者影响是**完整性**（可用图片字节覆盖任意文件），不是 RCE。若判定需要，单独一轮做"输出路径限定 + 审批" |
+| 审计 JSONL（§18） | 仍**未做**（`docs/safety.md` §4 仍如实写着"本版未做"） | 晚批独立项，不影响边界 |
 
 ---
 
 ## 6. 下次维护建议动作
 
 1. 若需重载运行时变更：走 §4 的 dsh-phoenix 优雅重启循环，而非手动 `systemctl restart`。
-   （第二十轮登记 gen-27 的原因**不是**运行时代码变更——`lib/` 未变——而是 §5 之外的部署配置变更需要重载才能生效。）
-2. 全量用例基数：**362 例（361 过 + 1 pty-skip）**。在 pty 可用机器（如 CI）跑 `pnpm run test` 可看到 362/362。
-3. 远端分支卫生：第二十轮已把 15 条**全部分并入 main** 的分支删掉（16 → 1）。今后**合入即删**，别再让它攒回来。
+   （第二十一轮登记 gen-28 的原因是**真正的运行时变更**：`packages/core/lib/*.js` 变了——
+   GUI 审批门只有在重载后才会在跑着的 dsh 里生效。第二十轮的 gen-27 则是部署配置变更。）
+2. 全量用例基数：**371 例（370 过 + 1 pty-skip）**。在 pty 可用机器（如 CI）跑 `pnpm run test` 可看到 371/371。
+3. 远端分支卫生：第二十轮把 16 → 1；第二十一轮**合入即删**保持 `origin` 只有 `main`。
+   本地在第二十一轮又清掉 3 条已并入 main 的分支（`fix/gui-interaction-approval` 与两条 `docs/maintain-round-20*`）。
 4. 保持“提交前 typecheck+test+build 全绿 + 行为变更补测试 + push 后 CI 绿”的验收线。
 5. **凡文档里出现"已知限制 / 静默 / 无输出"这类词，都当作"待复现的假设"**（第十九轮教训的正面用法）。
+6. **安全扫描要问"谁声称了什么、谁在守它"，而不是"有没有告警"**：第二十一轮的高价值发现
+   （GUI 输入注入无审批）**不是任何扫描器报出来的**——CodeQL/audit/密钥/发布面全绿，
+   它是"把每个"能执行的输入面"列出来，再问"这个面凭什么不需要审批"问出来的。
+   下一轮建议同样先做一次**执行面 × 审批面**的对照（见 §26.3），而不是只看扫描器输出。
+7. **被文档承认"晚批/未做"的事，要定期问一句"这个版本过去了吗"**：
+   GUI 白名单被 `docs/safety-todo.md` 记为"0.15+"晚批，而 `v0.15.0` 早已发过——
+   "晚批"这个词会让一条真实的 RCE-相邻缺口**看起来已被处理**。第二十一轮就是靠这一问挖出来的。
 
 ---
 
@@ -4743,3 +4757,314 @@ Oct 11 04:20:29  dsh[1456879]: [dsh-phoenix] loaded (graceful restart + client r
   4. **读 §5 时把它当作待办清单**：每轮**删除**已解决的行，而不是在下面加一行"已解决"。
   5. **`pnpm audit` 一律走脚本**；**`gh issue view` 失败换 REST/JSON 端点**（§24.1）。
   6. **合入即删分支**（本轮已建立，16 → 1）。
+
+---
+
+## 26. 维护记录（2026-10-13 04:00 CST / UTC 2026-10-12 20:00 · 第二十一轮：0 open issue / 0 open PR → step 5；闭环 gen-27 与 issue #40 的最终判据 → 安全扫描（审计/密钥/发布面/CodeQL）全不变 → **真正的高价值发现来自"执行面 × 审批面"对照而非扫描器**：`ros2_gui_interact` 无审批、无目标限制地注入任意窗口输入（选中终端即宿主机命令执行）→ 落地仓库自己早已决定的 §17 GUI 白名单 + 白名单外审批 → PR #73 5/5 绿合入 → 登记 gen-28）
+
+> 本轮结论：起始 **0 open issue / 0 open PR**、`main = 845f04f`、工作树干净 ⇒ 按流程 `1 → 无 issue → 5`，本轮**无 issue 需要评估（step 2/3 的 issue 部分不适用）**。
+> 本轮交付：**1 个 PR 合入**（#73，CI/CodeQL **5/5 绿**）、`main 845f04f → 4ab647c`、
+> 用例 **362 → 371**（+9）、**CodeQL open 10 不变**（无新规则、无新实例）、audit prod/含 dev 干净、
+> 发布面 **9/9 CLEAN**、**远程分支保持只有 `main`**、本地清掉 3 条已并入的分支。
+> **本轮最有价值的一条不是扫描器报的**：audit / CodeQL / 密钥 / 发布面**全绿**，
+> 而一个"无审批即可在宿主机上执行任意命令"的相邻路径仍然开着——它是**对照**出来的（§26.3），
+> 且**仓库自己早就决定要堵**（`docs/safety-todo.md` §17、验收 #11），只是被标成"晚批 0.15+"而 0.15.0 早已发过。
+
+### 26.0 仓库快照（本轮起始/结束）
+
+| 项 | 起始 | 结束 |
+| --- | --- | --- |
+| 当前分支 | `main`（= `origin/main` `845f04f`），工作树**干净** | `main`（= `origin/main` **`4ab647c`**），工作树干净 |
+| `main` | `845f04f` | **`4ab647c`** |
+| open issue / open PR | **0 / 0** | **0 / 0** |
+| vitest 用例 | **362**（361 过 + 1 pty-skip） | **371**（370 过 + 1 pty-skip） |
+| CodeQL **open** 告警 | **10**（8 high `js/insecure-temporary-file` + 2 medium `js/file-access-to-http`） | **10**（同规则同数量；本轮新增代码**未产生新告警**） |
+| Dependabot open | 0 | 0 |
+| `pnpm audit`（脚本，权威 registry） | prod 干净 / 含 dev 干净 | 同 |
+| 发布面（9 个非私有包 `pnpm pack` + `tar -tzf`） | 9/9 CLEAN | 9/9 CLEAN |
+| 活体工具 / 技能 | **81 / 9**（六 bundle，`drifted` 全 `false`、`stale: false`、`missing: []`、`undeclared: []`） | 同（**未新增工具**，故 surface 不变） |
+| 运行中的 dsh | PID **1736**，启动 **2026-10-12 17:25:19**（那次是**机器重启**，不是 phoenix 代际） | 同进程（本轮结束时登记 gen-28，落地留给下一轮开工确认） |
+| dsh-phoenix 状态文件 | `generation 27` / **`running`** / `deferDeadline 0` / `pendingResume false` | 登记后 → `generation 28` / `deferred`（§26.4） |
+| 远程分支 | **1**（仅 `main`） | **1**（仍仅 `main`；PR #73 合入即删） |
+| 本机 | Node `v24.16.0` / pnpm `11.22.0`（与 root `packageManager` 一致） | 同 |
+
+### 26.1 Issue 检查（step 1）
+
+```text
+gh issue list --state open   → []（0 个）
+gh pr list   --state open    → （空，0 个）
+gh issue list --state all --json | length → 10（全部 CLOSED）
+```
+
+⇒ **无未处理 issue**，按流程直接转 **step 5（安全扫描）**。本轮因此**没有** step 2 的"建议合理性评估"对象——
+但 §26.3 的发现来自仓库内**自己的决策记录**（`docs/safety-todo.md`），性质上等价于一条"已决定、未执行"的建议。
+
+### 26.2 先闭环上一轮唯一的未闭环观测（gen-27 + `missingSources`）
+
+第二十轮留下**唯一**的待运维项：确认 gen-27 落地，并复核 `ros2_env_check` 的
+`missingSources` 应为 `[]`、且不再有「已剔除该段」note——这是 issue #40 修复的**唯一**最终判据。
+本轮开工**第一件事**就是读 journal（状态文件只能回答"此刻处于哪个生命周期状态"）：
+
+```text
+Oct 12 12:35:36  [dsh-phoenix] cordis tool: cordis_run
+Oct 12 12:35:39  [dsh-phoenix] restart requested (gen 27): plugin-change          ← 第二十轮登记
+Oct 12 12:40:39  [dsh-phoenix] agent idle; executing deferred restart (gen 27)
+Oct 12 12:40:39  [dsh-phoenix] restart cmd exit=0
+Oct 12 12:40:48  systemd: Started dsh-web.service
+Oct 12 12:40:51  dsh[311316]: [dsh-phoenix] loaded (graceful restart + client reconnect + lifecycle)
+```
+
+```json
+{ "generation": 27, "lifecycleState": "running", "goalId": null,
+  "pendingResume": false, "resumeAttempt": 0, "deferDeadline": 0,
+  "updatedAt": 1791797130836 }
+```
+
+`generation 27` + `lifecycleState: running` + `deferDeadline: 0` + `pendingResume: false`
+⇒ **gen-27 逐字命中、干净落地**（`deferDeadline − updatedAt = 900000 ms` 的硬期限链与第十四～二十轮一致）。
+
+**本轮的判据（issue #40 的收口）**——活体 `ros2_env_check`：
+
+```json
+{ "setup": { "prefix": "source /home/stvli/lite_delivery_aio/install/setup.bash &&",
+             "sourcePath": "/home/stvli/lite_delivery_aio/install/setup.bash",
+             "explicit": true, "sessionOverride": null } }
+```
+
+**没有 `missingSources` 字段、也没有 `note`**。这不是"字段丢了"，而是**逐字等价于 `[]`**：
+`packages/core/src/tools.ts:1607` 只在 `setup.missingSources.length > 0` 时才附上该字段
+（`...(setup.missingSources.length > 0 ? { missingSources: setup.missingSources } : {})`），
+而 `resolveSetup` 的健康分支（`packages/common/src/runner.ts:222-230`）**会**填一个空数组。
+⇒ **字段的缺席 ⇔ `[]`**，且不再有「已剔除该段」note。**issue #40 的最终判据达成、闭环。**
+
+**另一条必须写清的时间线**（否则会把别人的落地算成自己的）：本进程（PID 1736）启动于
+**10-12 17:25:19**，比本轮任何编辑都早——因为**机器在 10-12 17:25:11 重启过**：
+
+```text
+Oct 12 17:24:34  systemd: Stopping dsh-web.service…
+Oct 12 17:24:35  systemd: Stopped dsh-web.service.
+-- Boot 6ad08cd3ca314ff298c1fe3441a4b43f --
+Oct 12 17:25:19  systemd: Started dsh-web.service
+Oct 12 17:25:22  dsh[1736]: [dsh-phoenix] loaded
+```
+
+状态文件的 `updatedAt: 1791797130836` = **10-12 17:25:30**，正是**本次启动时重写的时间戳**
+（延续 §23.5.1 的读法：它不是任何重启时刻）。另外这台机器 `uptime -s` = `2026-10-12 17:25:11`，
+与 journal 的 `-- Boot --` 行一致。
+
+### 26.3 安全扫描（step 5）——扫描器全绿，但真正的发现是"对照"出来的
+
+#### 26.3.1 同口径的机械扫描（与第十九/二十轮逐条可比）
+
+| 面 | 结果 |
+| --- | --- |
+| 供应链（`pnpm run audit` = `--prod --audit-level high`，**显式权威 registry**） | ✅ **No known vulnerabilities found** |
+| 供应链（**含 dev**，`pnpm run audit:all`） | ✅ **No known vulnerabilities found** |
+| 硬编码密钥（`sk-` / `AIza` / `ghp_` / `gho_` / `github_pat_` / `xox` / `npm_` / `BEGIN … PRIVATE KEY`） | ✅ 跟踪文件中 **0**（`git grep`，排除维护文档与 CHANGELOG 里对这些模式的描述文字） |
+| **静态分析（CodeQL）** | ✅ **10 → 10**，逐条定位：8 high `js/insecure-temporary-file`（`packages/{common,core,dsh-ros2,vision}/tests/*` + `scripts/verification/measure.mjs`）+ 2 medium `js/file-access-to-http`（`packages/vision/src/vision.ts:64,102`）。**本轮新增代码 0 告警**（CI CodeQL **pass**） |
+| 发布面（9 个非私有包 `pnpm pack` + 逐条 `tar -tzf`） | ✅ **9/9 CLEAN**，`pyc=0`；且实测**恰好 7 个包**装 `.py`（common 1 / core 2 / moveit 5 / profile 1 / safety 1 / sidecar 6 / vision 2）**全部**带 `!**/__pycache__` + `!**/*.pyc` 守卫，`dsh-ros2` 与 `dsh-ros2-state` 装 0 个 `.py` 故无需守卫 —— 与文档的"7 个"逐字吻合 |
+| 发布面是否含 tests | ✅ **不含**：核心包 tarball 只有 `lib/` + `scripts/` + `package.json`/`README.md`/`LICENSE`/`cordis.patch.yml` ⇒ 上面 8 条 `insecure-temporary-file` **确实不在发布面**（**复核了上一轮的继承结论**，未直接沿用） |
+| Python 执行面（按 `.py` 或首行 `#!…python` 取全集，repo-wide） | ✅ **29 个文件**；`shell=True` / `os.system` / `eval(` / `exec(` / `pickle` / `yaml.load` **全部 0**；`subprocess` 命中 **16 处调用点**（`run` 13 + `Popen` 3）+ 8 个 `DEVNULL` —— 与第十九/二十轮**逐字一致** |
+| TS 命令面（`src/`） | ✅ **无 `execSync` / 无 `shell:true` / 无 `eval(` / 无 `new Function(`**；`execFile` ×14、`spawn` ×2、`spawnSync` ×0 —— 与第十九/二十轮**逐字相同** |
+| 既有防线回归（第十三/十四/十六/十七/十八/十九/二十轮） | ✅ 全部仍在：`safe_sid()` 双层守卫（tool 侧 `isSafePathComponent` + helper 侧 `_SID_RE`）、PTY `DIR_MODE 0o700` / `FILE_MODE 0o600`（`packages/core/scripts/pty_session.py:88-89,132-134`）、sidecar UDS `chmod 0o600`、安装器 `umask 077` + `chmod 700`、`ros2_interface_create` 的 `flag: 'wx'`（`O_EXCL`，`tools.ts:432`）、`classifyVisionTransport()` 的回环/明文判定 |
+| 活体网络出口复测 | ⚠️ **不变、已有上报**：`ros2_vision_doctor` 实时报 `transport.cleartext: true`（`http://121.9.219.138:8888/v1`，非回环）；`~/.dsh-ros2/secrets.json` 实测 `mode: 600` |
+| Dependabot | ✅ **0 open**（本轮无积压） |
+
+> **必须写清的一条**：以上"干净"与第十九/二十轮**同口径**——审计走 `pnpm run audit`
+> （脚本内已钉 `--registry https://registry.npmjs.org/`），**不是裸敲**；裸敲在本机默认镜像下
+> 仍然只会 `ERR_PNPM_AUDIT_ENDPOINT_NOT_EXISTS`。
+
+#### 26.3.2 真正的发现：**执行面 × 审批面**对照（扫描器不会报这个）
+
+机械扫描全绿之后，本轮换了一个问题：**把每个"能执行、能写、能注入输入"的接口列出来，
+再逐个问——这个面凭什么不需要审批？** 于是照着代码数了一遍 `requestApproval` 的**覆盖**：
+
+| 类别 | 工具 | 审批 |
+| --- | --- | --- |
+| L2 写/动 | `ros2_colcon_build` · `ros2_rosdep_install` · `ros2_interface_create` · `ros2_param_set` · `ros2_bag_record` · `ros2_bag_play` · `ros2_install`(start) · `ros2_launch` · `ros2_param_delete` · `ros2_lifecycle`(set) · `ros2_component`(load) · `ros2_service_call` · `ros2_action_send_goal` · `ros2_daemon`(stop/start) · `ros2_topic_pub` · `ros2_run` · `ros2_process_cleanup` · `moveit_move` · `robot_register` · `robot_topology`(snapshot/learn) · `robot_safety_start/lock/unlock` · `ros2_zero_pose_semantics` · `ros2_vision_set_key` | ✅ **全部有**（逐条在 `tools.ts` 定位到 `requestApproval`） |
+| L3 GUI | `ros2_gui_start` / `ros2_gui_list` / `ros2_gui_close` / `ros2_screenshot` / `ros2_gui_observe` / **`ros2_gui_interact`** | ❌ **一个都没有** |
+
+**`ros2_gui_interact` 的具体问题**（`packages/core/src/tools.ts:995-1077`，修复前）：
+
+- `action=key` + `text` 走 `xdotool type`，`keys` 走 `xdotool key` —— 即**任意文本/按键**；
+- 传 `windowTitle` 时先 `windowactivate` **把那扇窗切到前台**再输入；
+- **不传** `windowTitle` 时作用于**当前焦点窗口**（绝对坐标点击/打字）；
+- **全程没有任何审批，也没有任何目标限制**。
+
+⇒ 把 `windowTitle` 指向一个终端（或干脆让它成为焦点窗口）就能**在宿主机上以当前用户身份执行命令**。
+威胁模型不是假想的：本插件的 agent 会消费**不可信内容**（ROS 话题消息、VLM 描述的图像、抓取的页面、
+报错文本），而相邻的、**窄得多**的动作（跑一个 ROS 可执行文件、调一个服务、发一条话题）**全都要审批**——
+**最宽的输入面反而没有门**。这就是"执行面 × 审批面"对照要问的问题，**CodeQL / audit / 密钥扫描都不会报它**。
+
+#### 26.3.3 合理性 / 必要性判断（等价于 step 2）
+
+**这不是新增需求，而是仓库自己已经决定、却一直没执行的事**：
+
+- `docs/safety-todo.md` §1 第 17 条：`L3 GUI 安全` → **做（轻）** → "`ros2_gui_interact` 默认白名单
+  （rviz2/rqt/rqt_graph）+ 窗口标题校验"，批次标 **晚（0.15+）**；
+- `docs/safety-todo.md` §3 晚批表：同一项的展开（"需改动时审批"）；
+- 验收表第 11 条 **"GUI 能力限制"** → 归属"晚批（§3）"；
+- 上游评审 `docs/safety-gpt-review.md` §17："Do NOT allow unrestricted arbitrary GUI interaction by default…
+  GUI interaction should be approval-gated when the action can modify robot state or launch/stop processes."
+
+**结论：合理且必要。** 但**必要性的一条额外理由本轮才被说清**：这项工作被标成"晚批 0.15+"，
+而 `v0.15.0` **早在 2026-08-24 就已发布**（`git tag` 实测，且是 `HEAD` 的祖先）——
+于是"晚批"三个字让一条**真实存在**的宿主机命令执行路径**看起来已经被处理过**。
+README 更把它反向写成了事实（`README.md:236` 原文："Interaction is local to the host session
+(**no approval**, same as other L3 tools)"），文档与代码在**同一个错的方向上**互相印证。
+
+**决定：本轮实现 §17 的"轻"版本**，即白名单 + 按**解析后的**窗口标题校验 + 白名单外审批。
+**不**顺手扩到相邻项（见 §26.5"明确没有做的事"）。
+
+### 26.4 开发管理（git · step 3）与 dsh-phoenix（step 4）
+
+| PR | 分支 | 提交 | CI |
+| --- | --- | --- | --- |
+| **#73** | `fix/gui-interaction-approval` | `0f64edd` `fix(security)` + `a0c2e35` `docs(safety)` | ✅ `check (22)` / `check (24)` / `analyze (js-ts)` / `analyze (python)` / `CodeQL` **5/5 全绿**；合入后 main 同一条 CI 亦 **success** |
+
+提交面 9 个文件：`packages/core/src/gui.ts`、`packages/core/src/tools.ts`、`packages/core/src/config.ts`、
+`packages/core/src/index.ts`、`packages/core/tests/gui.spec.ts`、`README.md`、`README_CN.md`、
+`docs/safety.md`、`docs/safety-todo.md`。
+
+#### 26.4.1 `fix(security)`：白名单 + 白名单外审批（不可自证式绕过）
+
+1. **`GuiManagerOptions.allowedApplications`**（默认 `DEFAULT_ALLOWED_APPLICATIONS = ['rviz2','rqt','rqt_graph']`，
+   亦可由 `config.guiAllowedApplications` 覆盖）；新增纯函数 `isAllowedWindowTitle(title, allowed)`
+   （大小写不敏感**子串**匹配，因为真实标题带后缀：`rviz2 - RViz`）。
+2. **`GuiManager.classifyInteraction(windowTitle?)`** → `confined | not-found | unconfined`：
+   - 校验对象是 **`findWindow` 解析出来的窗口的 `title`**，**不是调用方传进来的 `windowTitle`**——
+     所以"传一个白名单名字"**不能**为另一扇窗背书（专门有测试钉这一点）；
+   - **不传 `windowTitle` 永远不是 `confined`**（绝对坐标/焦点窗口无法确认目标）；
+   - 窗口**不存在**时报 `not-found`，**不问审批**（没有东西可批，问就是误导用户）。
+3. **`ros2_gui_interact`** 在任何 `xdotool` 事件之前判定；`unconfined` → `requestApproval`
+   （`docs/safety.md` 的"审批先于执行"），`denied` → `APPROVAL_DENIED`。
+   `requestApproval` **fail-closed**（无审批服务/无 agent/异常/任何非 `allowed-once` 都拒），
+   ⇒ 这个改动**不可能**自己把面放大。
+4. **如实写下边界**：白名单是**便利性**控制，**不是**安全边界——任何进程都能改自己的窗口标题，
+   标题匹配**不构成身份证明**。真正的边界是审批门。这句话同时写进了**代码注释**、两个 README 和
+   `docs/safety.md`（§26.6 第 2 条说明了为什么必须这样写）。
+
+#### 26.4.2 可证伪（不是"跑绿了就算"）
+
+把**只有** `tools.ts` 里那段 gate 删掉（保留 gui.ts 的白名单函数与测试），跑 `gui.spec.ts`：
+
+```text
+× ros2_gui_interact click at absolute coordinates requires approval
+× gates typing into a non-allowlisted window behind approval
+× lets an operator extend the allowlist through the manager
+⎯⎯ Failed Tests 3 ⎯⎯
+AssertionError: expected true to be false            （×2）
+AssertionError: expected undefined to be 'APPROVAL_DENIED'
+Tests  3 failed | 33 passed (36)
+```
+
+⇒ **新增用例确实有牙**（只跑绿什么也证明不了：它可能根本没匹配到任何东西）。恢复后 36/36 绿。
+
+#### 26.4.3 验收（本地 + CI）
+
+```bash
+cd /home/stvli/Desktop/embody_agent_ws/dsh-ros2
+CI=true pnpm run build      # 9 个项目全部 Done
+CI=true pnpm run typecheck  # 9 个项目 tsc --noEmit 全部 Done
+CI=true pnpm -r test        # 370 passed | 1 skipped（core 153+1 skip，gui.spec.ts 27 → 36）
+python3 -m sidecar.selftest # SELFTEST PASSED (11 scenarios)
+```
+
+`lib/` 由本轮构建刷新 ⇒ **这是真实的运行时变更**（不是第二十轮那种"配置变了但 `lib/` 没变"）。
+
+#### 26.4.4 dsh-phoenix 循环（step 4）
+
+**接线核对**：`dsh-phoenix` 与 `dsh-ros2` 全家仍以 `link:` 装在 web profile；本轮未改动接线。
+**状态文件路径**（本轮补充记录，避免每轮重新找）：由 **systemd unit 的环境变量**给出，
+**不在本会话的 shell 环境里**：
+
+```bash
+systemctl --user show dsh-web -p Environment
+#   → DSH_PHOENIX_STATE_FILE=/home/stvli/tmp/dsh-phoenix-state.json
+```
+
+（`~/.dsh/.agent-presets/cordis-phoenix` 是 **preset 目录**，不是状态文件；`/proc/<pid>/environ` 被沙箱拒绝。）
+
+**活体持续测试**：本会话 `ros2_env_check` 的实时对账与仓库一致——
+`totalTools: 81` / `totalSkills: 9` / 六 bundle `drifted` 全 `false` / `stale: false` / `missing: []` /
+`undeclared: []` / 技能目录 `complete: true`。**本轮未新增工具**，故 surface 与元数据无需改动。
+
+**本轮需不需要重启？——需要，且理由是"真的改了运行时"**：`packages/core/lib/*.js` 已变，
+而运行中的进程（PID 1736）加载的是**旧** `lib/`——**不重载则新审批门在这个 dsh 里不生效**。
+按既有最小失败面（一个空实现的动态 plugin + `cordis_run`）在**文档写完后作为本轮最后一个动作**登记 **gen-28**；
+只登记、不假装已落地，落地确认留给下一轮开工时的 journal（与第二十轮的读法一致）。
+
+### 26.5 本轮发现
+
+1. **【已修·真实·本轮最有价值·扫描器不会报】** `ros2_gui_interact` 可**无审批**把任意按键/文本
+   注入**任意窗口**（选中/激活终端 = 宿主机命令执行），而更窄的动作全都要审批（§26.3.2）。
+   **根因不是"忘了加审批"**，而是**这条路径被归类为 L3"本地会话操作"**，于是整类默认无门。
+   **修法**：按仓库自己 §17 的决定落白名单 + 白名单外审批（§26.4.1）。
+2. **【读法·真实】** "晚批/未做"是**会过期**的标签：§17 记为"0.15+"，而 `v0.15.0` 早已发布
+   ⇒ 一条真实的 RCE-相邻缺口**看起来已被处理**。**教训**：把"被文档承认的未做项"当**待办**定期问
+   "这个版本过去了吗"（已写进 §6 第 7 条）。
+3. **【已修·文档·同一方向自证】** README 把不安全状态写成事实（"no approval, same as other L3 tools"），
+   与代码**互相印证**、彼此都不显得可疑。**文档与代码一致 ≠ 正确**——两者可以一起错。
+   本轮把 3 处（`README.md` / `README_CN.md` / `docs/safety.md`）改成实话，并把边界写清（§26.4.1 第 4 条）。
+4. **【闭环·跨轮】** 上一轮唯一的未闭环观测（gen-27 + `missingSources`）**逐字命中并闭环**（§26.2），
+   且本轮把"为什么字段缺席 ⇔ `[]`"**定位到源码行**（`tools.ts:1607` + `runner.ts:222-230`），
+   而不是"看起来没报错就算通过"。
+5. **【复核·不沿用继承结论】** 上一轮"8 条 `insecure-temporary-file` 都不在发布面"是**继承**来的；
+   本轮**实际解开 tarball**确认发布面只有 `lib/`+`scripts/`（无 `tests/`），结论成立（§26.3.1）。
+   同一条纪律也用在 GUI 白名单上：**没有**直接采信"§17 还没做"的文档说法，而是 `grep` 了
+   `allowedApplications|allowlist|白名单` 全仓库，确认**只有文档提到、代码里根本没有**。
+6. **【未变·如实】** CodeQL **10 → 10**、audit（prod/含 dev）干净、密钥 0、发布面 9/9 CLEAN、
+   Python/TS 执行面与既有防线逐条回归通过；**唯一"正在发生"的风险仍是 VLM 网关明文 `http://`**
+   （第十四轮已上报为 #38，doctor 每轮实时告警），属运维决定，本轮只重新确认它仍在。
+7. **【边界·如实】** 本轮**改了**运行时行为（GUI 工具会多出审批提示），
+   因此**不能**声称"只改了文档"；同时**没有**改 L1/L2/MoveIt/安全层的行为。
+   `lib/` 变了 ⇒ 必须 gen-28 重载才在跑着的 dsh 里生效（§26.4.4）。
+8. **【卫生】** 远程分支保持**只有 `main`**；本地删掉 3 条**已并入 main** 的分支
+   （`fix/gui-interaction-approval`、`docs/maintain-round-20`、`docs/maintain-round-20-gen27`）。
+   仍**不删**那 7 条"非祖先"分支（squash 合入或仅本地，`--merged` 判不出），与第二十轮同一判断。
+
+### 26.6 本轮最有价值的三个"读法"
+
+1. **扫描器绿 ≠ 没有洞**：本轮 audit / CodeQL / 密钥 / 发布面**全绿**，而一条宿主机命令执行路径开着。
+   高价值发现来自**把"执行面"和"审批面"列成两张表对照**（§26.3.2）——这是可以每轮重复的动作。
+2. **"谁声称了什么、谁在守它"之后，还要问"这句声称是不是**同向**错的"**：
+   第二十轮的教训是"某个数不实先问谁定义了它"；本轮是"**代码和文档一起错**"——
+   README 的"no approval"与代码的"没有 `requestApproval`"**互相印证**，所以两边都不会显得可疑。
+   **文档与代码一致，不构成正确性的证据。**
+3. **先查"是不是我自己决定过"**：本轮不是提出新需求，而是**发现一条自己的决定躺在"晚批"里过期了**。
+   动手前先 `grep` 决策记录（`docs/safety-todo.md` / 上游评审）能避免：(a) 自作主张发明策略；
+   (b) 重复讨论已定的取舍。§17 连字段名（`allowedApplications`）和白名单内容都写好了，照做即可。
+
+### 26.7 结论与下一步建议
+
+- **交付**：**1 个 PR 合入 `main`**——**#73**（`fix(security)` + `docs(safety)`，**CI/CodeQL 5/5 绿**），
+  `main` **`845f04f` → `4ab647c`**；用例 **362 → 371**（+9）；**open issue / open PR 均为 0**；
+  CodeQL **10 不变**；audit prod/含 dev 干净；发布面 **9/9 CLEAN**；远程分支仅 `main`。
+- **线上价值**：堵住一条**无审批的宿主机输入注入**路径——从此 `ros2_gui_interact` 只在白名单应用窗口内
+  免审批直驱（RViz2/rqt 的既有配方**照旧可用**），任何其它目标（含终端、含"当前焦点窗口"）**必须先问人**，
+  且无审批服务时**直接拒绝**。同时把文档里"无需审批"的错误事实改正，并把"白名单不是边界"写进代码与文档。
+- **明确没有做的事（以及理由）**：
+  1. **没有**把 `ros2_gui_start` / `ros2_gui_close` / `ros2_screenshot` 一起加审批——§17 针对的是**输入注入**；
+     `close` 只对自己跟踪的会话发信号，`screenshot`/`image_snapshot` 的任意 `output` 路径影响是**完整性**
+     （内容固定为图片字节），不是 RCE。如实登记在 §5，留给单独一轮（避免把一次维护做成产品改版）。
+  2. **没有**把白名单做成硬边界（按 `_NET_WM_PID` 校验属主进程）——那是新设计，不是 §17 的"轻"版本；
+     相反，本轮**明确写下**它只是便利性控制，以免读者高估它。
+  3. **没有**实现 §18 审计 JSONL——仍是晚批独立项，`docs/safety.md` 继续如实写着"本版未做"。
+  4. **没有**清理本地那 7 条"非祖先"分支——与第二十轮同一理由（需要意图，不是测量）。
+- **待运维**：
+  1. **确认 gen-28 落地**（下一轮开工看 journal 的 `restart requested (gen 28)` →
+     `executing deferred restart (gen 28)` → `loaded`），并在重载后**实测一次审批门**：
+     对未列入白名单的窗口（先放一扇，如文件管理器）调用 `ros2_gui_interact`，
+     应**弹出审批**；在无审批服务的会话里应**直接 `APPROVAL_DENIED`**。
+  2. 视需要决定 VLM 网关的 `https://` / 回环迁移（第十四轮以来的老项）。
+- **下次维护建议**：
+  1. **先闭环 gen-28**，并做上面第 1 条的**审批门实测**（这是本轮修复的唯一最终判据，
+     与 issue #40 用 `missingSources` 收口同理：**要有可判定的判据，不要"应该没问题"**）。
+  2. **重复"执行面 × 审批面"对照**（§26.3.2 的两张表）：新增任何会执行/写入/注入输入的工具时，
+     先回答"它凭什么免审批"。本轮证明**扫描器不会替你问这个问题**。
+  3. **把"晚批 / 未做 / 计划中"当作有保质期的假设**，每轮问一次"这个版本过去了吗"（§6 第 7 条）。
+  4. **不沿用继承结论**：上一轮写下的"都不在发布面""还没做"之类，本轮要么**实测复核**
+     （解开 tarball / `grep` 全仓库），要么标注为未复核。
+  5. **新不变量/新防线要"可证伪"再提交**：删掉防线跑出红，是"它到底有没有牙"的唯一证据（§26.4.2）。
+  6. **读 §5 时把它当作待办清单**：每轮**删除**已解决的行、**加上**新如实登记的行。
+  7. `pnpm audit` 一律走脚本；`gh issue view` 失败换 REST/JSON 端点（§24.1）；**合入即删分支**。
