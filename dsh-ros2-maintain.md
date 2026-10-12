@@ -1,8 +1,8 @@
 # dsh-ros2 日常维护文档（Maintenance Log）
 
 > 仓库：`StvLi/dsh-ros2` · 本地代码：`/home/stvli/Desktop/embody_agent_ws/dsh-ros2`（git remote `git@github.com:StvLi/dsh-ros2.git`）
-> 维护日期：2026-10-11（最近一轮） · 维护者：DSH scheduled-run agent（StvLi 仓）
-> 维护轮次：第一轮 2026-09-03（§0–§7）；第二轮 2026-09-04（§8）；第三轮 2026-09-05（§9，安全修复）；第四轮 2026-09-05（§10，无 open issue → 安全检查 → 两项维护卫生修复）；第五轮 2026-09-06（§11，无 open issue → 安全检查 → 落地 `ros2_install` 注入修复）；第六轮 2026-09-11（§12，无 open issue → 安全检查 → 落地 `safety_monitor` / `zero_pose_semantics` 注入修复 + vitest 4 升级 + CI 最小权限）；第七轮 2026-09-13（§13，open issue #19 → journey skills + 组合不变量）；第八轮 2026-09-14（§14，3 个 open issue → #21 修复并真机复核、#22 落地但保留 open、#19 完成验收测量）；第九轮 2026-09-21（§15）：open issue #22 → 补齐"会话技能目录对账"（其唯一未实现项）+ 修复 `ros2_env_check` 的"报告 ≠ 执行"缺陷（第八轮存疑项的真因）+ 安全复测；**第十轮 2026-09-22（§16，本轮）：补齐第九轮"在途无 PR"的缺口（PR #27，CI 首跑即抓出"本地绿、CI 红"）→ 在运行中进程里验收并关闭 issue #22 → 定位并修复线上故障真因（`rosSetup` 只校验第一段）→ 3 个 PR 全部合入 main**；第十二轮 2026-09-24（§17，收尾超时遗留的在途 PR #32 → 实测第十轮的重启请求已按硬期限落地 → 修复"配置没送到 doctor"的接线缺口 + API Key 来源语义）；第十三轮 2026-09-25（§18，0 open issue / 0 open PR → 安全扫描发现并落地 3 处真实缺陷 = PTY 会话 id 路径穿越 · 发布物携带 `__pycache__` 字节码 · 安装器选项注入，并开启 Dependabot 告警）；**第十四轮 2026-09-26（§19）：0/0 → 先闭环第十三轮唯一的未闭环观测（gen-21 重启逐字命中），再落地 3 个 PR = 明文传输的 VLM API Key 可见化 · 插件自建 IPC 对象权限收紧（PTY 会话文件 / sidecar UDS / 安装器脚本）· Dependabot 版本更新；并把跨五轮未处理的部署配置项升级为 issue #40；**第十五轮 2026-09-29（§20）：open issue #40 → step 2 评估（合理、必要，但配置在仓库外且需运维决定）→ **承接上一轮时间窗被截断留下的在途分支** `fix/workspace-path-hygiene` 并落地 `fix(common)`：自愈探针用**原始文本**比对存在性，把**存活但写成 `~/…`** 的工作区判为缺失、剔除该段、并在只剩它时**静默切换到 `/opt/ros/<distro>`** —— 恰是本轮文档新推荐的路径形式；闭环第十四轮的 gen-22 观测（逐字命中）；实测线上 **6 处**死链（issue #40 少算 1 处）；本轮**无 GitHub API token**，改用一次性 `ci/probe-*` 分支取得 CI（Node 22/24 双绿）后删除**；**第十六轮 2026-09-30（§21，本轮）：open issue #40 → step 2 复核（逐字确认**仍然准确**、更正为**实测 6 处**死链、结论仍交运维）→ **上一轮唯一的运维缺口已消失：`gh` 有了 token**，于是第一个动作就是把第十五轮卡住的在途分支**开成 PR #48、CI 双绿后合入 main**（第一次拿到**真实** PR CI，不再需要 `ci/probe-*` 代跑）；随后落地 3 个 PR = `fix(packaging)` 发布面 `__pycache__` 守卫（**此前只有"碰巧出现过"的那 3 个包有守卫**，实测 moveit 可复现泄漏 `.pyc`）+ `ci(security)` **CodeQL 代码扫描基线**（第十四/十五轮连续两次建议、本轮首次落地）+ `fix(security)` 首个基线 **29 条告警**中的**2 处真实缺陷**（`ros2_interface_create` 的 TOCTOU 可被符号链接穿出 · 自愈探针的自动探测路径未加引号）；Dependabot 积压 6 → 4（#47 合入并替掉失败的 #44）**；**第十七轮 2026-10-01（§22，本轮）：open issue #40 → step 2 第三次复核（事实逐字不变、结论仍交运维、故不再重复评论）→ 把第十六轮**有意不修**的 3 条 ReDoS 告警**先测量再修**：走真实入口实测后只有 **1 条真实可达**（`parseTopicList`，n=4000 阻塞 **14.8 s**，k=2.11；并发现**第二种**形状 `[`×n+` ]x]` 在 n=20000 阻塞 **697 ms**）、1 条被调用方的 `trim()`/`split('\n')` **消掉而不可达**、1 条**不可复现**（贪婪 `.*` 一步到 `$`，不回溯）→ 三条全部改为**可证明线性**的扫描 + `chars.ts` 逐码点字符类 + **差分等价测试**（穷举 + 10 万条随机/解析器，**0 分歧**），PR #55 CI/CodeQL **5/5 绿**后合入；**闭环第十六轮唯一的遗留观测**（gen-24：`lifecycleState: running`、无残留 `deferDeadline`、`pendingResume: false`）；Dependabot 积压 4 → 3（#43 vitest 4→5 dev-only 合入；#42/#45/#46 抬的是 **type-only peer 下界**，而 CI 装的是**该 PR 自己抬上去的 devDependency** ⇒ **结构上无法评估下界**，升级为 **issue #56**）；CodeQL open **13 → 10**；发布面用**预先种入 `.pyc` + 摘守卫正向对照**复测 9/9 CLEAN；并更正第十六轮快照表里与 §21.8 矛盾的"main 344"（实测 **347**）**。；**第十九轮 2026-10-11（§24，本轮）：open issue #40 → step 2 第五次复核（事实逐字不变、结论仍交运维）→ **把 §5「已知限制」里从第一轮躺到现在的 PTY 幻影会话修掉**：实测旧行为比原文更严重（无 pty 时 `start` 退出 0 并打印 `started session … (pid N)`，`status` **永远**报 `STATE running`，**连不存在的会话 id 也报 running**）⇒ 在父进程 fork 前探测 pty、失败写 `state=failed` 并退出 3、工具返回明确的 `PTY_UNAVAILABLE`；顺带查出**同一个 REMAINDER 解析缺陷**把 `--dir` 当参数投喂给下载来的 sudo 安装脚本（安装器 argv 实测 `["--dir", <dir>]`，修后为 `[]`），且 `--all` 名义存在却不可达 ⇒ 改为"flag 必须在 action 之前"并对 `status`/`stop` 的多余参数**报错而非静默忽略**；**安全扫描发现本地审计门禁在这台机器上根本跑不起来**（`~/.npmrc` 指向的镜像没有 advisory 端点⇒ 前几轮"本地复算供应链"实际无法复现）⇒ 把权威 registry 钉进 `pnpm run audit` / `audit:all` 并让 CI 调用同一条命令；文档计数全面漂移的修正**其中一次被仓库自己的组合不变量测试当场打回**（README 的 83 是"全家族六包"、聚合包只挂 81 ⇒ 改回 83，并在安装步骤把两个数分别说清）→ 并把它升格为 **issue #68**；2 个 PR（#66/#67）CI/CodeQL **5/5 绿**后合入，`main 66a139a → 7dc553f`**。
+> 维护日期：2026-10-12（最近一轮） · 维护者：DSH scheduled-run agent（StvLi 仓）
+> 维护轮次：第一轮 2026-09-03（§0–§7）；第二轮 2026-09-04（§8）；第三轮 2026-09-05（§9，安全修复）；第四轮 2026-09-05（§10，无 open issue → 安全检查 → 两项维护卫生修复）；第五轮 2026-09-06（§11，无 open issue → 安全检查 → 落地 `ros2_install` 注入修复）；第六轮 2026-09-11（§12，无 open issue → 安全检查 → 落地 `safety_monitor` / `zero_pose_semantics` 注入修复 + vitest 4 升级 + CI 最小权限）；第七轮 2026-09-13（§13，open issue #19 → journey skills + 组合不变量）；第八轮 2026-09-14（§14，3 个 open issue → #21 修复并真机复核、#22 落地但保留 open、#19 完成验收测量）；第九轮 2026-09-21（§15）：open issue #22 → 补齐"会话技能目录对账"（其唯一未实现项）+ 修复 `ros2_env_check` 的"报告 ≠ 执行"缺陷（第八轮存疑项的真因）+ 安全复测；**第十轮 2026-09-22（§16，本轮）：补齐第九轮"在途无 PR"的缺口（PR #27，CI 首跑即抓出"本地绿、CI 红"）→ 在运行中进程里验收并关闭 issue #22 → 定位并修复线上故障真因（`rosSetup` 只校验第一段）→ 3 个 PR 全部合入 main**；第十二轮 2026-09-24（§17，收尾超时遗留的在途 PR #32 → 实测第十轮的重启请求已按硬期限落地 → 修复"配置没送到 doctor"的接线缺口 + API Key 来源语义）；第十三轮 2026-09-25（§18，0 open issue / 0 open PR → 安全扫描发现并落地 3 处真实缺陷 = PTY 会话 id 路径穿越 · 发布物携带 `__pycache__` 字节码 · 安装器选项注入，并开启 Dependabot 告警）；**第十四轮 2026-09-26（§19）：0/0 → 先闭环第十三轮唯一的未闭环观测（gen-21 重启逐字命中），再落地 3 个 PR = 明文传输的 VLM API Key 可见化 · 插件自建 IPC 对象权限收紧（PTY 会话文件 / sidecar UDS / 安装器脚本）· Dependabot 版本更新；并把跨五轮未处理的部署配置项升级为 issue #40；**第十五轮 2026-09-29（§20）：open issue #40 → step 2 评估（合理、必要，但配置在仓库外且需运维决定）→ **承接上一轮时间窗被截断留下的在途分支** `fix/workspace-path-hygiene` 并落地 `fix(common)`：自愈探针用**原始文本**比对存在性，把**存活但写成 `~/…`** 的工作区判为缺失、剔除该段、并在只剩它时**静默切换到 `/opt/ros/<distro>`** —— 恰是本轮文档新推荐的路径形式；闭环第十四轮的 gen-22 观测（逐字命中）；实测线上 **6 处**死链（issue #40 少算 1 处）；本轮**无 GitHub API token**，改用一次性 `ci/probe-*` 分支取得 CI（Node 22/24 双绿）后删除**；**第十六轮 2026-09-30（§21，本轮）：open issue #40 → step 2 复核（逐字确认**仍然准确**、更正为**实测 6 处**死链、结论仍交运维）→ **上一轮唯一的运维缺口已消失：`gh` 有了 token**，于是第一个动作就是把第十五轮卡住的在途分支**开成 PR #48、CI 双绿后合入 main**（第一次拿到**真实** PR CI，不再需要 `ci/probe-*` 代跑）；随后落地 3 个 PR = `fix(packaging)` 发布面 `__pycache__` 守卫（**此前只有"碰巧出现过"的那 3 个包有守卫**，实测 moveit 可复现泄漏 `.pyc`）+ `ci(security)` **CodeQL 代码扫描基线**（第十四/十五轮连续两次建议、本轮首次落地）+ `fix(security)` 首个基线 **29 条告警**中的**2 处真实缺陷**（`ros2_interface_create` 的 TOCTOU 可被符号链接穿出 · 自愈探针的自动探测路径未加引号）；Dependabot 积压 6 → 4（#47 合入并替掉失败的 #44）**；**第十七轮 2026-10-01（§22，本轮）：open issue #40 → step 2 第三次复核（事实逐字不变、结论仍交运维、故不再重复评论）→ 把第十六轮**有意不修**的 3 条 ReDoS 告警**先测量再修**：走真实入口实测后只有 **1 条真实可达**（`parseTopicList`，n=4000 阻塞 **14.8 s**，k=2.11；并发现**第二种**形状 `[`×n+` ]x]` 在 n=20000 阻塞 **697 ms**）、1 条被调用方的 `trim()`/`split('\n')` **消掉而不可达**、1 条**不可复现**（贪婪 `.*` 一步到 `$`，不回溯）→ 三条全部改为**可证明线性**的扫描 + `chars.ts` 逐码点字符类 + **差分等价测试**（穷举 + 10 万条随机/解析器，**0 分歧**），PR #55 CI/CodeQL **5/5 绿**后合入；**闭环第十六轮唯一的遗留观测**（gen-24：`lifecycleState: running`、无残留 `deferDeadline`、`pendingResume: false`）；Dependabot 积压 4 → 3（#43 vitest 4→5 dev-only 合入；#42/#45/#46 抬的是 **type-only peer 下界**，而 CI 装的是**该 PR 自己抬上去的 devDependency** ⇒ **结构上无法评估下界**，升级为 **issue #56**）；CodeQL open **13 → 10**；发布面用**预先种入 `.pyc` + 摘守卫正向对照**复测 9/9 CLEAN；并更正第十六轮快照表里与 §21.8 矛盾的"main 344"（实测 **347**）**。；**第十九轮 2026-10-11（§24，本轮）：open issue #40 → step 2 第五次复核（事实逐字不变、结论仍交运维）→ **把 §5「已知限制」里从第一轮躺到现在的 PTY 幻影会话修掉**：实测旧行为比原文更严重（无 pty 时 `start` 退出 0 并打印 `started session … (pid N)`，`status` **永远**报 `STATE running`，**连不存在的会话 id 也报 running**）⇒ 在父进程 fork 前探测 pty、失败写 `state=failed` 并退出 3、工具返回明确的 `PTY_UNAVAILABLE`；顺带查出**同一个 REMAINDER 解析缺陷**把 `--dir` 当参数投喂给下载来的 sudo 安装脚本（安装器 argv 实测 `["--dir", <dir>]`，修后为 `[]`），且 `--all` 名义存在却不可达 ⇒ 改为"flag 必须在 action 之前"并对 `status`/`stop` 的多余参数**报错而非静默忽略**；**安全扫描发现本地审计门禁在这台机器上根本跑不起来**（`~/.npmrc` 指向的镜像没有 advisory 端点⇒ 前几轮"本地复算供应链"实际无法复现）⇒ 把权威 registry 钉进 `pnpm run audit` / `audit:all` 并让 CI 调用同一条命令；文档计数全面漂移的修正**其中一次被仓库自己的组合不变量测试当场打回**（README 的 83 是"全家族六包"、聚合包只挂 81 ⇒ 改回 83，并在安装步骤把两个数分别说清）→ 并把它升格为 **issue #68**；2 个 PR（#66/#67）CI/CodeQL **5/5 绿**后合入，`main 66a139a → 7dc553f`**。**第二十轮 2026-10-12（§25，本轮）：2 open issue（#40 + #68）→ **issue #68 落地**（`fix(metadata)`：聚合包按"它实际挂的东西"宣称 81、家族 83 仍是家族的数）→ 顺带扫出**同一类缺陷的更大缺口**：三个**已发布**的 per-package `README.md` 从未被任何不变量读过（core 33 对 61、vision 5 对 7、聚合 51+4 对 81+9），已修并把"每个包 README 的第一个工具计数必须等于实测"写进组合不变量（**可证伪**：换回修复前文件即报 `expected 33 to be 61`）→ **issue #40 第六次复核后经运维确认、本轮真正落地**（备份 + 删 5 条死段尾 + 删第 63 行整条 `rosSetup`，YAML 校验通过，行为与自愈后的实际链逐字等价，等 gen-27 重启生效）→ 安全扫描审计/密钥/发布面/CodeQL 全不变（10 条 open 同规则同数量）、**远程已合并分支 16 → 1**（15 条全部是 main 的祖先）→ 1 个 PR（#70）CI/CodeQL **5/5 绿**后合入，`main 7dc553f → 316c142`，**open issue 归零**。**
 
 本文件记录 dsh-ros2 插件的一次完整日常维护循环：**查 issue → 评估建议 → 分支开发 → 验证 → 推送 → 交付维护文档**。每次维护在下方追加一节。
 
@@ -148,22 +148,27 @@ dsh-phoenix 已在 web profile 安装并生效：
 
 ## 5. 已知限制 / 遗留事项
 
+> 本节是**活文档**，每轮复核一次；已被解决的条目**删除**而不是留着（第十九轮的教训：
+> 一条写成"已知限制"的句子会停止被测量——`ros2_install` 的 PTY 幻影会话就是这样躺了 18 轮）。
+
 | 项 | 说明 | 建议 |
 | --- | --- | --- |
-| pty 受限环境 | 无头/容器 `devpts ptmxmode=000` 下 `ros2_install` 的 PTY 会话不可用（测试已 skip；工具层仍会静默返回无输出 session） | 后续可在 `pty_session.py` 让 daemon 上报 pty 分配失败，工具返回明确 `PTY_UNAVAILABLE` |
-| `docs/maintenance` 远端分支 | PR #1 合并后遗留，落后于 main | 可 `git push origin --delete docs/maintenance` |
-| README pnpm 版本声明 | 未显式写明需 pnpm 11.x（CI 已固定） | 可选补一句，风险低 |
+| pty 受限环境（**第十九轮已修，环境限制本身仍在**） | 无头/容器 `devpts ptmxmode=000` 下 PTY 会话确实分不出来；但工具**不再撒谎**——父进程 fork 前探测 pty，失败写 `state=failed`、退出码 3、工具返回 `PTY_UNAVAILABLE`，`status` 对不存在的会话报 `unknown`（测试仍 1 例 skip，因为本机没有 pty 可分配） | 无需动作；真正的修复已在 `packages/core`，CI（有 pty）跑满例 |
+| VLM 网关**明文 `http://` + 非回环** | 本机 `vision.baseUrl = http://121.9.219.138:8888/v1`，`ros2_vision_doctor` 实时报 `transport.cleartext: true` 并给告警（第十四轮 #38 落地）；key 走 `Authorization` 头 / `?key=` 查询串 | **运维决定**：换成 `https://`，或在同机起服务走 `http://127.0.0.1:…`（回环不告警） |
+| `~/.npmrc` 指向无 advisory 端点的镜像 | 本机默认 registry 是 `registry.npmmirror.com`，裸敲 `pnpm audit` 会 `ERR_PNPM_AUDIT_ENDPOINT_NOT_EXISTS`（fail closed） | 一律走 `pnpm run audit` / `audit:all`（已把权威 registry 钉进脚本，CI 调同一条命令） |
 | `docs/feedback-env-recovery.md:97` | 为历史反馈记录（截图数字 166 / core 89→94），非用户入口 | 保留为历史快照 |
-| sidecar / state | sidecar 为“纯模板框架”（reducer 未实现），state 是控制面客户端 | 符合设计，无动作 |
+| sidecar / state | sidecar 为“纯模板框架”（reducer 未实现），state 是控制面客户端，且**故意不在聚合包依赖里**（issue #68 的决定） | 符合设计，无动作 |
 
 ---
 
 ## 6. 下次维护建议动作
 
 1. 若需重载运行时变更：走 §4 的 dsh-phoenix 优雅重启循环，而非手动 `systemctl restart`。
-2. 在 pty 可用机器（如 CI）跑一次全量 `pnpm run test`，确认 182 例全绿（本会话 1 例 skip）。
-3. 视需要将 `docs/maintenance` 清理，并在 README 补 pnpm 版本声明。
+   （第二十轮登记 gen-27 的原因**不是**运行时代码变更——`lib/` 未变——而是 §5 之外的部署配置变更需要重载才能生效。）
+2. 全量用例基数：**362 例（361 过 + 1 pty-skip）**。在 pty 可用机器（如 CI）跑 `pnpm run test` 可看到 362/362。
+3. 远端分支卫生：第二十轮已把 15 条**全部分并入 main** 的分支删掉（16 → 1）。今后**合入即删**，别再让它攒回来。
 4. 保持“提交前 typecheck+test+build 全绿 + 行为变更补测试 + push 后 CI 绿”的验收线。
+5. **凡文档里出现"已知限制 / 静默 / 无输出"这类词，都当作"待复现的假设"**（第十九轮教训的正面用法）。
 
 ---
 
@@ -4447,3 +4452,279 @@ dsh-web 进程启动                   2026-10-10 17:47:11   ← 早于它 ⇒ �
      （`grep -rn '83' packages/*/tests` 一条命令就能避免）。
   5. **`pnpm audit` 一律走脚本**（`pnpm run audit` / `audit:all`），不要裸敲——裸敲在本机默认 registry 下**只会失败**。
   6. **`gh` 子命令失败时换 REST 端点再试一次**（`gh issue view` 会被 Projects classic 弃用挡下，§24.1）。
+
+---
+
+## 25. 维护记录（2026-10-12 04:00 CST / UTC 2026-10-11 20:00 · 第二十轮：2 open issue（#40 + #68）→ **#68 落地并顺带扫出同类缺陷的更大缺口**（三个**已发布**的 per-package README 从未被任何不变量读过）→ **#40 第六次复核后经运维确认、本轮真正落地**（跨六轮）→ 安全扫描全不变 → 远程已合并分支 16 → 1 → 1 个 PR 合入，**open issue 归零**）
+
+> 本轮结论：起始 **2 open issue（#40 第五次复核保留 + 新 #68）/ 0 open PR**、`main = 929ab88`、工作树干净。
+> 本轮交付：**1 个 PR 合入**（#70，CI/CodeQL **5/5 绿**）、**2 个 issue 关闭**（#68 由 PR 自动关闭、#40 由运维决定后落地并人工关闭）、
+> **部署配置首次被本轮实际修改**（§25.2.2），`main 929ab88 → 316c142`。
+> 用例 **361 → 362**（+1，本轮的 README 计数不变量）；**CodeQL open 10 不变**（同规则同数量）；
+> `pnpm audit` prod / 含 dev 都干净；发布面 **9/9 CLEAN**；**远程分支 16 → 1**。
+> **本轮最有价值的一条不是新功能，而是"同一类缺陷比 issue 描述得更大"**：
+> #68 只说了聚合包的 `package.json` 描述；顺着"谁宣称了什么"扫下去发现
+> **三个发布到 npm 的 per-package `README.md` 从来没有被任何不变量读过**（§25.6 第 2 条），
+> 而仓库**已经**有一条组合不变量在守"广告口径"——它只是没覆盖这几个文件。
+> 另外：**跨六轮的 issue #40 终于落地**，且落地方式本身是可复算的——
+> 不是"觉得应该没事"，而是**本轮 `ros2_env_check` 的 `missingSources` 已经证明删除后与在跑的链逐字等价**（§25.2.2）。
+
+### 25.0 仓库快照（本轮起始/结束）
+
+| 项 | 起始 | 结束 |
+| --- | --- | --- |
+| 当前分支 | `main`（= `origin/main` `929ab88`），工作树**干净** | `main`（= `origin/main` **`316c142`**），工作树干净 |
+| `main` | `929ab88` | **`316c142`** |
+| open issue / open PR | **2 / 0**（#40 + #68） | **0 / 0** |
+| vitest 用例 | **361**（360 过 + 1 pty-skip） | **362**（361 过 + 1 pty-skip） |
+| CodeQL **open** 告警 | **10**（8 high `js/insecure-temporary-file` + 2 medium `js/file-access-to-http`） | **10**（同规则同数量，**无新规则、无新实例**） |
+| `pnpm audit`（脚本，权威 registry） | prod 干净 / 含 dev 干净 | 同 |
+| npm registry | `https://registry.npmmirror.com`（仍无 advisory 端点；脚本已钉权威 registry） | 同 |
+| 活体工具 / 技能 | **81 / 9**（六 bundle，`drifted` 全 `false`、`stale: false`、`missing: []`、`undeclared: []`） | 同（**版本未变**，`lib/` 本轮未变——见 §25.4） |
+| 家族工具总数 | **83**（= 81 + 可选 `dsh-ros2-state` 的 2） | 同（聚合包元数据现在如实写 81，家族 83 仍是家族的数） |
+| 运行中的 dsh | 启动于 **2026-10-11 04:20:26 CST**（PID 1456879，即 gen-26 那次重启后） | **同进程**；`lib/` 本轮**未变** ⇒ 无功能重启需求；但**部署配置变了** ⇒ 登记 gen-27（§25.4） |
+| dsh-phoenix 状态文件 | `generation 26` / `running` / `deferDeadline 0` / `pendingResume false` | `generation 27` / **`deferred`**（§25.4） |
+| 远程分支 | **16**（main + 15 条已全并入 main 的残留） | **1**（仅 `main`） |
+| 本机 | Node `v24.16.0` / pnpm `11.22.0`（与 root `packageManager` 一致） | 同 |
+
+### 25.1 Issue 检查（step 1）
+
+REST（`gh issue view` 仍会被 Projects classic 弃用挡下，沿用 §24.1 的教训换 JSON 端点）：
+
+```text
+open: #40（2026-09-25 开，1 条评论）、#68（2026-10-10 开，0 条评论）  → 2 个，故走 step 2
+open PR: 0
+```
+
+### 25.2 建议评估（step 2）
+
+#### 25.2.1 issue #68 —— **合理、必要，且本轮可修**（与前五轮的 #40 不同：它在仓库内）
+
+issue 的断言逐条复算：
+
+| 断言 | 本轮实测 | 结果 |
+| --- | --- | --- |
+| 聚合包 `description` 宣称 "(install this to get all **83** tools + 9 skills)" | `git show 929ab88:packages/dsh-ros2/package.json` → 逐字如此 | ✅ |
+| 它实际只挂 81 | 六包逐个数（core 61 / profile 4 / moveit 4 / safety 5 / vision 7 = **81**；state 另 2） | ✅ |
+| `dependencies` 与 `cordis.patch.yml` 都不含 `dsh-ros2-state` | 两处都没有 | ✅ |
+| 不变式**同时**断言"聚合包 description 含 83" | `journeys.spec.ts` 里 `expect(aggregate.description).toContain(toolCount + ' tools')`，而 `toolCount = allTools.length = 83` | ✅ 内部自洽但发布口径不实 |
+
+**结论：合理、必要。** 一条发布出去的元数据宣称了安装它拿不到的东西，属于"报告 ≠ 事实"。
+**决定：采纳 issue 给出的方案 2（维持 state 可选），把元数据改成实话**，理由不是"改动小"，而是三条实质理由：
+
+1. `dsh-ros2-state` 的 2 个工具**需要 `dsh-ros2-sidecar` 数据面**（UDS socket）才可用；把它塞进聚合包 =
+   让聚合包宣称两个"装了还不能用"的工具，代价大于修一句假话；
+2. 聚合包的定位是"装上就能用的域 bundle 合集"，README 的安装步骤本来就是**单独装 state**——
+   方案 2 是让元数据回归文档早已定下的形状，而不是改变产品形状；
+3. 方案 1 会改变**所有现存聚合包用户**的安装面（多一个依赖 + 多一个需要部署的进程），
+   这是比"元数据不实"重得多的变更，**该由运维/产品决定，不该由一次维护顺手做**。
+   （方案 1 并未被关闭：若将来要，改动面是 `dependencies` + `cordis.patch.yml` + description + 不变式里的 `81` 字面量。）
+
+#### 25.2.2 issue #40 —— 第六次复核：**事实逐字不变，但本轮由运维决定"落地"**（跨六轮收口）
+
+前五轮的结论都是"合理、必要，但改动在仓库外、属于正在运行的部署，是运维决定"。本轮**仍然先逐条复算**：
+
+| 断言 | 本轮实测 | 结果 |
+| --- | --- | --- |
+| 5 条 `rosSetup` 仍 source 已删除的路径 | `grep -n rosSetup ~/.dsh/profiles/web/cordis.patch.yml` → 33/37/41/45/49，均以 `&& source /tmp/vlm_ws/install/setup.bash &&` 结尾 | ✅ 不变 |
+| 该路径确实不存在 | `ls -d /tmp/vlm_ws` → `No such file or directory` | ✅ 不变 |
+| 第 63 行 `rosSetup` 指向同样不存在的 `bar_ws` | `ls -d /home/stvli/Desktop/bar_ws` → 不存在 | ✅ 仍成立 |
+| 自愈仍在剔除该段 | 本会话 `ros2_env_check` 实时返回 `missingSources: ["/tmp/vlm_ws/install/setup.bash"]` + note「已剔除该段，改用其余 1 段（首个 source：`/home/stvli/lite_delivery_aio/install/setup.bash`）」 | ✅ **第六份活体证据** |
+
+**这一轮的差别**：不再重复"交运维"的结论，而是**把决定交给运维本人**（一次明确的 yes/no，而不是替他决定，也不是第七次记录），得到确认后**实际落地**：
+
+```text
+备份：~/.dsh/profiles/web/cordis.patch.yml.bak-issue40-20261012122931
+改动：5 条链尾部 `&& source /tmp/vlm_ws/install/setup.bash` 删除
+      + 第 63 行整条 rosSetup 删除（该条目回落到自动探测——与自愈后的实际行为一致，因为该链只有这一段、且是死的）
+校验：yaml.safe_load 通过，顶层条目 7 条（不变）；写入前断言"死段 5 处 + bar_ws 1 处"才动手
+```
+
+**为什么这不是"顺手改生产配置"**：改动的正确性**是被测量证明的、不是被论证的**——
+`missingSources` 已经说明在跑的 prefix 就是删除后的那一条（逐字等价），所以这次写入**只是在把已经生效的事实写回文件**。
+另外它确实越过了本会话的 workspace 沙箱（`~/.dsh/` 在仓库外），因此是**先被沙箱拒绝、再带理由升级授权**并由用户批准后执行的（§25.6 第 3 条）。
+生效需要一次重载（prefix 在 apply 时读取）⇒ 登记 gen-27（§25.4）；下一轮的验收判据：`ros2_env_check` 应报 `missingSources: []` 且不再有「已剔除该段」note。
+
+### 25.3 开发管理（git · step 3）
+
+| PR | 分支 | 提交 | CI |
+| --- | --- | --- | --- |
+| **#70** | `fix/aggregate-surface-metadata` | `fix(metadata)` | ✅ `check (22)` / `check (24)` / `analyze (js-ts)` / `analyze (python)` / `CodeQL` **5/5 全绿** |
+
+提交面 7 个文件：`packages/dsh-ros2/package.json`（description）、`packages/dsh-ros2/README.md`、
+`packages/core/README.md`、`packages/vision/README.md`、`docs/journey-catalogue.md`（不变式的第 5 条）、
+`packages/dsh-ros2/tests/journey-catalogue.ts`（新增 `BUNDLE_PACKAGES`）、`packages/dsh-ros2/tests/journeys.spec.ts`。
+
+#### 25.3.1 `fix(metadata)`：把"宣称"改成"实测"（#68 + 它的更大同类面）
+
+**第一处（issue #68 本体）**：
+
+```text
+old  … (install this to get all 83 tools + 9 skills).
+new  … mounting 81 tools + 9 skills; the optional dsh-ros2-state takes the family to 83.
+```
+
+**第二处（本轮扫出来的、issue 没写的更大缺口）**——顺着"谁宣称了工具数"把**每个包的 README** 也数了一遍：
+
+| 文件（**都在 npm `files` 里、会发布**） | 宣称 | 实测 |
+| --- | --- | --- |
+| `packages/core/README.md` | 33 | **61** |
+| `packages/vision/README.md` | 5 | **7** |
+| `packages/dsh-ros2/README.md` | 51 tools + 4 skills | **81 tools + 9 skills** |
+
+`packages/core/README.md` 的 33 是**原始 split 提交（`e6b2ac3`）时代的数**；core 后来长到 61，
+而**组合不变量只读了 `package.json` 的 description 和两个根 README，从没读过 per-package README**
+（core 的 description 在早前某轮已从 59 修到 61——**同一个数，一个文件被守住了，另一个文件没有**）。
+
+**第三处（真正的修复：让口径可导出）**——不变式不再是"改字面量"，而是**测量**：
+
+1. 新增 `BUNDLE_PACKAGES`（bundle → npm 包名），聚合包要挂什么**从它自己声明的 `dependencies` 导出**，
+   `aggregateToolCount` = 所挂 bundle 的工具数之和；
+2. 断言 `aggregateToolCount === 81` **且** `toolCount - aggregateToolCount === state 的 2 个`（聚合包 = 家族 − 那个可选件，这是决策本身）；
+3. 断言聚合包 description 含 `81 tools` / `9 skills`，**且不含** `83 tools`（"不得把家族总数当自己的面"）；
+4. 新增一条独立用例：**每个包 README 里"读者遇到的第一个工具计数"必须等于该包的实测数**
+   （没写计数的包如 `dsh-ros2-state` 跳过）；聚合包 README 同样受检。
+
+**可证伪（不是"跑绿了就算"）**：把修复前的 4 个文件 `git stash` 回去再跑，新用例**当场红**：
+
+```text
+FAIL  tests/journeys.spec.ts > … > keeps every package README's advertised tool count honest (issue #68)
+AssertionError: core/README.md advertises a stale tool count: expected 33 to be 61
+FAIL  tests/journeys.spec.ts > … > keeps the advertised counts and skill lists in step with the tree
+AssertionError: expected 'Aggregate cordis bundle for the dsh-r…' to contain '81 tools'
+```
+
+`core/README.md` 里那三行**每层计数（17/10/6）也一并去掉**：它们同样是无人导出的字面量，
+修数字只是把同一个坑再挖一遍；改为**只写分组描述**并注明"总数由不变式测量、分组行不承载计数"。
+（L2 的 10 与 L3 的 6 其实仍与实测一致，但**只留不会漂的那个数**。）
+
+### 25.4 dsh-phoenix 持续更新/测试循环（step 4）
+
+**接线核对（与 §4 一致）**：`dsh-phoenix` 与 `dsh-ros2` 全家都以 `link:` 装进 web profile
+（`~/.dsh/profiles/web/node_modules/dsh-ros2* → …/embody_agent_ws/dsh-ros2/packages/*`），
+本轮未改动接线。
+
+**① 先闭环上一轮登记的 gen-26**（第十八/十九轮的教训：状态文件只能回答"此刻处于哪个生命周期状态"，**"什么时候重启的"只有 journal 能定**）：
+
+```text
+Oct 11 04:17:40  [dsh-phoenix] restart requested (gen 26): plugin-change          ← 第十九轮登记
+Oct 11 04:20:16  [dsh-phoenix] agent idle; executing deferred restart (gen 26)
+Oct 11 04:20:16  [dsh-phoenix] scheduling restart (plugin-change, gen 26): systemd-run …
+Oct 11 04:20:17  [dsh-phoenix] restart cmd exit=0
+Oct 11 04:20:26  systemd: Started dsh-web.service
+Oct 11 04:20:29  dsh[1456879]: [dsh-phoenix] loaded (graceful restart + client reconnect + lifecycle)
+```
+
+```json
+{ "generation": 26, "lifecycleState": "running", "goalId": null,
+  "pendingResume": false, "resumeAttempt": 0, "deferDeadline": 0, "updatedAt": 1791663637942 }
+```
+
+`lifecycleState: running` + `deferDeadline: 0` + `pendingResume: false` =
+**gen-26 逐字命中、干净落地**（`deferDeadline − updatedAt = 900000 ms` 的硬期限链与第十四～十九轮一致）。
+
+**② 一个必须如实写下的"时间错觉"**：上面这些 journal 时间是 **10-11 04:20**，
+而本轮是 **10-12 04:00 开工**——**gen-26 在上一轮结束后就落地了，并不属于本轮**。
+本轮开工时运行进程（PID 1456879）启动于 10-11 04:20:26，**比本轮任何一次编辑都早约 24 小时**。
+`updatedAt: 1791663637942`（= 10-11 04:20:37）是**本次启动时重写的时间戳**，不是重启时刻（§23.5.1 的读法继续成立）。
+
+**③ 活体持续测试（step 4 的"测试"一半）**：本会话 `ros2_env_check` 的实时对账与仓库一致：
+
+```json
+{ "loaded":[{"name":"dsh-ros2","version":"0.1.0"},{"name":"dsh-ros2-core","version":"0.1.5"},
+            {"name":"dsh-ros2-moveit","version":"0.1.0"},{"name":"dsh-ros2-profile","version":"0.1.0"},
+            {"name":"dsh-ros2-safety","version":"0.1.0"},{"name":"dsh-ros2-vision","version":"0.1.3"}],
+  "drift":[ … 六条均 drifted:false … ], "stale":false, "missing":[], "undeclared":[],
+  "surface":[ core 61, moveit 4, profile 4, safety 5, vision 7, dsh-ros2 0 ],
+  "totalTools":81, "totalSkills":9 }
+```
+
+**④ 本轮需不需要重启？——需要，但理由与以往不同**：
+本轮的改动面是 **description + README + tests + docs**，`tsconfig.build.json` 只编 `src/`，
+**`lib/` 的内容没有变**（构建只是重写了同样的字节）⇒ **功能上不需要重载**。
+但 §25.2.2 实际改了**部署配置**（`rosSetup` 链），而 prefix 是 **apply 时读取**的
+⇒ **为了让配置变更生效，本轮登记 gen-27**（沿用第十六/十七/十九轮已验证的最小失败面：一个空实现的动态 plugin + `cordis_run`）。
+
+**在文档写完后作为本轮最后一个动作登记**，只登记、不假装已落地；落地确认留给下一轮开工时的 journal。
+
+### 25.5 安全扫描（step 5）
+
+| 面 | 结果 |
+| --- | --- |
+| 供应链（`pnpm run audit` = `--prod --audit-level high`，**显式权威 registry**） | ✅ **No known vulnerabilities found** |
+| 供应链（**含 dev**，`pnpm run audit:all`） | ✅ **No known vulnerabilities found** |
+| 硬编码密钥（`sk-` / `AIza` / `ghp_` / `gho_` / `github_pat_` / `xox` / `npm_` / `BEGIN … PRIVATE KEY`） | ✅ 跟踪文件中 **0**（`git grep`，排除维护文档里对这些模式的描述文字） |
+| **静态分析（CodeQL）** | ✅ **10 → 10**；逐条定位：8 high `js/insecure-temporary-file` **全在 tests/scripts**（`scripts/verification/measure.mjs`、`vision/tests`、`core/tests`、`dsh-ros2/tests`、`common/tests`——**都不在发布面**）+ 2 medium `js/file-access-to-http` 在 `packages/vision/src/vision.ts`（**源码，非测试**：URL 由 `config` 构造、文件内容只进 body 做 base64 图片，是该工具的设计意图，非 SSRF） |
+| 发布面（9 个非私有包 `pnpm pack` + 逐条 `tar -tzf`） | ✅ **9/9 CLEAN**，无 `__pycache__`/`.pyc`（含 `dsh-ros2-state` 与 `sidecar`，即 CI 门禁点名的两个） |
+| Python 执行面（按 `.py` 或首行 `#!…python` 取全集，repo-wide） | ✅ **29 个文件**；`shell=True` / `os.system` / `eval(` / `exec(` / `pickle` / `yaml.load` **全部 0**；`subprocess` 出现 24 次 = **16 处调用点**（`run` 13 + `Popen` 3，与第十九轮的 16 逐字一致）+ 8 个 `DEVNULL` 常量；`shell=True` 为 0 ⇒ 全为 argv 数组 |
+| TS 命令面（`src/`） | ✅ **无 `execSync` / 无 `shell:true` / 无 `eval(` / 无 `new Function(`**；`execFile` ×14、`spawn` ×2、`spawnSync` ×0（与第十九轮逐字相同） |
+| 既有防线回归（第十三/十四/十六/十七/十八/十九轮） | ✅ 全部仍在：`safe_sid()` 双层守卫（tool 侧 `isSafePathComponent` + helper 侧 `_SID_RE`）、PTY `DIR_MODE 0o700` / `FILE_MODE 0o600`、sidecar UDS `chmod 0o600`、安装器 `umask 077` + `chmod 700`、`ros2_interface_create` 的 `flag: 'wx'`（`O_EXCL`，实测 `packages/core/src/tools.ts:432`）、`classifyVisionTransport()` 的回环/明文判定 |
+| 活体网络出口复测 | ⚠️ **不变、已有上报**：`ros2_vision_doctor` 实时报 `transport.cleartext: true`（`http://121.9.219.138:8888/v1`，非回环）+ 明确告警；secrets 文件 `/home/stvli/.dsh-ros2/secrets.json` 实测 `mode: 600` |
+| 本轮新增攻击面 | ✅ **无**：改动只有元数据/文档/测试（§25.3），无新增命令执行、网络或文件写入路径 |
+
+**必须写清的一条**：本轮的"干净"与第十九轮**同口径**——审计走的是 `pnpm run audit`
+（脚本内已钉 `--registry https://registry.npmjs.org/`），**不是裸敲**；裸敲在本机默认镜像下仍然只会 `ERR_PNPM_AUDIT_ENDPOINT_NOT_EXISTS`。
+
+### 25.6 本轮发现
+
+1. **【已修·真实·issue #68】** 聚合包的发布元数据宣称 83、实际挂 81（§25.2.1）。
+   **决定**：维持 `dsh-ros2-state` 可选，元数据改成实话（81），家族 83 仍是家族的数。
+   **没有再犯第十九轮第 3 条的错**：这次**先去搜"谁定义了这个数"**（`grep -rn '83' packages/*/tests`），
+   找到 `journey-catalogue.ts` 的 BUNDLES 就是"家族"口径，于是没有把两个数当一个数改。
+2. **【已修·真实·本轮最有价值】同一类缺陷比 issue 描述得更大：三个"已发布的 per-package README"从未被任何不变量读过**（§25.3.1）。
+   core 33→61、vision 5→7、聚合 51+4→81+9。**根因不是"忘了改数字"，而是"口径没有单一来源"**：
+   仓库**已经**有一条"广告口径"不变量，但它只读 `package.json` 的 description 与两个根 README，
+   **per-package README 是它的盲区**——而那几个文件恰恰**会进 npm tarball**。
+   ⇒ 修法不是把 3 个数字改对，而是把"每个包 README 的第一个工具计数 = 实测"变成不变量（**可证伪**，§25.3.1 给了红/绿对照）。
+3. **【已落地·运维决定·跨六轮】issue #40 真正落地，且落地方式是"把已生效的事实写回文件"**（§25.2.2）。
+   这是本维护任务**第一次修改仓库外的运行中部署配置**：先按规矩试、被沙箱拒绝、再带理由升级到 `danger-full-access`、
+   **经用户明确批准**后执行；写入前先备份、先断言"死段 5 处 + bar_ws 1 处"、写完再用 `yaml.safe_load` 校验。
+   **与前五轮"交运维"的差别**：这次没有替运维做决定，也没有第七次记录，而是**把决定明确地问出来**，得到 yes 才动手。
+4. **【读法·定时陷阱】上一轮的 gen-26 在本轮开工前 ~24 小时就已经落地，并不属于本轮**（§25.4 第 ② 条）。
+   按 journal 的 `restart requested (gen 26)` / `executing deferred restart (gen 26)` 才定得出时刻；
+   **状态文件里只有一个"本次启动时重写的时间戳"**。⇒ 每轮开工**先闭环上一轮的观测**，是对的；
+   但**把"我看到的落地"当成"我这一轮触发的落地"是错的**——本轮差点这么写。
+5. **【已修·卫生】活文档 §5/§6 从第一轮起就没再动过，已经变成"谎话生成器"**：
+   §5 还在建议"后续可让 `pty_session.py` 上报 pty 分配失败"（**第十九轮已经做完**），
+   §6 还写着"确认 **182** 例全绿"（实际 **362** 例），还有一条建议清理**已经不存在的** `docs/maintenance` 分支。
+   ⇒ 本轮把 §5 里已解决的条目**删除**（不是留着）、把"活文档每轮复核"写进小节抬头，并把 §6 的数字与建议换成当前的。
+   **"已知限制"列表如果不删条目，就会变成第十九轮第 1 条那个躺了 18 轮没人再看的句子。**
+6. **【已修·卫生】远程分支 16 → 1**（§25.0）。15 条残留**全部**是 `origin/main` 的祖先
+   （`git branch -r --merged origin/main` 逐条确认后才删），随后 `git fetch --prune`。
+   §5 里"可清理 `docs/maintenance`"这条建议从第一轮挂到现在——本轮把这一类一次性清掉，
+   并把"合入即删"写进 §6，免得再攒回来。
+7. **【未变·如实】安全扫描零新增**（§25.5）：CodeQL 10 条同规则同数量、审计 prod/含 dev 干净、密钥 0、
+   发布面 9/9 CLEAN、Python/TS 执行面与既有防线逐条回归通过。
+   **唯一一条"正在发生"的风险仍是 VLM 网关明文 `http://`**（第十四轮已上报为 #38，doctor 每轮实时告警）——
+   它的解决需要换 https 或改走回环，属运维决定，本轮**只是重新确认它仍然存在**。
+8. **【边界·如实】本轮不改任何运行时行为**：`lib/` 未变，活体 `totalTools/totalSkills` 与仓库一致
+   ⇒ **不能声称"本轮验证了工具行为"**；本轮验证的是**宣称与树的一致性**（组合不变量 + 活体对账），以及**部署配置的等价替换**。
+
+### 25.7 结论与下一步建议
+
+- **交付**：**1 个 PR 合入 `main`**——**#70**（`fix(metadata)`：聚合包按实测宣称 81 + per-package README 计数不变量，**5/5 绿**）；
+  **2 个 issue 关闭**（**#68** 由 PR 关闭、**#40** 运维确认后落地并关闭）；`main` **`929ab88` → `316c142`**；
+  用例 **361 → 362**；CodeQL **10 不变**；审计 prod/含 dev 干净；发布面 **9/9 CLEAN**；**远程分支 16 → 1**；**open issue 归零**。
+- **线上价值**：把三处"**宣称 ≠ 事实**"堵上——
+  ① 聚合包不再宣称它拿不出的工具数（并且**不得**把家族总数当自己的面，这一条现在是断言）；
+  ② **每个发布包的 README 计数**都被不变量守住了（此前是盲区，三个文件已经漂了很多轮）；
+  ③ 部署配置里躺了六轮的**死链**清掉（自愈的 warning 噪声与每次调用的多余 `existsSync` 一并消失）。
+- **明确没有做的事（以及理由）**：
+  1. **没有给聚合包加 `dsh-ros2-state`**——那会取消"可选附加"的定位、改变所有用户安装面，属产品决定（§25.2.1）。
+  2. **没有把 VLM 网关换成 https / 回环**——仓库外配置，需运维决定（§25.5）。
+  3. **没有清理本地那 7 条"非祖先"分支**（squash 合入或仅本地）——`--merged` 判不出 squash，
+     删了可能丢一个人的在途分支，属"需要意图而非测量"的判断，如实留下（§25.6 第 6 条只删了可证明是祖先的那些）。
+- **待运维**：
+  1. **确认 gen-27 落地**（下一轮开工时看 journal 的 `restart requested (gen 27)` → `executing deferred restart (gen 27)`），
+     并复核 `ros2_env_check` 的 **`missingSources` 应为 `[]`**、且不再有「已剔除该段」note——这是 #40 修复的**唯一**最终判据。
+  2. 视需要决定 VLM 网关的 `https://` / 回环迁移。
+- **下次维护建议**：
+  1. **先闭环 gen-27 与 `missingSources: []`**（§25.4 / §25.7 待运维第 1 条）。
+  2. **若再遇到"某个数/某句话不实"，先问"谁定义了它、谁在守它"**：
+     `grep -rn '<数字>' packages/*/tests docs/`。本轮第 2 条（三个 README）和第 1 条（83 是家族口径）
+     都是这一条命令的收益；第十九轮第 3 条的返工也是缺了它。
+  3. **新不变量要"可证伪"再提交**：本轮把修复前的文件 `git stash` 回去跑出红，是"这个不变量到底有没有牙"的**唯一**证据
+     （只跑绿说明不了任何事——它可能根本没匹配到任何文件）。
+  4. **读 §5 时把它当作待办清单**：每轮**删除**已解决的行，而不是在下面加一行"已解决"。
+  5. **`pnpm audit` 一律走脚本**；**`gh issue view` 失败换 REST/JSON 端点**（§24.1）。
+  6. **合入即删分支**（本轮已建立，16 → 1）。
