@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { GuiManager, type InteractFn, type ScreenshotFn, type SpawnedProcess, type SpawnFn, type WindowCmdFn } from '../src/gui.js'
+import { GuiManager, DEFAULT_ALLOWED_APPLICATIONS, isAllowedWindowTitle, type InteractFn, type ScreenshotFn, type SpawnedProcess, type SpawnFn, type WindowCmdFn } from '../src/gui.js'
 import { type VisionProvider } from 'dsh-ros2-common'
 // CoreToolDeps comes from ../src/tools.js (createRos2Tools accepts plain ToolDeps)
 import { createRos2Tools } from '../src/tools.js'
@@ -53,7 +53,7 @@ function fakeInteract(recorder: Array<{ args: string[]; display?: string }>): In
   }
 }
 
-function makeManager(overrides: { spawn?: SpawnFn; windowCmd?: WindowCmdFn; screenshot?: ScreenshotFn; interact?: InteractFn; kill?: (pid: number, s: string) => boolean } = {}) {
+function makeManager(overrides: { spawn?: SpawnFn; windowCmd?: WindowCmdFn; screenshot?: ScreenshotFn; interact?: InteractFn; kill?: (pid: number, s: string) => boolean; allowedApplications?: string[] } = {}) {
   const spawnLog: Array<{ bin: string; args: string[]; env: Record<string, string> }> = []
   const shotLog: Array<{ output: string; opts: unknown }> = []
   const interactLog: Array<{ args: string[]; display?: string }> = []
@@ -65,6 +65,7 @@ function makeManager(overrides: { spawn?: SpawnFn; windowCmd?: WindowCmdFn; scre
     interact: overrides.interact ?? fakeInteract(interactLog),
     kill: overrides.kill ?? ((pid, signal) => { killed.push({ pid, signal }); return true }),
     screenshotDir: '/tmp/dsh-ros2-test',
+    ...(overrides.allowedApplications ? { allowedApplications: overrides.allowedApplications } : {}),
   })
   return { manager, spawnLog, shotLog, interactLog, killed }
 }
@@ -258,9 +259,14 @@ class LocalMockVision implements VisionProvider {
   async describe(): Promise<string> { return '[mock vision] ok' }
 }
 
-function visualDeps() {
-  const { manager } = makeManager()
-  const deps: ToolDeps = { run: async () => ({ ok: true, command: '', stdout: '', stderr: '', exitCode: 0, timedOut: false, durationMs: 0 }), gui: manager, vision: new LocalMockVision() }
+function visualDeps(opts: { approval?: () => Promise<string>; allowedApplications?: string[] } = {}) {
+  const { manager } = makeManager(opts.allowedApplications ? { allowedApplications: opts.allowedApplications } : {})
+  const deps: ToolDeps = {
+    run: async () => ({ ok: true, command: '', stdout: '', stderr: '', exitCode: 0, timedOut: false, durationMs: 0 }),
+    gui: manager,
+    vision: new LocalMockVision(),
+    ...(opts.approval ? { approval: opts.approval } : {}),
+  }
   return { deps, manager }
 }
 
@@ -317,8 +323,14 @@ describe('L3 visualization tools', () => {
 
   // ── L3 interaction tools (P4) ──────────────────────────────────────────
 
-  it('ros2_gui_interact click at absolute coordinates', async () => {
-    const { deps } = visualDeps()
+  it('ros2_gui_interact click at absolute coordinates requires approval', async () => {
+    // No windowTitle = whatever is focused (e.g. a terminal): the tool must not
+    // inject input silently, and with no approval service that is a denial.
+    const denied = (await tool(visualDeps().deps, 'ros2_gui_interact').execute({ action: 'click', x: 100, y: 200, button: 1 }, execStub)) as ToolResult
+    expect(denied.ok).toBe(false)
+    expect(denied.error?.code).toBe('APPROVAL_DENIED')
+
+    const { deps } = visualDeps({ approval: async () => 'allowed-once' })
     const out = (await tool(deps, 'ros2_gui_interact').execute({ action: 'click', x: 100, y: 200, button: 1 }, execStub)) as ToolResult
     expect(out.ok).toBe(true)
     expect(out.data).toMatchObject({ button: 1, count: 1, x: 100, y: 200 })
@@ -341,7 +353,7 @@ describe('L3 visualization tools', () => {
   })
 
   it('ros2_gui_interact key sends combos or text, not both', async () => {
-    const { deps } = visualDeps()
+    const { deps } = visualDeps({ approval: async () => 'allowed-once' })
     const combo = (await tool(deps, 'ros2_gui_interact').execute({ action: 'key', keys: 'ctrl+shift+r' }, execStub)) as ToolResult
     expect(combo.ok).toBe(true)
     expect(combo.data).toMatchObject({ kind: 'keys', value: 'ctrl+shift+r' })
@@ -360,5 +372,92 @@ describe('L3 visualization tools', () => {
     expect(click.error?.code).toBe('GUI_UNAVAILABLE')
     const key = (await tool(bare, 'ros2_gui_interact').execute({ action: 'key', keys: 'a' }, execStub)) as ToolResult
     expect(key.error?.code).toBe('GUI_UNAVAILABLE')
+  })
+
+  // ── L3 allowlist / approval gate (safety-todo §17) ─────────────────────
+
+  it('classifies an allowlisted application window as confined', async () => {
+    const { manager } = makeManager()
+    await expect(manager.classifyInteraction('rviz2')).resolves.toMatchObject({
+      kind: 'confined', window: { id: '0x03a00007', title: 'rviz2 - RViz' },
+    })
+    await expect(manager.classifyInteraction('rqt_graph')).resolves.toMatchObject({ kind: 'confined' })
+  })
+
+  it('never treats an unspecified target as confined', async () => {
+    const { manager } = makeManager()
+    for (const value of [undefined, '', '   ']) {
+      const verdict = await manager.classifyInteraction(value)
+      expect(verdict.kind).toBe('unconfined')
+    }
+  })
+
+  it('separates "no such window" from "not allowlisted"', async () => {
+    const { manager } = makeManager()
+    expect((await manager.classifyInteraction('firefox')).kind).toBe('not-found')
+    // A non-allowlisted window that DOES exist is unconfined (needs approval),
+    // not not-found: the two need different handling.
+    const { manager: real } = makeManager({ windowCmd: async () => ({ ok: true, stdout: WMCTRL_REAL_OUTPUT }) })
+    const verdict = await real.classifyInteraction('Desktop Icons')
+    expect(verdict.kind).toBe('unconfined')
+    if (verdict.kind === 'unconfined') expect(verdict.reason).toContain('Desktop Icons 1')
+  })
+
+  it('does not let a caller assert its way into the allowlist', async () => {
+    // Only non-allowlisted windows exist, but the caller claims "rviz2".
+    // Resolution fails (not-found) — it must NOT be reported as confined.
+    const { manager } = makeManager({ windowCmd: async () => ({ ok: true, stdout: WMCTRL_REAL_OUTPUT }) })
+    expect((await manager.classifyInteraction('rviz2')).kind).toBe('not-found')
+  })
+
+  it('honours a configured allowlist and matches titles case-insensitively', () => {
+    expect(isAllowedWindowTitle('rviz2 - RViz', DEFAULT_ALLOWED_APPLICATIONS)).toBe(true)
+    expect(isAllowedWindowTitle('Firefox', DEFAULT_ALLOWED_APPLICATIONS)).toBe(false)
+    expect(isAllowedWindowTitle('rqt_graph', DEFAULT_ALLOWED_APPLICATIONS)).toBe(true)
+    expect(isAllowedWindowTitle('Terminal', DEFAULT_ALLOWED_APPLICATIONS)).toBe(false)
+    expect(isAllowedWindowTitle('Terminal', ['terminal'])).toBe(true)
+    // An empty entry must not act as a wildcard.
+    expect(isAllowedWindowTitle('anything', ['', '  '])).toBe(false)
+  })
+
+  it('drives an allowlisted window without approval', async () => {
+    const { deps } = visualDeps()
+    const out = (await tool(deps, 'ros2_gui_interact').execute({ action: 'key', windowTitle: 'rqt_graph', keys: 'ctrl+shift+r' }, execStub)) as ToolResult
+    expect(out.ok).toBe(true)
+  })
+
+  it('gates typing into a non-allowlisted window behind approval', async () => {
+    const { manager } = makeManager({ windowCmd: async () => ({ ok: true, stdout: WMCTRL_REAL_OUTPUT }) })
+    const base: ToolDeps = { run: async () => ({ ok: true, command: '', stdout: '', stderr: '', exitCode: 0, timedOut: false, durationMs: 0 }), gui: manager }
+
+    // This is the host-input-injection path: no approval service => denial.
+    const denied = (await tool(base, 'ros2_gui_interact').execute({ action: 'key', windowTitle: 'Desktop Icons', text: 'rm -rf /\n' }, execStub)) as ToolResult
+    expect(denied.ok).toBe(false)
+    expect(denied.error?.code).toBe('APPROVAL_DENIED')
+
+    const reasons: string[] = []
+    const approved = { ...base, approval: async (req: unknown) => { reasons.push(String((req as { reason?: string }).reason ?? '')); return 'allowed-once' } }
+    const out = (await tool(approved, 'ros2_gui_interact').execute({ action: 'key', windowTitle: 'Desktop Icons', text: 'rm -rf /\n' }, execStub)) as ToolResult
+    expect(out.ok).toBe(true)
+    expect(reasons[0]).toContain('非白名单')
+    expect(reasons[0]).toContain('Desktop Icons 1')
+  })
+
+  it('reports a missing window without asking for approval', async () => {
+    let asked = 0
+    const { deps } = visualDeps({ approval: async () => { asked += 1; return 'allowed-once' } })
+    const out = (await tool(deps, 'ros2_gui_interact').execute({ action: 'click', windowTitle: 'firefox' }, execStub)) as ToolResult
+    expect(out.ok).toBe(false)
+    expect(out.error?.code).toBe('INTERACT_FAILED')
+    // A window that does not exist cannot be interacted with, so prompting
+    // the user would be a pointless (and misleading) approval.
+    expect(asked).toBe(0)
+  })
+
+  it('lets an operator extend the allowlist through the manager', async () => {
+    const { deps } = visualDeps({ allowedApplications: ['terminal'] })
+    const out = (await tool(deps, 'ros2_gui_interact').execute({ action: 'key', windowTitle: 'rviz2', keys: 'a' }, execStub)) as ToolResult
+    // rviz2 is no longer allowlisted, and there is no approval service.
+    expect(out.error?.code).toBe('APPROVAL_DENIED')
   })
 })

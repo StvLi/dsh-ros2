@@ -20,7 +20,7 @@
 | --- | --- | --- |
 | **L1** | 只读诊断：包/工作区/依赖检查、节点/话题/服务/动作/参数/接口枚举、单帧话题采样、TF 树查询、全图拓扑 JSON、`ros2doctor`、bag 摘要、MoveIt 发现、机器人档案读取、安全状态读取与 VLM 语义仲裁 | 纯只读，无需审批 |
 | **L2** | 审批门控管理：`colcon build`（后台任务）、`rosdep install`、消息骨架生成、`param set`、限时 `bag record`、一键安装 ROS2、launch 启停、rosbag 回放、MoveIt 运动、零位语义校准、机器人注册与拓扑学习、**safety_monitor 启动 / 人工门锁死与解锁** | 写操作一律先审批（fail-closed） |
-| **L3** | 可视化：RViz2 / rqt 生命周期管理、截图、多模态视觉描述、xdotool 级窗口交互 | 本地会话操作 |
+| **L3** | 可视化：RViz2 / rqt 生命周期管理、截图、多模态视觉描述、xdotool 级窗口交互 | 本地会话操作；交互限定在应用白名单内，白名单之外一律先审批 |
 | **L4** | 实时视觉：并行 VLM ROS2 节点 + 图像话题取帧（无头；`vision_bringup` 周期刷新每话题桥），外加 **RViz2 离屏渲染**（OGRE 渲染内核 → `/rviz/scene` 话题） | 纯软件渲染，无需显示器 |
 
 所有工具直接调用宿主上的 `ros2` / `colcon` / `rosdep` CLI；L1 永远不修改任何东西，L2 永远先询问。
@@ -240,9 +240,11 @@ GUI 生命周期 + 截图 + 多模态视觉（"先能看，再谈动"）+ xdotoo
 | `ros2_screenshot` | 截屏或按窗口标题截图到 PNG |
 | `ros2_vision_describe` | 用配置的多模态模型描述一张图片（Gemini / OpenAI / mock） |
 | `ros2_gui_observe` | 确保 GUI 运行 → 截图 → 返回多模态描述（"看"工作流） |
-| `ros2_gui_interact` | 统一 xdotool 交互：`action=click`（点击/滚动，`button` 4/5 = 滚动）、`action=drag`（拖拽：RViz2 orbit/pan/zoom）、`action=key`（组合键如 `ctrl+shift+r` 或输入文本） |
+| `ros2_gui_interact` | 统一 xdotool 交互：`action=click`（点击/滚动，`button` 4/5 = 滚动）、`action=drag`（拖拽：RViz2 orbit/pan/zoom）、`action=key`（组合键如 `ctrl+shift+r` 或输入文本）。**交互限定在应用白名单内**（默认 `rviz2` / `rqt` / `rqt_graph`，可用 `guiAllowedApplications` 配置）；其它目标——包括不传 `windowTitle`（作用于当前焦点窗口）——**一律先审批** |
 
-交互配方（模型视角）：`ros2_gui_interact {action: "drag", windowTitle: "rviz2", button: 1, toX: <dx>, toY: <dy>}` 环绕视角、`action: "drag", button: 3` 缩放、`ros2_gui_interact {action: "key", keys: "ctrl+shift+r"}` 重载配置。`wmctrl` 枚举不到窗口（如显示上没有窗口管理器）时窗口相对交互会报"未找到窗口"——退回绝对屏幕坐标。交互属于本地会话操作（无需审批，与其它 L3 工具一致）。
+交互配方（模型视角）：`ros2_gui_interact {action: "drag", windowTitle: "rviz2", button: 1, toX: <dx>, toY: <dy>}` 环绕视角、`action: "drag", button: 3` 缩放、`ros2_gui_interact {action: "key", keys: "ctrl+shift+r"}` 重载配置。`wmctrl` 枚举不到窗口（如显示上没有窗口管理器）时窗口相对交互会报"未找到窗口"——退回绝对屏幕坐标，此时因为目标是焦点窗口，**会先请求审批**。
+
+**为什么要白名单**：`action=key` 会把任意文本键入被选中的窗口，因此不受限的目标就是一条宿主机输入注入路径（往终端里打字=执行命令）。白名单是**便利性**控制——任何进程都能改自己的窗口标题，标题匹配不构成身份证明；真正的边界是**审批门**，且它是 fail-closed 的（没有审批服务即拒绝）。见 [`docs/safety.md`](docs/safety.md)。
 
 ### L4 实时视觉（并行 VLM over ROS2，无头图像话题）
 
@@ -429,6 +431,7 @@ snapshot` 固化聚合层；`robot_topology learn` 在使用中逐个追加重�
 | `display` | string | `''` | GUI/截图工具的 DISPLAY 覆盖 |
 | `screenshotDir` | string | `''` | 截图输出目录（默认 `$TMPDIR/dsh-ros2`） |
 | `screenshotCommand` | string | `''` | 自定义截图命令；`{output}` 替换为 PNG 路径 |
+| `guiAllowedApplications` | string[] | `[]` | `ros2_gui_interact` 可免审批驱动的应用；空 = `rviz2` / `rqt` / `rqt_graph` |
 | `vision.provider` | string | `'mock'` | `mock` \| `gemini` \| `openai` |
 | `vision.apiKey` | string | `''` | 你的 API key（用户提供；永不记录日志） |
 | `vision.model` | string | `''` | 模型覆盖（如 `gemini-2.5-flash`、`gpt-4o-mini`） |
@@ -523,7 +526,7 @@ CI（`.github/workflows/ci.yml`）：push 到 `main` / PR 时在 Node 22 与 24 
 | [`docs/compatibility.md`](docs/compatibility.md) | 兼容基线 |
 | [`docs/safety.md`](docs/safety.md) | 安全边界：六层（agent 权限 / 人工审批 / 运动校验 / 执行监视 / 事后验证 / 物理机器人安全）、fail-closed 与降级策略、"DSH 非功能安全系统"声明 |
 | [`docs/safety-handover.md`](docs/safety-handover.md) | 本体适配交接：通用框架/接口 vs 本体数据源/算法、profile `safety` schema、接口定义 |
-| [`docs/safety-todo.md`](docs/safety-todo.md) | GPT 评审结论与批次：0.14.1 已完成（确定性校验）、0.15+（GUI 白名单 / 审计 / C++ 实时节点…） |
+| [`docs/safety-todo.md`](docs/safety-todo.md) | GPT 评审结论与批次：0.14.1 已完成（确定性校验）、GUI 白名单已落地（§17）、仍待做（审计 JSONL / C++ 实时节点…） |
 | [`docs/test-robot-state-vision.md`](docs/test-robot-state-vision.md) | 真机端到端实测：流水线、实时性、mesh/TF 绑定修复与验证、四路联合分析（含图） |
 | [`docs/test-gpu-passthrough.md`](docs/test-gpu-passthrough.md) | GPU 直通验证：硬件、排查、结果、使用方式 |
 | [`CHANGELOG.md`](CHANGELOG.md) | 版本变更记录（Keep a Changelog） |
