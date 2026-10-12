@@ -18,7 +18,12 @@
  * silently break a journey.
  */
 
-/** The bundles that ship dsh-ros2 tools (the aggregate mounts them all). */
+/**
+ * The bundles that ship dsh-ros2 tools. This is the **family**, not the
+ * aggregate's mount: the aggregate depends on the five domain bundles only and
+ * leaves `dsh-ros2-state` optional (issue #68), so the family total and the
+ * aggregate's advertised surface are two different numbers.
+ */
 export type Bundle = 'core' | 'profile' | 'moveit' | 'safety' | 'vision' | 'dsh-ros2-state'
 
 /** Directory name of each bundle under `packages/`. */
@@ -28,6 +33,20 @@ export const BUNDLE_DIRS: Readonly<Record<Bundle, string>> = {
   moveit: 'moveit',
   safety: 'safety',
   vision: 'vision',
+  'dsh-ros2-state': 'dsh-ros2-state',
+}
+
+/**
+ * npm package name of each bundle. What the aggregate actually mounts is
+ * measured from its declared `dependencies` through this map, so its published
+ * tool count cannot drift away from the tree again (issue #68).
+ */
+export const BUNDLE_PACKAGES: Readonly<Record<Bundle, string>> = {
+  core: 'dsh-ros2-core',
+  profile: 'dsh-ros2-profile',
+  moveit: 'dsh-ros2-moveit',
+  safety: 'dsh-ros2-safety',
+  vision: 'dsh-ros2-vision',
   'dsh-ros2-state': 'dsh-ros2-state',
 }
 
