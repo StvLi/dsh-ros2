@@ -4645,7 +4645,22 @@ Oct 11 04:20:29  dsh[1456879]: [dsh-phoenix] loaded (graceful restart + client r
 但 §25.2.2 实际改了**部署配置**（`rosSetup` 链），而 prefix 是 **apply 时读取**的
 ⇒ **为了让配置变更生效，本轮登记 gen-27**（沿用第十六/十七/十九轮已验证的最小失败面：一个空实现的动态 plugin + `cordis_run`）。
 
-**在文档写完后作为本轮最后一个动作登记**，只登记、不假装已落地；落地确认留给下一轮开工时的 journal。
+**在文档写完后作为本轮最后一个动作登记**（`rsttrg-1/pkg-1`，空 `apply()`），只登记、不假装已落地；落地确认留给下一轮开工时的 journal。
+登记**当场**即可验证：
+
+```text
+12:35:36  [dsh-phoenix] cordis tool: cordis_run
+12:35:39  [dsh-phoenix] restart requested (gen 27): plugin-change
+```
+
+```json
+{ "generation": 27, "lifecycleState": "deferred", "goalId": null,
+  "pendingResume": false, "resumeAttempt": 0,
+  "deferDeadline": 1791780639213, "updatedAt": 1791779739213, "coalesced": false }
+```
+
+`deferDeadline − updatedAt = 900000 ms` ⇒ **正好是文档化的 900 s 硬期限**（与第十四～十九轮逐字一致），
+`coalesced: false`（本轮只有一次激活）。**落地（`executing deferred restart (gen 27)` → 新进程 `loaded`）留给下一轮开工时的 journal 确认。**
 
 ### 25.5 安全扫描（step 5）
 
