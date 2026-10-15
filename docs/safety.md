@@ -77,6 +77,17 @@ REQUEST → NORMALIZE → PLAN → VALIDATE → APPROVAL → FINGERPRINT CHECK �
   `rviz2` / `rqt` / `rqt_graph`（可用 `guiAllowedApplications` 配置）；其余目标——
   包括不传 `windowTitle`（作用于焦点窗口）——一律先审批，且 fail-closed。
   注意白名单只是便利性控制（窗口标题可被任意进程伪造），**审批门才是边界**。
+- "执行宿主文件"的面按**写操作**加门（第二十二轮）：
+  `ros2_workspace use <ws>` 把命令前缀换成 `source <ws>/install/setup.bash`，而
+  source 该文件即**执行**它（等价于运行文件里的代码），且该覆盖作用于本进程
+  **所有会话**后续的每一条命令——这比 `ros2_run` 更强，所以与 `ros2_run` 一样
+  要求审批，fail-closed；`show`/`reset` 仍是只读/降级，不需要审批。
+- VLM 上传前按**文件内容**确认为图片（第二十二轮）：
+  `ros2_vision_describe` 的 `imagePath`（以及 `ros2_vlm_analyze` 经 `vlm_node` 读的
+  同名参数）由调用方给出，字节发往**第三方网关**。旧实现按扩展名猜 MIME、对未知
+  扩展名回落 `image/png`，等于"把任意可读文件 base64 后 POST 出去"。现在只接受
+  真正的 PNG/JPEG/GIF/WebP（TS 与 Python 两侧各一道，读**头部**判定，非图片直接
+  拒绝且不整体读入内存）。
 
 ---
 
