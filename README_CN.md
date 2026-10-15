@@ -171,7 +171,7 @@ ros2_doctor                         # 系统健康报告
 | `ros2_topic_echo` | `ros2 topic echo <topic> --once` | 单帧消息（尽量 JSON）；`--qos-reliability` / `--qos-durability` 透传，可读 TRANSIENT_LOCAL 锁存话题 |
 | `ros2_topic_hz` | `ros2 topic hz <topic> [--window N]` | 测量话题发布频率（窗口内均值/最小/最大/标准差）；自然终止 = 测量超时 |
 | `ros2_env_check` | 环境解析探测 | 自检：当前 source 哪个 setup、路径是否存在、可见包/节点数 |
-| `ros2_workspace` | `source <ws>/install/setup.bash &&` | 会话内切换/查看工作区（use/show/reset）——不改配置、不重启 |
+| `ros2_workspace` | `source <ws>/install/setup.bash &&` | 会话内切换/查看工作区（use/show/reset）——不改配置、不重启。`use` **需要审批**：source 该文件即*执行*它，且该覆盖会作用于后续每一条命令 |
 | `ros2_topic_bw` / `ros2_topic_delay` | `ros2 topic bw|delay <topic>` | 测量话题带宽 / 端到端延迟；超时终止 |
 | `ros2_service_list` | `ros2 service list -t` | 服务及类型 |
 | `ros2_service_type` / `ros2_service_find` | `ros2 service type|find ...` | 服务类型 / 按类型找服务 |
@@ -238,7 +238,7 @@ GUI 生命周期 + 截图 + 多模态视觉（"先能看，再谈动"）+ xdotoo
 | `ros2_gui_list` | 被跟踪会话 + X11 窗口（`wmctrl -lG`） |
 | `ros2_gui_close` | 关闭会话（SIGTERM） |
 | `ros2_screenshot` | 截屏或按窗口标题截图到 PNG |
-| `ros2_vision_describe` | 用配置的多模态模型描述一张图片（Gemini / OpenAI / mock） |
+| `ros2_vision_describe` | 用配置的多模态模型描述一张图片（Gemini / OpenAI / mock）。路径必须是真正的 PNG/JPEG/GIF/WebP——上传前按**文件内容**（magic bytes）判定 |
 | `ros2_gui_observe` | 确保 GUI 运行 → 截图 → 返回多模态描述（"看"工作流） |
 | `ros2_gui_interact` | 统一 xdotool 交互：`action=click`（点击/滚动，`button` 4/5 = 滚动）、`action=drag`（拖拽：RViz2 orbit/pan/zoom）、`action=key`（组合键如 `ctrl+shift+r` 或输入文本）。**交互限定在应用白名单内**（默认 `rviz2` / `rqt` / `rqt_graph`，可用 `guiAllowedApplications` 配置）；其它目标——包括不传 `windowTitle`（作用于当前焦点窗口）——**一律先审批** |
 

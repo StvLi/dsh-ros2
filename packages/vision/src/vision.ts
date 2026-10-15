@@ -1,5 +1,5 @@
+import { createReadStream } from 'node:fs'
 import { readFile } from 'node:fs/promises'
-import path from 'node:path'
 import { type DescribeOptions, type VisionConfig, type VisionProvider } from 'dsh-ros2-common'
 
 export type { DescribeOptions, VisionConfig, VisionProvider }
@@ -17,17 +17,64 @@ export function createVisionProvider(config: VisionConfig): VisionProvider {
   }
 }
 
-export async function readImageBase64(imagePath: string): Promise<{ data: string; mime: string }> {
-  const buffer = await readFile(imagePath)
-  return { data: buffer.toString('base64'), mime: mimeFor(imagePath) }
+/**
+ * Image type from the file's own leading bytes, or null when it is not one of
+ * the four formats the VLM gateways accept.
+ *
+ * This used to be decided by the path's extension, on the caller's word, and
+ * the bytes were then read and POSTed to a third-party gateway. Both egress
+ * paths take a caller-chosen path (`ros2_vision_describe` here, and
+ * `ros2_vlm_analyze` through the Python `vlm_node`), so "it ends in .png ⇒ it
+ * is an image" let ANY readable file — `~/.ssh/id_rsa`, a config, a token
+ * store — be base64'd and shipped off-host with no approval. Content decides
+ * now. The sniffed code is also the MIME we send, so a JPEG named `.png` is
+ * described correctly instead of being mislabelled.
+ */
+export function sniffImageMime(head: Uint8Array): string | null {
+  const starts = (bytes: number[], at = 0): boolean =>
+    head.length >= at + bytes.length && bytes.every((b, i) => head[at + i] === b)
+  if (starts([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) return 'image/png'
+  if (starts([0xff, 0xd8, 0xff])) return 'image/jpeg'
+  // GIF87a / GIF89a
+  if (starts([0x47, 0x49, 0x46, 0x38]) && (head[4] === 0x37 || head[4] === 0x39) && head[5] === 0x61) return 'image/gif'
+  // RIFF....WEBP
+  if (starts([0x52, 0x49, 0x46, 0x46]) && starts([0x57, 0x45, 0x42, 0x50], 8)) return 'image/webp'
+  return null
 }
 
-function mimeFor(imagePath: string): string {
-  const ext = path.extname(imagePath).toLowerCase()
-  if (ext === '.jpg' || ext === '.jpeg') return 'image/jpeg'
-  if (ext === '.webp') return 'image/webp'
-  if (ext === '.gif') return 'image/gif'
-  return 'image/png'
+/** Longest magic number we match (WebP needs 12 bytes). */
+const IMAGE_HEAD_BYTES = 12
+
+/**
+ * Read at most the first `n` bytes.
+ *
+ * Deliberately not `readFile`: the path is caller-chosen, so a mistake — a
+ * multi-gigabyte video, or a character device like `/dev/zero` that never
+ * reaches EOF — has to be refused without being pulled into memory first. A
+ * bounded read stream stops at `end` no matter what the file claims to be.
+ * (This is also why it is a stream rather than `fs.open` + `read`: the latter
+ * is a write-shaped sink for CodeQL's js/insecure-temporary-file, which
+ * reports the caller's temp-dir test fixture here as if we created it.)
+ */
+async function readHead(imagePath: string, n: number): Promise<Buffer> {
+  const chunks: Buffer[] = []
+  const stream = createReadStream(imagePath, { start: 0, end: n - 1 })
+  for await (const chunk of stream) chunks.push(chunk as Buffer)
+  return Buffer.concat(chunks)
+}
+
+/** Decide the image type from the file's leading bytes, reading only the header. */
+export async function detectImageMime(imagePath: string): Promise<string | null> {
+  return sniffImageMime(await readHead(imagePath, IMAGE_HEAD_BYTES))
+}
+
+export async function readImageBase64(imagePath: string): Promise<{ data: string; mime: string }> {
+  const mime = await detectImageMime(imagePath)
+  if (mime === null) {
+    throw new Error(`不是受支持的图片文件（PNG/JPEG/GIF/WebP，按文件内容判定）：${imagePath}`)
+  }
+  const buffer = await readFile(imagePath)
+  return { data: buffer.toString('base64'), mime }
 }
 
 /** Deterministic fake for tests and keyless setups. */

@@ -162,7 +162,7 @@ ros2_doctor                         # system health report
 | `ros2_topic_echo` | `ros2 topic echo <topic> --once` | One message sample (JSON when possible); `--qos-reliability` / `--qos-durability` overrides reach TRANSIENT_LOCAL latched topics |
 | `ros2_topic_hz` | `ros2 topic hz <topic> [--window N]` | Measure publish frequency (average/min/max/std dev over the window); natural termination = measurement timeout |
 | `ros2_env_check` | resolved-setup probe | Self-check the environment: which setup is sourced, path existence, visible packages/nodes |
-| `ros2_workspace` | `source <ws>/install/setup.bash &&` | Switch/show the workspace in-session (use/show/reset) — no config edit, no restart |
+| `ros2_workspace` | `source <ws>/install/setup.bash &&` | Switch/show the workspace in-session (use/show/reset) — no config edit, no restart. `use` **requires approval**: sourcing the file *executes* it, and the override then applies to every later command |
 | `ros2_topic_bw` / `ros2_topic_delay` | `ros2 topic bw|delay <topic>` | Measure topic bandwidth / end-to-end delay; timeout-terminated |
 | `ros2_service_list` | `ros2 service list -t` | Services with types |
 | `ros2_service_type` / `ros2_service_find` | `ros2 service type|find ...` | Service type / find services by type |
@@ -229,7 +229,7 @@ GUI lifecycle + screenshots + multimodal vision ("see first, then move") + xdoto
 | `ros2_gui_list` | Tracked sessions + X11 windows (`wmctrl -lG`) |
 | `ros2_gui_close` | Close a session (SIGTERM) |
 | `ros2_screenshot` | Capture the screen or one window to a PNG |
-| `ros2_vision_describe` | Describe an image with the configured multimodal model (Gemini / OpenAI / mock) |
+| `ros2_vision_describe` | Describe an image with the configured multimodal model (Gemini / OpenAI / mock). The path must be a real PNG/JPEG/GIF/WebP — the **content** is sniffed before anything is uploaded |
 | `ros2_gui_observe` | Ensure a GUI is running → screenshot → return the multimodal description (the "see it" workflow) |
 | `ros2_gui_interact` | unified xdotool interaction: `action=click` (click/scroll, `button` 4/5 = scroll), `action=drag` (press-drag-release: RViz2 orbit/pan/zoom), `action=key` (combos like `ctrl+shift+r` or typed text). **Confined to an application allowlist** (default `rviz2` / `rqt` / `rqt_graph`, configurable via `guiAllowedApplications`); any other target — including omitting `windowTitle`, which acts on whatever is focused — **requires approval** |
 

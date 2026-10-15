@@ -1732,23 +1732,28 @@ function makeEnvCheckTool(deps: CoreToolDeps) {
 }
 
 /**
- * L1: switch/show the ROS2 workspace for subsequent tool calls WITHOUT
- * editing config or restarting DSH (session-scoped in-memory override).
+ * L1 read-only for `show`/`reset`; the `use` action is a WRITE and is
+ * approval-gated.
+ *
+ * `use` sets the process-wide in-memory override WITHOUT editing config or
+ * restarting DSH. Note that "in-memory" is not the same as "per session": the
+ * override lives in one module-level slot (`runner.ts`), so it applies to every
+ * session served by this DSH process, not just the caller's. `show` reports it.
  */
 function makeWorkspaceTool(deps: CoreToolDeps) {
   return defineTool({
     name: 'ros2_workspace',
     description:
-      'Switch or show the ROS2 workspace for subsequent tool calls WITHOUT editing config or restarting (session-scoped). ' +
-      'use <path>: validate <path>/install/setup.bash and set it as the source prefix; ' +
-      'show: report the effective setup (session override / configured rosSetup / auto-detected); ' +
-      'reset: clear the session override and return to the configured fallback chain.',
+      'Switch or show the ROS2 workspace for subsequent tool calls WITHOUT editing config or restarting (in-memory; process-wide for this DSH run). ' +
+      'use <path>: validate <path>/install/setup.bash and set it as the source prefix — this EXECUTES that file, so it requires approval; ' +
+      'show: report the effective setup (override / configured rosSetup / auto-detected); ' +
+      'reset: clear the override and return to the configured fallback chain.',
     parameters: {
       action: { type: 'string', enum: ['use', 'show', 'reset'], default: 'show', description: 'use | show | reset.' },
       path: { type: 'string', default: '', description: 'use: workspace root whose install/setup.bash will be sourced.' },
     },
     output: { schema: resultSchema, render: renderResult },
-    async execute(args) {
+    async execute(args, exec) {
       const params = args as Record<string, unknown>
       const action = String(params.action ?? 'show')
       if (action === 'use') {
@@ -1766,6 +1771,16 @@ function makeWorkspaceTool(deps: CoreToolDeps) {
           return toolError('ros2_workspace', 'ros2_workspace', 'SETUP_NOT_FOUND',
             `未找到 ${setup}。请确认该工作区已 colcon build；或检查路径下是否有 install/setup.bash。当前会话覆盖：${getSessionRosSetup() ?? '（无）'}。`)
         }
+        // Sourcing a setup.bash EXECUTES it: bash runs whatever the file
+        // contains, with this process's privileges, and the override then
+        // applies to every later tool call. That is strictly more powerful
+        // than `ros2_run` — which is approval-gated — so an ungated path here
+        // is arbitrary host code execution with no prompt at all. The check
+        // above only proves the file EXISTS, never what it does.
+        const approval = await requestApproval(deps, exec, 'ros2_workspace',
+          `将把 ROS2 命令前缀切换为 source ${setup} —— bash 会执行该文件（等价于运行其中的代码），`
+          + `且本进程内所有会话后续的工具调用都会先 source 它。`)
+        if (!approval.allowed) return deniedResult('ros2_workspace', 'ros2_workspace', approval.outcome)
         // Quote the source path so a path containing spaces or shell
         // metacharacters is one safe shell word — never raw-interpolated into
         // `bash -lc` (injection + path-with-space correctness hardening).

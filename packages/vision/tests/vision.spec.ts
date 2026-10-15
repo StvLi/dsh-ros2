@@ -19,18 +19,43 @@ describe('vision providers', () => {
     expect(() => createVisionProvider({ provider: 'bogus' })).toThrow(/unknown vision provider/)
   })
 
-  it('readImageBase64 reports mime by extension', async () => {
+  it('readImageBase64 decides the mime from the file content, not the extension', async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'dsh-vision-'))
     try {
-      const png = path.join(dir, 'img.png')
-      const jpg = path.join(dir, 'img.jpg')
-      await writeFile(png, Buffer.from([0x89, 0x50, 0x4e, 0x47]))
-      await writeFile(jpg, Buffer.from([0xff, 0xd8]))
-      const { mime: pngMime, data } = await import('../src/vision.js').then((m) => m.readImageBase64(png))
+      // A real PNG signature, but named `.jpg`: content must win.
+      const misnamed = path.join(dir, 'actually-png.jpg')
+      await writeFile(misnamed, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]))
+      const { mime: pngMime, data } = await readImageBase64(misnamed)
       expect(pngMime).toBe('image/png')
       expect(data.length).toBeGreaterThan(0)
-      const { mime: jpgMime } = await import('../src/vision.js').then((m) => m.readImageBase64(jpg))
-      expect(jpgMime).toBe('image/jpeg')
+
+      const jpg = path.join(dir, 'img.jpg')
+      await writeFile(jpg, Buffer.from([0xff, 0xd8, 0xff, 0xe0]))
+      expect((await readImageBase64(jpg)).mime).toBe('image/jpeg')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  // The egress path takes a caller-chosen path, so "is this an image?" must be
+  // answered by the bytes. Delete the content check in readImageBase64 and this
+  // goes red — while a private key would have been base64'd and POSTed to the
+  // gateway under the guise of `image/png`.
+  it('readImageBase64 REFUSES a file that is not an image, whatever it is named', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'dsh-vision-'))
+    try {
+      const fakeKey = path.join(dir, 'id_rsa.png')
+      await writeFile(fakeKey, '-----BEGIN OPENSSH PRIVATE KEY-----\nnot an image\n')
+      await expect(readImageBase64(fakeKey)).rejects.toThrow(/不是受支持的图片文件/)
+
+      const txt = path.join(dir, 'notes.txt')
+      await writeFile(txt, 'hello\n')
+      await expect(readImageBase64(txt)).rejects.toThrow(/不是受支持的图片文件/)
+
+      // Truncated/vandalised headers must not slip through either.
+      const empty = path.join(dir, 'empty.png')
+      await writeFile(empty, Buffer.alloc(0))
+      await expect(readImageBase64(empty)).rejects.toThrow(/不是受支持的图片文件/)
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
@@ -55,5 +80,34 @@ describe('ros2_vision_describe tool', () => {
     const bare = createRos2Tools({ run }).find((x) => x.name === 'ros2_vision_describe')
     const noVision = (await bare!.execute({ imagePath: '/tmp/x.png' }, execStub)) as ToolResult
     expect(noVision.error?.code).toBe('VISION_UNAVAILABLE')
+  })
+
+  // The real gemini/openai providers read the path and upload the bytes. This
+  // stands in for them so the refusal is asserted at the TOOL surface, where
+  // the caller chooses the path.
+  class ReadingVP implements VisionProvider {
+    readonly name = 'openai'
+    async describe(imagePath: string): Promise<string> {
+      await readImageBase64(imagePath)
+      return 'must not be reached for a non-image'
+    }
+  }
+
+  it('refuses a non-image path instead of uploading it to the gateway', async () => {
+    const execStub = { agent: { id: 'test' } } as never
+    const run = async () => ({ ok: true, command: '', stdout: '', stderr: '', exitCode: 0, timedOut: false, durationMs: 0 })
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'dsh-vision-'))
+    try {
+      const secret = path.join(dir, 'id_rsa.png')
+      await writeFile(secret, '-----BEGIN OPENSSH PRIVATE KEY-----\nnot an image\n')
+      const t = createRos2Tools({ run, vision: new ReadingVP() }).find((x) => x.name === 'ros2_vision_describe')
+      if (!t) throw new Error('ros2_vision_describe not registered')
+      const out = (await t.execute({ imagePath: secret }, execStub)) as ToolResult
+      expect(out.ok).toBe(false)
+      expect(out.error?.code).toBe('VISION_FAILED')
+      expect(out.error?.message).toMatch(/不是受支持的图片文件/)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
   })
 })

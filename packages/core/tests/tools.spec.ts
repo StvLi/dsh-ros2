@@ -1568,26 +1568,74 @@ describe('ros2_env_check', () => {
 })
 
 describe('ros2_workspace', () => {
+  // mkdtemp, not a predictable `/tmp/<fixed-name>`: a fixed path is guessable
+  // and collides between concurrent runs, which is exactly what CodeQL's
+  // js/insecure-temporary-file flags. The `install/setup.bash` is created
+  // inside the fresh directory so the tool's existence check sees a real
+  // workspace. `prefix` is passed through, so a caller can keep a space in the
+  // name for the quoting test.
+  const makeWorkspaceFixture = (prefix: string): string => {
+    const dir = mkdtempSync(path.join(tmpdir(), prefix))
+    mkdirSync(`${dir}/install`, { recursive: true })
+    writeFileSync(`${dir}/install/setup.bash`, 'true\n')
+    return dir
+  }
+
   it('show is read-only without approval', async () => {
     const run = makeRun(() => ({ stdout: '' }))
     const out = await call('ros2_workspace', run, {})
     expect(out.ok).toBe(true)
     expect((out.data as { action: string }).action).toBe('show')
   })
-  it('use validates the setup path and errors when missing', async () => {
+  it('use validates the setup path and errors when missing (without escalating to a human)', async () => {
     const run = makeRun(() => ({ stdout: '' }))
-    const out = await call('ros2_workspace', run, { action: 'use', path: '/definitely/not/a/workspace' })
+    let asked = false
+    const t = tool2('ros2_workspace', run, async () => { asked = true; return 'allowed-once' })
+    const out = (await t.execute({ action: 'use', path: '/definitely/not/a/workspace' }, execStub)) as ToolResult
     expect(out.ok).toBe(false)
     expect(out.error?.code).toBe('SETUP_NOT_FOUND')
+    // A path that cannot work is not a question worth asking.
+    expect(asked).toBe(false)
   })
-  it('use sets the session override when the setup exists', async () => {
-    const { mkdirSync, writeFileSync, rmSync } = await import('node:fs')
-    const dir = '/tmp/dsh-ws-tool-test'
-    mkdirSync(`${dir}/install`, { recursive: true })
-    writeFileSync(`${dir}/install/setup.bash`, 'true\n')
+  // `use` makes bash execute an agent-chosen file for every later tool call,
+  // so it is a WRITE, not an L1 read. The next two tests are the gate's teeth:
+  // delete the `requestApproval` call in makeWorkspaceTool and both go red.
+  it('use FAILS CLOSED without an approval service and sets no override', async () => {
+    const dir = makeWorkspaceFixture('dsh-ws-nogate-')
+    setSessionRosSetup(null)
     try {
       const run = makeRun(() => ({ stdout: '' }))
       const out = await call('ros2_workspace', run, { action: 'use', path: dir })
+      expect(out.ok).toBe(false)
+      expect(out.error?.code).toBe('APPROVAL_DENIED')
+      // Nothing may be sourced before a human said yes.
+      expect(getSessionRosSetup()).toBeNull()
+    } finally {
+      setSessionRosSetup(null)
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+  it('use sets no override when approval is denied', async () => {
+    const dir = makeWorkspaceFixture('dsh-ws-denied-')
+    setSessionRosSetup(null)
+    try {
+      const run = makeRun(() => ({ stdout: '' }))
+      const t = tool2('ros2_workspace', run, async () => 'denied')
+      const out = (await t.execute({ action: 'use', path: dir }, execStub)) as ToolResult
+      expect(out.ok).toBe(false)
+      expect(out.error?.code).toBe('APPROVAL_DENIED')
+      expect(getSessionRosSetup()).toBeNull()
+    } finally {
+      setSessionRosSetup(null)
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+  it('use sets the override when the setup exists and approval is granted', async () => {
+    const dir = makeWorkspaceFixture('dsh-ws-tool-test-')
+    try {
+      const run = makeRun(() => ({ stdout: '' }))
+      const t = tool2('ros2_workspace', run, async () => 'allowed-once')
+      const out = (await t.execute({ action: 'use', path: dir }, execStub)) as ToolResult
       expect(out.ok).toBe(true)
       expect((out.data as { sessionRosSetup: string }).sessionRosSetup).toContain(`${dir}/install/setup.bash`)
     } finally {
@@ -1597,13 +1645,12 @@ describe('ros2_workspace', () => {
     }
   })
   it('use stores the source path as a single-quoted shell word (injection/path-with-space hardening)', async () => {
-    const { mkdirSync, writeFileSync, rmSync } = await import('node:fs')
-    const dir = `/tmp/dsh ws tool test ${process.pid}`
-    mkdirSync(`${dir}/install`, { recursive: true })
-    writeFileSync(`${dir}/install/setup.bash`, 'true\n')
+    // The space is the point: the prefix must still be ONE shell word.
+    const dir = makeWorkspaceFixture('dsh ws tool test ')
     try {
       const run = makeRun(() => ({ stdout: '' }))
-      const out = await call('ros2_workspace', run, { action: 'use', path: dir })
+      const t = tool2('ros2_workspace', run, async () => 'allowed-once')
+      const out = (await t.execute({ action: 'use', path: dir }, execStub)) as ToolResult
       expect(out.ok).toBe(true)
       // The prefix must be a quoted path (`source '<path>' && `), never a raw
       // interpolation of the user path into a `bash -lc` string.
