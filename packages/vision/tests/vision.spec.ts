@@ -45,7 +45,11 @@ describe('vision providers', () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'dsh-vision-'))
     try {
       const fakeKey = path.join(dir, 'id_rsa.png')
-      await writeFile(fakeKey, '-----BEGIN OPENSSH PRIVATE KEY-----\nnot an image\n')
+      // Shaped like the file people actually fear uploading, but deliberately
+      // NOT the PEM marker: a literal `-----BEGIN … PRIVATE KEY-----` in the
+      // tree trips every secret scanner forever, and alarm fatigue costs more
+      // than the flavour is worth. The bytes are what this test is about.
+      await writeFile(fakeKey, 'PRIVATE KEY MATERIAL — not an image\n')
       await expect(readImageBase64(fakeKey)).rejects.toThrow(/不是受支持的图片文件/)
 
       const txt = path.join(dir, 'notes.txt')
@@ -99,7 +103,8 @@ describe('ros2_vision_describe tool', () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'dsh-vision-'))
     try {
       const secret = path.join(dir, 'id_rsa.png')
-      await writeFile(secret, '-----BEGIN OPENSSH PRIVATE KEY-----\nnot an image\n')
+      // No PEM marker on purpose — see the note in the readImageBase64 test.
+      await writeFile(secret, 'PRIVATE KEY MATERIAL — not an image\n')
       const t = createRos2Tools({ run, vision: new ReadingVP() }).find((x) => x.name === 'ros2_vision_describe')
       if (!t) throw new Error('ros2_vision_describe not registered')
       const out = (await t.execute({ imagePath: secret }, execStub)) as ToolResult
