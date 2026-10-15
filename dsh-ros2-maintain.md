@@ -1,10 +1,12 @@
 # dsh-ros2 日常维护文档（Maintenance Log）
 
 > 仓库：`StvLi/dsh-ros2` · 本地代码：`/home/stvli/Desktop/embody_agent_ws/dsh-ros2`（git remote `git@github.com:StvLi/dsh-ros2.git`）
-> 维护日期：2026-10-13（最近一轮） · 维护者：DSH scheduled-run agent（StvLi 仓）
+> 维护日期：2026-10-15（最近一轮） · 维护者：DSH scheduled-run agent（StvLi 仓）
 > 维护轮次：第一轮 2026-09-03（§0–§7）；第二轮 2026-09-04（§8）；第三轮 2026-09-05（§9，安全修复）；第四轮 2026-09-05（§10，无 open issue → 安全检查 → 两项维护卫生修复）；第五轮 2026-09-06（§11，无 open issue → 安全检查 → 落地 `ros2_install` 注入修复）；第六轮 2026-09-11（§12，无 open issue → 安全检查 → 落地 `safety_monitor` / `zero_pose_semantics` 注入修复 + vitest 4 升级 + CI 最小权限）；第七轮 2026-09-13（§13，open issue #19 → journey skills + 组合不变量）；第八轮 2026-09-14（§14，3 个 open issue → #21 修复并真机复核、#22 落地但保留 open、#19 完成验收测量）；第九轮 2026-09-21（§15）：open issue #22 → 补齐"会话技能目录对账"（其唯一未实现项）+ 修复 `ros2_env_check` 的"报告 ≠ 执行"缺陷（第八轮存疑项的真因）+ 安全复测；**第十轮 2026-09-22（§16，本轮）：补齐第九轮"在途无 PR"的缺口（PR #27，CI 首跑即抓出"本地绿、CI 红"）→ 在运行中进程里验收并关闭 issue #22 → 定位并修复线上故障真因（`rosSetup` 只校验第一段）→ 3 个 PR 全部合入 main**；第十二轮 2026-09-24（§17，收尾超时遗留的在途 PR #32 → 实测第十轮的重启请求已按硬期限落地 → 修复"配置没送到 doctor"的接线缺口 + API Key 来源语义）；第十三轮 2026-09-25（§18，0 open issue / 0 open PR → 安全扫描发现并落地 3 处真实缺陷 = PTY 会话 id 路径穿越 · 发布物携带 `__pycache__` 字节码 · 安装器选项注入，并开启 Dependabot 告警）；**第十四轮 2026-09-26（§19）：0/0 → 先闭环第十三轮唯一的未闭环观测（gen-21 重启逐字命中），再落地 3 个 PR = 明文传输的 VLM API Key 可见化 · 插件自建 IPC 对象权限收紧（PTY 会话文件 / sidecar UDS / 安装器脚本）· Dependabot 版本更新；并把跨五轮未处理的部署配置项升级为 issue #40；**第十五轮 2026-09-29（§20）：open issue #40 → step 2 评估（合理、必要，但配置在仓库外且需运维决定）→ **承接上一轮时间窗被截断留下的在途分支** `fix/workspace-path-hygiene` 并落地 `fix(common)`：自愈探针用**原始文本**比对存在性，把**存活但写成 `~/…`** 的工作区判为缺失、剔除该段、并在只剩它时**静默切换到 `/opt/ros/<distro>`** —— 恰是本轮文档新推荐的路径形式；闭环第十四轮的 gen-22 观测（逐字命中）；实测线上 **6 处**死链（issue #40 少算 1 处）；本轮**无 GitHub API token**，改用一次性 `ci/probe-*` 分支取得 CI（Node 22/24 双绿）后删除**；**第十六轮 2026-09-30（§21，本轮）：open issue #40 → step 2 复核（逐字确认**仍然准确**、更正为**实测 6 处**死链、结论仍交运维）→ **上一轮唯一的运维缺口已消失：`gh` 有了 token**，于是第一个动作就是把第十五轮卡住的在途分支**开成 PR #48、CI 双绿后合入 main**（第一次拿到**真实** PR CI，不再需要 `ci/probe-*` 代跑）；随后落地 3 个 PR = `fix(packaging)` 发布面 `__pycache__` 守卫（**此前只有"碰巧出现过"的那 3 个包有守卫**，实测 moveit 可复现泄漏 `.pyc`）+ `ci(security)` **CodeQL 代码扫描基线**（第十四/十五轮连续两次建议、本轮首次落地）+ `fix(security)` 首个基线 **29 条告警**中的**2 处真实缺陷**（`ros2_interface_create` 的 TOCTOU 可被符号链接穿出 · 自愈探针的自动探测路径未加引号）；Dependabot 积压 6 → 4（#47 合入并替掉失败的 #44）**；**第十七轮 2026-10-01（§22，本轮）：open issue #40 → step 2 第三次复核（事实逐字不变、结论仍交运维、故不再重复评论）→ 把第十六轮**有意不修**的 3 条 ReDoS 告警**先测量再修**：走真实入口实测后只有 **1 条真实可达**（`parseTopicList`，n=4000 阻塞 **14.8 s**，k=2.11；并发现**第二种**形状 `[`×n+` ]x]` 在 n=20000 阻塞 **697 ms**）、1 条被调用方的 `trim()`/`split('\n')` **消掉而不可达**、1 条**不可复现**（贪婪 `.*` 一步到 `$`，不回溯）→ 三条全部改为**可证明线性**的扫描 + `chars.ts` 逐码点字符类 + **差分等价测试**（穷举 + 10 万条随机/解析器，**0 分歧**），PR #55 CI/CodeQL **5/5 绿**后合入；**闭环第十六轮唯一的遗留观测**（gen-24：`lifecycleState: running`、无残留 `deferDeadline`、`pendingResume: false`）；Dependabot 积压 4 → 3（#43 vitest 4→5 dev-only 合入；#42/#45/#46 抬的是 **type-only peer 下界**，而 CI 装的是**该 PR 自己抬上去的 devDependency** ⇒ **结构上无法评估下界**，升级为 **issue #56**）；CodeQL open **13 → 10**；发布面用**预先种入 `.pyc` + 摘守卫正向对照**复测 9/9 CLEAN；并更正第十六轮快照表里与 §21.8 矛盾的"main 344"（实测 **347**）**。；**第十九轮 2026-10-11（§24，本轮）：open issue #40 → step 2 第五次复核（事实逐字不变、结论仍交运维）→ **把 §5「已知限制」里从第一轮躺到现在的 PTY 幻影会话修掉**：实测旧行为比原文更严重（无 pty 时 `start` 退出 0 并打印 `started session … (pid N)`，`status` **永远**报 `STATE running`，**连不存在的会话 id 也报 running**）⇒ 在父进程 fork 前探测 pty、失败写 `state=failed` 并退出 3、工具返回明确的 `PTY_UNAVAILABLE`；顺带查出**同一个 REMAINDER 解析缺陷**把 `--dir` 当参数投喂给下载来的 sudo 安装脚本（安装器 argv 实测 `["--dir", <dir>]`，修后为 `[]`），且 `--all` 名义存在却不可达 ⇒ 改为"flag 必须在 action 之前"并对 `status`/`stop` 的多余参数**报错而非静默忽略**；**安全扫描发现本地审计门禁在这台机器上根本跑不起来**（`~/.npmrc` 指向的镜像没有 advisory 端点⇒ 前几轮"本地复算供应链"实际无法复现）⇒ 把权威 registry 钉进 `pnpm run audit` / `audit:all` 并让 CI 调用同一条命令；文档计数全面漂移的修正**其中一次被仓库自己的组合不变量测试当场打回**（README 的 83 是"全家族六包"、聚合包只挂 81 ⇒ 改回 83，并在安装步骤把两个数分别说清）→ 并把它升格为 **issue #68**；2 个 PR（#66/#67）CI/CodeQL **5/5 绿**后合入，`main 66a139a → 7dc553f`**。**第二十轮 2026-10-12（§25，本轮）：2 open issue（#40 + #68）→ **issue #68 落地**（`fix(metadata)`：聚合包按"它实际挂的东西"宣称 81、家族 83 仍是家族的数）→ 顺带扫出**同一类缺陷的更大缺口**：三个**已发布**的 per-package `README.md` 从未被任何不变量读过（core 33 对 61、vision 5 对 7、聚合 51+4 对 81+9），已修并把"每个包 README 的第一个工具计数必须等于实测"写进组合不变量（**可证伪**：换回修复前文件即报 `expected 33 to be 61`）→ **issue #40 第六次复核后经运维确认、本轮真正落地**（备份 + 删 5 条死段尾 + 删第 63 行整条 `rosSetup`，YAML 校验通过，行为与自愈后的实际链逐字等价，等 gen-27 重启生效）→ 安全扫描审计/密钥/发布面/CodeQL 全不变（10 条 open 同规则同数量）、**远程已合并分支 16 → 1**（15 条全部是 main 的祖先）→ 1 个 PR（#70）CI/CodeQL **5/5 绿**后合入，`main 7dc553f → 316c142`，**open issue 归零**。**
 >
 > **第二十一轮 2026-10-13（§26，本轮）：0 open issue / 0 open PR → 走 step 5；先闭环上一轮唯一的未闭环观测（gen-27 逐字落地于 10-12 12:40:48，且 `ros2_env_check` 不再报 `missingSources` = issue #40 的最终判据达成）→ 安全扫描沿用同口径全绿（audit prod/含 dev 干净、CodeQL 10 不变、密钥 0、发布面 9/9 CLEAN、Python/TS 执行面与既有防线逐条回归）→ **但真正的高价值发现不是扫描器给的**：把"每个能执行/输入的接口"与"审批面"对照后，发现 `ros2_gui_interact` 可以在**无审批、无目标限制**下把任意按键/文本送进**任意窗口**（选中终端即宿主机命令执行），而更窄的 `ros2_run`/`ros2_service_call` 反而都要审批；且这本是仓库**自己**在 `docs/safety-todo.md` §17 / 验收 #11 决定过、却一直未落地的事（README 还反过来写着"no approval, same as other L3 tools"）→ 落地 `fix(security)`：默认应用白名单（rviz2/rqt/rqt_graph，可配 `guiAllowedApplications`）+ 按**解析后**窗口标题判定 + 白名单外（含不传 `windowTitle`）**先审批**且 fail-closed；用例 **362 → 371**（+9，且删掉 gate 块会让 3 条断言当场变红）；PR #73 CI/CodeQL **5/5 绿**后合入，`main 845f04f → 4ab647c`，并登记 gen-28 让这**真实的运行时变更**（`lib/` 变了）在跑着的 dsh 里生效。**
+
+> **第二十二轮 2026-10-15（§27，本轮）：0 open issue / 0 open PR → 走 step 5；先闭环上一轮唯一的未闭环观测（gen-28 于 10-13 04:19:38 `loaded`，state 为 `running`、`deferDeadline: 0` —— 逐字命中）→ 安全扫描沿用同口径（audit prod/含 dev 干净、Dependabot 0、密钥 0、发布面 9/9、`ros2_env_check` 实时对账全绿）→ **高价值发现依旧不是扫描器给的**，而是上一轮 §6 第 6 条明确要求的"执行面 × 审批面"对照：`ros2_workspace use <ws>` 把命令前缀换成 `source <ws>/install/setup.bash` 却**无审批**——而 source 即**执行**该文件，且覆盖作用于**本进程所有会话**后续每一条命令，比要审批的 `ros2_run` 更强（实机复现：PoC setup.bash 的 marker 以 uid=1000 写入）→ 落地 `fix(security)` 加审批门 + fail-closed；顺带查出**同类第二处**：`ros2_vision_describe` / `ros2_vlm_analyze` 的 `imagePath` 不做任何校验就把文件 base64 后 POST 到第三方网关（旧逻辑按扩展名猜 MIME、未知扩展名回落 `image/png`）——CodeQL 的 `file-access-to-http` 报了**三轮**都被当作"by design"放过，**没人问过路径该不该无限** → 落地按**文件内容**（magic bytes）判定，TS/Python 两侧各一道；用例 **371 → 375**（+4；两处防线各自删掉都会让 2 条断言当场变红）；**CodeQL 首跑抓出我自己引入的 4 条告警**（3 条真实 = 测试用可预测 `/tmp/<name>`、1 条误报 = `fs.open` 被当写型 sink）→ 改用 `mkdtempSync` + 有界 `createReadStream` 后 **5/5 绿**，且顺带把 `tools.spec.ts` 的两条**存量**告警一并关掉，**CodeQL open 10 → 8**；PR #76 合入，`main 757aa17 → 412e49f`，登记 gen-29（本轮的 `lib/` 变更要在跑着的 dsh 里生效）。**
 
 本文件记录 dsh-ros2 插件的一次完整日常维护循环：**查 issue → 评估建议 → 分支开发 → 验证 → 推送 → 交付维护文档**。每次维护在下方追加一节。
 
@@ -162,6 +164,7 @@ dsh-phoenix 已在 web profile 安装并生效：
 | sidecar / state | sidecar 为“纯模板框架”（reducer 未实现），state 是控制面客户端，且**故意不在聚合包依赖里**（issue #68 的决定） | 符合设计，无动作 |
 | **GUI 白名单只是便利性控制，不是边界**（第二十一轮新增） | `ros2_gui_interact` 现在按**解析后的**窗口标题比对白名单，但任何进程都能改自己的窗口标题 ⇒ 标题匹配**不能证明**窗口身份。真正的边界是审批门（fail-closed）。 | 无动作（已如实写进代码注释 + README + `docs/safety.md`）；若将来要硬边界，需按 xdotool 的 `_NET_WM_PID` 校验属主进程，属新设计 |
 | **未加审批的相邻写面**（第二十一轮如实登记，未修） | `ros2_gui_close`（对自己启动的会话发 SIGTERM/SIGKILL）、`ros2_screenshot` / `ros2_image_snapshot`（`output` 接受任意绝对路径，写入内容固定为 PNG/JPEG） | 前者只作用于**自己跟踪的**会话；后者影响是**完整性**（可用图片字节覆盖任意文件），不是 RCE。若判定需要，单独一轮做"输出路径限定 + 审批" |
+| **`ros2_workspace` 的覆盖是进程级，不是会话级**（第二十二轮如实登记，未修） | `sessionRosSetup` 是 `runner.ts` 里**一个模块级变量**，`use` 改一次就作用于**本进程内所有会话**后续的每一条命令（第二十二轮已给它加审批门 + 把措辞改成 `process-wide`，但**隔离本身没做**）。多会话/多 agent 共用一个 DSH 进程时，A 的切换会影响 B。 | 要真隔离得把会话键从 `exec` 一路传到 ~60 个 `deps.run` 调用点（或引入 per-session 作用域），属**新设计**，单开一轮 |
 | 审计 JSONL（§18） | 仍**未做**（`docs/safety.md` §4 仍如实写着"本版未做"） | 晚批独立项，不影响边界 |
 
 ---
@@ -169,20 +172,24 @@ dsh-phoenix 已在 web profile 安装并生效：
 ## 6. 下次维护建议动作
 
 1. 若需重载运行时变更：走 §4 的 dsh-phoenix 优雅重启循环，而非手动 `systemctl restart`。
-   （第二十一轮登记 gen-28 的原因是**真正的运行时变更**：`packages/core/lib/*.js` 变了——
-   GUI 审批门只有在重载后才会在跑着的 dsh 里生效。第二十轮的 gen-27 则是部署配置变更。）
-2. 全量用例基数：**371 例（370 过 + 1 pty-skip）**。在 pty 可用机器（如 CI）跑 `pnpm run test` 可看到 371/371。
-3. 远端分支卫生：第二十轮把 16 → 1；第二十一轮**合入即删**保持 `origin` 只有 `main`。
-   本地在第二十一轮又清掉 3 条已并入 main 的分支（`fix/gui-interaction-approval` 与两条 `docs/maintain-round-20*`）。
+   （第二十二轮登记 gen-29 的原因同样是**真正的运行时变更**：`packages/core/lib/*.js` 与
+   `packages/vision/lib/*.js` 都变了——新审批门与图片内容校只有在重载后才会在跑着的 dsh 里生效。）
+2. 全量用例基数：**375 例（374 过 + 1 pty-skip）**。在 pty 可用机器（如 CI）跑 `pnpm run test` 可看到 375/375。
+3. 远端分支卫生：第二十轮把 16 → 1；第二十一/二十二轮**合入即删**保持 `origin` 只有 `main`。
 4. 保持“提交前 typecheck+test+build 全绿 + 行为变更补测试 + push 后 CI 绿”的验收线。
 5. **凡文档里出现"已知限制 / 静默 / 无输出"这类词，都当作"待复现的假设"**（第十九轮教训的正面用法）。
-6. **安全扫描要问"谁声称了什么、谁在守它"，而不是"有没有告警"**：第二十一轮的高价值发现
-   （GUI 输入注入无审批）**不是任何扫描器报出来的**——CodeQL/audit/密钥/发布面全绿，
-   它是"把每个"能执行的输入面"列出来，再问"这个面凭什么不需要审批"问出来的。
-   下一轮建议同样先做一次**执行面 × 审批面**的对照（见 §26.3），而不是只看扫描器输出。
-7. **被文档承认"晚批/未做"的事，要定期问一句"这个版本过去了吗"**：
-   GUI 白名单被 `docs/safety-todo.md` 记为"0.15+"晚批，而 `v0.15.0` 早已发过——
-   "晚批"这个词会让一条真实的 RCE-相邻缺口**看起来已被处理**。第二十一轮就是靠这一问挖出来的。
+6. **每轮固定做一次"执行面 × 审批面"对照**（§27.4.1 的 A/B 两张表）：把"能执行 / 能写 / 能把数据送出去"的
+   接口列出来，逐个问**"它凭什么不需要审批"**。这条已经**连续两轮**是唯一产出真实缺陷的动作
+   （第二十一轮 = GUI 输入注入；第二十二轮 = `ros2_workspace use` + VLM 上传面）——
+   而三层扫描器在这两轮里都是绿的。**不要把它当成"没有告警时的备选动作"。**
+7. **"by design"必须把被问的问题一起抄下来**（§27.6 第 2 条）：`js/file-access-to-http` 的既存理由
+   "读图就是功能"对**读**成立、对**路径是否该无限**不成立，于是三个轮次都没人再问。
+8. **CodeQL 报"新告警"先分三类**再下结论——真新问题 / 被新代码触发的误报 / 行号漂移（§27.4.4）。
+   另：**自己写的测试 fixture 也算扫描面**，别留字面量 PEM 头之类的永久噪声。
+9. **被文档承认"晚批/未做"的事，要定期问一句"这个版本过去了吗"**（第二十一轮的教训，仍有效）：
+   GUI 白名单曾被 `docs/safety-todo.md` 记为"0.15+"晚批，而 `v0.15.0` 早已发过——
+   "晚批"这个词会让一条真实的 RCE-相邻缺口**看起来已被处理**。本轮 §5 新增的
+   "`sessionRosSetup` 是进程级"与既有的"未加审批的相邻写面"两条，**同样要在后续轮次里被追问"过期了吗"**。
 
 ---
 
@@ -5084,3 +5091,265 @@ Oct 13 04:15:14  [dsh-phoenix] restart requested (gen 28): plugin-change
   5. **新不变量/新防线要"可证伪"再提交**：删掉防线跑出红，是"它到底有没有牙"的唯一证据（§26.4.2）。
   6. **读 §5 时把它当作待办清单**：每轮**删除**已解决的行、**加上**新如实登记的行。
   7. `pnpm audit` 一律走脚本；`gh issue view` 失败换 REST/JSON 端点（§24.1）；**合入即删分支**。
+
+---
+
+## 27. 维护记录（2026-10-15 18:49 CST / UTC 2026-10-15 10:49 · 第二十二轮：0 open issue / 0 open PR → step 5；闭环 gen-28 → 按上一轮 §6 第 6 条做"执行面 × 审批面"对照，挖出**两处未加门的宿主文件执行面**（`ros2_workspace use` 的 `source` 即执行 · VLM 上传面的任意文件外发）→ 两处都已修 + 可证伪测试 → **CodeQL 首跑抓出我自己引入的 4 条告警**并全部处理，open **10 → 8**）
+
+### 27.1 起点快照
+
+| 项 | 值 |
+| --- | --- |
+| 当前分支 | `main` @ `757aa17`（= `origin/main`，工作树干净） |
+| 远端分支 | 仅 `origin/main`（第二十一轮"合入即删"保持住了） |
+| open issue / open PR | **0 / 0** → 直接走 step 5 |
+| CodeQL open 告警 | **10**（8 × `insecure-temporary-file` + 2 × `file-access-to-http`） |
+| Dependabot open 告警 | **0** |
+| 工具 / 技能面 | `totalTools: 81` / `totalSkills: 9`（六 bundle，`drifted` 全 `false`） |
+| Node / pnpm | `v24.16.0` / `11.22.0`（与 root `packageManager` 一致） |
+| 用例基线 | **371（370 过 + 1 pty-skip）** |
+
+> `gh auth` 本轮**先失败后自愈**：第一次 `gh auth status` 报 `/home/stvli/.config/gh/hosts.yml` 的 token 无效，
+> 再查一次就走 keyring 正常了（token scopes 含 `repo`/`workflow`）。**教训**：把 `gh` 的一次失败当"没权限"
+> 会直接放弃 CodeQL/Dependabot 告警面——那是本仓库唯一的漏洞告警来源。先重试，再换 REST，再考虑无 token 的降级路径。
+
+### 27.2 闭环第二十一轮唯一的未闭环观测（gen-28）
+
+第二十一轮把 gen-28 登记为"只登记、不假装已落地"，落地判据交给本轮 journal。**逐字命中**：
+
+```text
+Oct 13 04:15:11  [dsh-phoenix] cordis tool: cordis_run
+Oct 13 04:15:14  [dsh-phoenix] restart requested (gen 28): plugin-change
+Oct 13 04:19:26  [dsh-phoenix] agent idle; executing deferred restart (gen 28)
+Oct 13 04:19:38  [dsh-phoenix] loaded (graceful restart + client reconnect + lifecycle)
+```
+
+本轮开工时读 `DSH_PHOENIX_STATE_FILE`（由 **systemd unit 环境变量**给出，不在会话 shell 里）：
+
+```json
+{ "generation": 28, "lifecycleState": "running", "goalId": null,
+  "pendingResume": false, "resumeAttempt": 0, "deferDeadline": 0,
+  "updatedAt": 1792060449378 }
+```
+
+`lifecycleState: running` + `deferDeadline: 0` + `pendingResume: false` ⇒ **重启已完整落地**，无残留期限。
+另有一次**计划外**的重载：`Oct 15 18:34:01 [dsh-phoenix] loaded`（PID 2076），发生在本轮动手**之前**——
+所以本轮全程跑着的进程加载的是**第二十一轮的** `lib/`（含 GUI 白名单、**不含**本轮的门）。
+
+**这一点被 §27.4.2 的 PoC 反向印证**：`ros2_workspace use` 实测**没有弹审批**，与"旧 lib 在跑"完全一致。
+
+### 27.3 安全扫描（与既有基线逐项对账）
+
+| 面 | 本轮结果 | 与上一轮 |
+| --- | --- | --- |
+| `pnpm run audit`（prod, high） | No known vulnerabilities found | 不变 |
+| `pnpm run audit:all`（含 dev） | No known vulnerabilities found | 不变 |
+| 密钥（tracked 文件 + 全历史新增行） | **0** | 不变（见 §27.4.4 的一处自造噪声，已清） |
+| 发布面（tarball：入口 + patch + 无 `.pyc`） | **9/9 CLEAN** | 不变 |
+| CodeQL open | **10 → 8** | **改善**（见 §27.4.4） |
+| Dependabot open | **0 → 0** | 不变 |
+| `ros2_env_check` 实时对账 | `totalTools: 81` / `totalSkills: 9` / 六 bundle `drifted` 全 `false` / `stale: false` / `missing: []` / `undeclared: []` / `unresolved: []` / 技能目录 `complete: true` | 不变 |
+| 线上环境 | `visiblePackages: 450` / `visibleNodes: 0`（无 ROS2 节点在跑，属正常） | — |
+
+**结论：扫描器全绿/不变，而本轮两处真实缺陷一处都不会被它们报出来（§27.4.2 扫描器 0 提示，§27.4.3 报了但被误判）。**
+
+### 27.4 本轮发现与修复
+
+#### 27.4.1 "执行面 × 审批面"对照（上一轮 §6 第 6 条要求的动作）
+
+工具面 **81** 条不变。把"能执行 / 能写 / 能把数据送出去"的接口列出来，逐个问**"它凭什么不需要审批"**：
+
+**A. 有审批门的（26 条）**：`moveit_move`、`robot_register`、`robot_topology`、`robot_safety_start|lock|unlock`、
+`ros2_run`、`ros2_launch`、`ros2_colcon_build`、`ros2_component`、`ros2_daemon`、`ros2_install`、
+`ros2_interface_create`、`ros2_lifecycle`、`ros2_param_set|delete`、`ros2_process_cleanup`、
+`ros2_rosdep_install`、`ros2_service_call`、`ros2_topic_pub`、`ros2_bag_record|play`、
+`ros2_action_send_goal`、`ros2_vision_set_key`、`ros2_zero_pose_semantics`、**`ros2_workspace`（本轮新增）**
+——外加**条件门** `ros2_gui_interact`（白名单外才审批）。
+
+**B. 无门但"有副作用"的，逐条交代**：
+
+| 工具 | 副作用 | 本轮判断 |
+| --- | --- | --- |
+| **`ros2_workspace {action:use}`** | **换前缀为 `source <ws>/install/setup.bash` ⇒ bash 执行任意文件，且作用于本进程所有会话的后续每条命令** | **发现 1：不可接受，本轮加门（§27.4.2）** |
+| `ros2_vision_describe` / `ros2_vlm_analyze` | **读调用方指定的任意文件 → base64 → POST 到第三方网关** | **发现 2：不可接受，本轮改为按内容判定（§27.4.3）** |
+| `ros2_gui_start` / `ros2_gui_close` / `ros2_gui_observe` | 预设应用（rviz2/rqt/rqt_graph）生命周期 | 应用名是 **enum**，非任意命令；`close` 只对自己跟踪的会话发信号。**维持不加门**（与第二十一轮一致） |
+| `ros2_screenshot` / `ros2_image_snapshot` | `output` 接受任意绝对路径 | 写入内容**固定为 PNG/JPEG 字节**，影响是**完整性**不是 RCE。已在 §5 如实登记，**本轮不动** |
+| `robot_safety_arbitrate` | 把关节状态 + 渲染帧发给 VLM | 是**只读语义仲裁**，非 safe 结论一律升级人类；输入不含任意文件路径。维持 |
+| `ros2_vision_analyze` | 经 bridge 读话题**最新帧** | 只读话题，不接受文件路径。维持 |
+
+> **这张表就是本轮的产出**：A 组 26 条是"已经被守住的"，B 组每条都必须能回答"为什么不需要门"。
+> 两处答不上来的（`ros2_workspace use`、VLM 上传面）就是本轮修的东西——**两次都不是靠跑扫描器问出来的**。
+
+#### 27.4.2 发现 1【已修·真实·扫描器 0 提示】`ros2_workspace use` = 无审批的宿主机代码执行
+
+- **代码事实**：`makeWorkspaceTool` 的 `use` 分支只做三件事——`access(<ws>/install/setup.bash)` 判**存在**、
+  校验通过后 `setSessionRosSetup('source ' + shq(setup) + ' && ')`、返回。**没有 `requestApproval`**
+  （该 `execute(args)` 连 `exec` 参数都没有，**结构上不可能**加门）。
+- **为什么它是执行面**：`runner.ts: resolveSetup()` 把该覆盖当作 explicit 前缀，`runCommand`
+  于是走 `execFileP('bash', ['-lc', 'source … && <cmd>'])`。**`source` 一个文件就是执行它**，
+  而且覆盖存在**一个模块级变量**里（`runner.ts:81` `let sessionRosSetup`），
+  ⇒ **后续每一次工具调用**、**本进程内所有会话**都会先执行它。
+- **比 `ros2_run` 更强却是 L1**：`ros2_run`（跑一个可执行文件）要审批，而"source 任意文件 + 持久化 +
+  跨会话"不要。工具自己的注释写着 **L1**——与第二十一轮 `ros2_gui_interact` 被归为 L3
+  **是同一类分类错误**：注释里的"会话内、内存态、只读"三个词掩盖了真实权限。
+- **实机复现（本轮实测，非推断）**：造一个 `install/setup.bash` 只写 markdown 标记，然后走**活的**工具：
+
+  ```text
+  ros2_workspace {action: use, path: <PoC ws>}
+    → ok:true, sessionRosSetup: "source '<PoC>/install/setup.bash' && ", 未要求审批
+  ros2_env_check                    # 只读工具，经前缀执行
+    → ok:true
+  cat <PoC>/marker.txt
+    → "POC-EXECUTED 1792060556 uid=1000 host=stvli-desktop-ubuntu-2404"
+  ```
+
+  **即：agent 能把任意文件送进 bash 执行，全程零提示。** 复现后立刻 `reset` 并删掉 PoC 目录（§27.4.5 记录恢复结果）。
+- **修法（最小、与既有先例一致）**：`use` 加 `requestApproval(deps, exec, 'ros2_workspace', …)`，
+  理由文案里写明"**bash 会执行该文件**"且"**本进程内所有会话**后续调用都会先 source 它"；
+  拒绝/无审批服务 ⇒ `APPROVAL_DENIED`（fail-closed）。`show`/`reset` **保持只读**（reset 只是降级）。
+  路径不存在的检查**放在提示之前**——一个不可能成功的路径不该拿去问人。
+- **顺带改正的措辞**：工具描述与注释原文写 `session-scoped`，容易被读成"只影响我这个会话"。
+  实测是**进程级**（模块级单槽）。本轮把描述/注释/审批文案都改成 `process-wide for this DSH run` 如实表述。
+
+#### 27.4.3 发现 2【已修·真实·扫描器报了但被连续三轮误判为 by design】VLM 上传面可外发任意文件
+
+- **代码事实**：两条 egress 都吃**调用方给的路径**，且都不校验：
+  - TS：`ros2_vision_describe` → `readImageBase64(imagePath)` → `readFile` → base64 → `fetch` 到网关；
+  - Python：`ros2_vlm_analyze` → `vlm_node._handle_describe` → `open(request.image_path, "rb")` → `call_vlm`。
+  MIME 由**扩展名**猜（`mimeFor` / `image_mime`），**未知扩展名回落 `image/png`**。
+- **后果**：`imagePath: ~/.ssh/id_rsa` 会被读、base64、**POST 到第三方网关**，还被标成 PNG。
+  不需要审批。
+- **为什么三轮没修**：CodeQL 的 `js/file-access-to-http`（告警 **#28/#29**）从第十六轮建基线起就在，
+  每轮都被记为"**by design**（读图就是这个工具的功能）"而放过。
+  **"读图是功能"只解释了"读"，没人问过"路径该不该是任意的"**——这正是第二十一轮那条教训
+  （"文档与代码一致 ≠ 正确"）的变体：**扫描器报了、理由也写下来了，但理由回答的是另一个问题。**
+- **修法（两侧各一道，按内容判定）**：
+  - TS：`sniffImageMime(head)`（PNG 8 字节 / JPEG `FFD8FF` / GIF87a·89a / RIFF…WEBP），
+    `readImageBase64` 先判后读，非图片抛错；**顺带修正 MIME 语义**——把 `.jpg` 的 PNG 正确描述为 `image/png`
+    而不是被标错。`detectImageMime` 只读**头部**，所以巨大非图片不会先进内存。
+  - Python：`vlm_node` 同样先读 12 字节判内容，非图片 `ValueError` 拒绝，**只有真图片才会走到 `call_vlm`**；
+    顺手删掉已成死代码的 `image_mime` / `import mimetypes`。
+- **实测（本轮，非推断）**：真实 PNG → `image/png`；`id_rsa.png`（内容是私钥文本）→ 拒绝；
+  纯文本 → 拒绝；空文件 → 拒绝；截断 PNG → 拒绝；`RIFF…WAVE` → 拒绝；**`/dev/zero` → 0ms 返回 null**。
+  Python 侧 sniffer 单测 **10/10 PASS**（PNG/JPEG/GIF87a/GIF89a/WebP/私钥/文本/空/截断/RIFF-non-WebP）。
+- **`/dev/zero` 这一条是本轮把实现从 `fs.open` 改成有界流的原因，也是它值得保留的原因**：
+  `readFile` 没有 EOF 可停（`/dev/zero` 永不结束）⇒ 会把整个 DSH 进程读爆；**有界 `createReadStream` 在 12 字节处停**。
+
+#### 27.4.4 CodeQL 抓出**我自己**引入的告警（3 真 + 1 误报），并把存量也顺手关掉
+
+首推后 PR 的 CodeQL 检查**红**：*"6 new alerts including 4 high severity"*。逐条看**没有一条是产品代码的漏洞**，
+但四条里有三条确实是我写的：
+
+| 告警 | 性质 | 处理 |
+| --- | --- | --- |
+| `#31 #32 #33` `js/insecure-temporary-file` @ `core/tests/tools.spec.ts` | **真实**：我新写的测试用**可预测**的 `/tmp/<固定名>` 造 fixture（还会在并发跑测试时撞名） | 改用 `mkdtempSync(path.join(tmpdir(), …))` |
+| `#34` `js/insecure-temporary-file` @ `vision/src/vision.ts` | **误报，但有真原因**：`fs.open(path,'r')` 在该 query 里是**写型 sink**，于是把**调用方测试的临时目录 fixture**报成了"我们在建临时文件" | 改成有界 `createReadStream`（§27.4.3 说明它本来就该有界） |
+| `#28 #29` `js/file-access-to-http` | **行号漂移的重复报告**（同一对存量告警，因为我加了行） | 不改；属"上传图片就是功能" |
+
+修完 **5/5 绿**。**净效果是基线变好**：`core/tests/tools.spec.ts` 里两条**存量**告警（#10/#11）因为我一起改成 `mkdtempSync` 而关闭
+⇒ **CodeQL open 10 → 8**（合入后实测：`8 open` = 6 条 `insecure-temporary-file` + 2 条 `file-access-to-http`）。
+
+**本轮教训（新）**：**扫描器抓到的"新告警"要先分三类——真新问题 / 误报但被你的新代码触发 / 纯粹行号漂移**。
+三条的处理方式完全不同，混在一起就会得出"CodeQL 在烦我"的错误结论。
+
+#### 27.4.5 本轮改了什么、没改什么（边界如实）
+
+| 项 | 结论 |
+| --- | --- |
+| **改了运行时行为** | 是。`ros2_workspace use` 会多一次审批提示；非图片路径不再被上传。`packages/core/lib/*.js` 与 `packages/vision/lib/*.js` **都变了** ⇒ 需要重载（§27.4.6） |
+| **没改 L1 只读面** | `show`/`reset`、所有 `ros2_*_list|info|echo|show` 仍是只读 |
+| **没改 L2 运动/安全路径** | `moveit_move`、`motion_validate`、`safety_monitor`、审批时序**一行未动** |
+| **没做（有意）** | ① 没把 `ros2_workspace` 做成**按会话**隔离——`sessionRosSetup` 是一个模块级槽，改成按会话要在 ~60 个调用点传会话键，**是新设计不是维护**；本轮只**如实改名**（process-wide）并登记进 §5。② 没给 `ros2_screenshot`/`ros2_image_snapshot` 的 `output` 加路径限定（§5 既有条目）。③ 没做审计 JSONL（§18 晚批） |
+| **PoC 现场已清理** | `reset` 已把会话覆盖清回配置值（`ros2_workspace show` → `sessionOverride: null`，`effective.prefix = source /home/stvli/lite_delivery_aio/install/setup.bash &&`）；PoC 目录已删（`CLEAN`） |
+
+#### 27.4.6 dsh-phoenix 循环（step 4）
+
+- **接线核对**：`dsh-phoenix` 与 dsh-ros2 全家仍以 **`link:`** 装在 web profile
+  （`~/.dsh/profiles/web/node_modules/dsh-ros2-core -> …/packages/core`），本轮未改动线。
+- **状态文件**：`DSH_PHOENIX_STATE_FILE=/home/stvli/tmp/dsh-phoenix-state.json`（由 systemd unit 给出）。
+- **本轮需不需要重启？——需要，且理由是"真的改了运行时"**：`packages/core/lib/*.js`、`packages/vision/lib/*.js`
+  都变了，而跑着的进程（PID 2076，10-15 18:34 loaded，**本轮动手前**）加载的是旧 `lib/`。
+  已核实**新门确实进了构建产物**：`lib/gui.js` 有 `DEFAULT_ALLOWED_APPLICATIONS`(2)、
+  `lib/tools.js` 有 `'ros2_workspace'` 审批(1)、`lib/vision.js` 有 `sniffImageMime`(2)。
+- **登记 gen-29**：按既有最小失败面（一个空实现的动态 plugin + `cordis_run`）作为**本轮最后一个动作**登记
+  （`rsttrg-1/pkg-1`，空 `apply()`，不注册 service/event/tool/timer ⇒ 无副作用需要回收）：
+
+  ```text
+  Oct 15 18:49:03  [dsh-phoenix] cordis tool: cordis_run
+  Oct 15 18:49:06  [dsh-phoenix] restart requested (gen 29): plugin-change
+  ```
+
+  ```json
+  { "generation": 29, "lifecycleState": "deferred", "goalId": null,
+    "pendingResume": false, "resumeAttempt": 0,
+    "deferDeadline": 1792062246551, "updatedAt": 1792061346551, "coalesced": false }
+  ```
+
+  `deferDeadline − updatedAt = 900000 ms` ⇒ 正好是文档化的 **900 s 硬期限**（与第十四～二十一轮逐字一致），
+  `coalesced: false`（本轮只有一次激活）。**落地（`executing deferred restart (gen 29)` → 新进程 `loaded`）
+  留给下一轮开工时的 journal 确认**。
+
+### 27.5 本轮发现
+
+1. **【已修·真实·最有价值·扫描器 0 提示】** `ros2_workspace use` 无审批地让 **bash 执行 agent 指定的文件**，
+   且作用于**本进程所有会话**的后续每条命令——比要审批的 `ros2_run` 更强（§27.4.2）。实机复现 marker 以 uid=1000 落盘。
+   **根因是同一种分类错误**：注释宣称"会话内/内存态/只读（L1）"，掩盖了真实权限（第二十一轮 `ros2_gui_interact` 同因）。
+2. **【已修·真实·被连续三轮误判】** VLM 两条 egress 接受**任意路径**并把字节 POST 到第三方网关，
+   MIME 还按扩展名猜（未知→`image/png`）。CodeQL 从建基线起就报了 **#28/#29**，
+   三轮都记成"by design"——**"读图是功能"只回答了"读"，没回答"路径该不该任意"**（§27.4.3）。
+3. **【新增教训·CodeQL 反向抓我】** 首推 4 条 high 全是**我自己**的：3 条真（可预测 `/tmp` fixture）+
+   1 条误报（`fs.open` 是写型 sink）。**"新告警"必须分三类**：真新问题 / 被新代码触发的误报 / 行号漂移（§27.4.4）。
+   处理完之后基线还**变好了**（10 → 8）。
+4. **【闭环·跨轮】** 上一轮唯一未闭环观测 gen-28 **逐字命中**（§27.2），且 PoC 反向印证了"跑着的是旧 lib"。
+5. **【不沿用继承结论】** 上一轮"密钥 0"是继承来的；本轮自己扫了一遍，**先扫出 2 条命中**——
+   查下去发现**是我自己刚写的测试 fixture 里放了字面量 PEM 头**（不是真密钥）。
+   这正是仓库自己抱怨过的"噪声淹没信号"，于是把 fixture 改成不含 PEM 标记的载荷，**再扫 0 命中**（§27.3）。
+6. **【未变·如实】** audit prod/含 dev 干净、Dependabot 0、发布面 9/9、`ros2_env_check` 对账全绿、
+   Python/TS 执行面与既有防线回归通过。**唯一"正在发生"的风险仍是 VLM 网关明文 `http://`**（第十四轮 #38，属运维决定）。
+7. **【边界·如实】** 本轮**改了**运行时行为（`ros2_workspace` 会多一次审批提示、非图片不再上传），
+   因此**不能**声称"只改了文档"；`lib/` 变了 ⇒ 必须 gen-29 重载才在跑着的 dsh 里生效（§27.4.6）。
+8. **【卫生】** 远程分支保持**只有 `main`**（PR #76 合入即删）；本地无遗留分支。
+
+### 27.6 本轮最有价值的三个"读法"
+
+1. **扫描器全绿时，去看"谁能执行 / 谁能外发"，再问它凭什么免审批。**
+   本轮两处发现：一处扫描器**完全没提**（`ros2_workspace`），一处**报了三轮却被理由绕开**（VLM 路径）。
+   上一轮 §6 第 6 条要求的这张对照表**连续两轮都是唯一产出真实缺陷的动作**——它应该成为每轮固定动作，
+   而不是"没有告警时的备选"。
+2. **"by design"必须回答**被问的那个问题**。** `js/file-access-to-http` 的既有理由"读图就是功能"
+   对**读**是成立的，对**路径是否该无限**是不成立的。写"by design"时要把**问题**也抄一遍，
+   否则下一个人只会读到结论、读不到它没覆盖的范围。
+3. **扫描器抓到"新告警"时，先分三类**（真新问题 / 新代码触发的误报 / 行号漂移）。
+   本轮 4 条 high 全是我自己的，但三类处理方式完全不同；把三类混为一谈就会把一次**有效的**质量门
+   误读成"工具在烦人"。同理：**自己造的 fixture 也要算进扫描面**——一句 `-----BEGIN … PRIVATE KEY-----`
+   会让所有密钥扫描器**永远**报下去。
+
+### 27.7 结论与下一步建议
+
+- **交付**：**1 个 PR 合入 `main`**——**#76**（两枚 `fix(security)` + 一枚 `docs(safety)`，**CI/CodeQL 5/5 绿**），
+  `main` **`757aa17` → `412e49f`**；用例 **371 → 375**（+4）；CodeQL open **10 → 8**（**改善**）；
+  audit prod/含 dev 干净；密钥 0；发布面 **9/9 CLEAN**；Dependabot 0；**open issue / open PR 均为 0**；远程分支仅 `main`。
+- **线上价值**：堵住两条**不需要审批就能进宿主/出宿主**的路径——
+  ① `ros2_workspace use` 从此要人确认（`show`/`reset` 照旧免审批，`ros2-bringup-recovery` 的既有配方
+  **只多一次提示**，功能不减）；② 文档承诺"path to a PNG/JPEG/WebP/GIF image"从"承诺"变成"强制"，
+  非图片文件再也发不出去。
+- **明确没有做的事（以及理由）**：
+  1. **没有**把 `sessionRosSetup` 改成按会话隔离——那是新设计（要在 ~60 个调用点传会话键），
+     本轮只把措辞改成如实的 process-wide 并登记 §5。
+  2. **没有**给 `ros2_screenshot` / `ros2_image_snapshot` 的任意 `output` 路径加门——影响是完整性不是 RCE，
+     §5 已登记，留给单独一轮。
+  3. **没有**动 `ros2_gui_start` / `ros2_gui_close` / `ros2_observe`——应用名是 enum，非任意命令（与第二十一轮同判断）。
+  4. **没有**实现审计 JSONL（§18 晚批）。
+- **待运维**：
+  1. **确认 gen-29 落地**（下一轮开工看 journal 的 `restart requested (gen 29)` →
+     `executing deferred restart (gen 29)` → `loaded`），并在重载后**实测新门**：
+     对一个临时 PoC 工作区调 `ros2_workspace use`，应**弹出审批**；在无审批服务的会话里应**直接 `APPROVAL_DENIED`**
+     （即本轮 §27.4.2 的 PoC 重跑一次，这次期望"被拦"）。
+  2. 视需要决定 VLM 网关的 `https://` / 回环迁移（第十四轮以来的老项）。
+- **下次维护建议**：
+  1. **继续做"执行面 × 审批面"对照**（§27.4.1 的 A/B 两张表），三层扫描（audit/CodeQL/密钥/发布面）照旧但**不作为主产出**。
+  2. **闭环 gen-29 + 重跑一次 §27.4.2 的 PoC**（这次期望被审批门拦住）——**要有可判定的判据**。
+  3. **读 §5 当待办清单**：本轮新增"`sessionRosSetup` 是进程级"一条；已解决的条目要删。
+  4. **自己写的 fixture 也算扫描面**：别在仓库里留字面量 PEM 头之类的"永久噪声"。
+  5. **CodeQL 报"新告警"先分三类**再下结论（§27.4.4）。
+  6. `pnpm audit` 一律走脚本；`gh` 失败先重试再换 REST（§27.3 的教训）；**合入即删分支**。
