@@ -6,7 +6,7 @@
 >
 > **第二十一轮 2026-10-13（§26，本轮）：0 open issue / 0 open PR → 走 step 5；先闭环上一轮唯一的未闭环观测（gen-27 逐字落地于 10-12 12:40:48，且 `ros2_env_check` 不再报 `missingSources` = issue #40 的最终判据达成）→ 安全扫描沿用同口径全绿（audit prod/含 dev 干净、CodeQL 10 不变、密钥 0、发布面 9/9 CLEAN、Python/TS 执行面与既有防线逐条回归）→ **但真正的高价值发现不是扫描器给的**：把"每个能执行/输入的接口"与"审批面"对照后，发现 `ros2_gui_interact` 可以在**无审批、无目标限制**下把任意按键/文本送进**任意窗口**（选中终端即宿主机命令执行），而更窄的 `ros2_run`/`ros2_service_call` 反而都要审批；且这本是仓库**自己**在 `docs/safety-todo.md` §17 / 验收 #11 决定过、却一直未落地的事（README 还反过来写着"no approval, same as other L3 tools"）→ 落地 `fix(security)`：默认应用白名单（rviz2/rqt/rqt_graph，可配 `guiAllowedApplications`）+ 按**解析后**窗口标题判定 + 白名单外（含不传 `windowTitle`）**先审批**且 fail-closed；用例 **362 → 371**（+9，且删掉 gate 块会让 3 条断言当场变红）；PR #73 CI/CodeQL **5/5 绿**后合入，`main 845f04f → 4ab647c`，并登记 gen-28 让这**真实的运行时变更**（`lib/` 变了）在跑着的 dsh 里生效。**
 
-> **第二十二轮 2026-10-15（§27，本轮）：0 open issue / 0 open PR → 走 step 5；先闭环上一轮唯一的未闭环观测（gen-28 于 10-13 04:19:38 `loaded`，state 为 `running`、`deferDeadline: 0` —— 逐字命中）→ 安全扫描沿用同口径（audit prod/含 dev 干净、Dependabot 0、密钥 0、发布面 9/9、`ros2_env_check` 实时对账全绿）→ **高价值发现依旧不是扫描器给的**，而是上一轮 §6 第 6 条明确要求的"执行面 × 审批面"对照：`ros2_workspace use <ws>` 把命令前缀换成 `source <ws>/install/setup.bash` 却**无审批**——而 source 即**执行**该文件，且覆盖作用于**本进程所有会话**后续每一条命令，比要审批的 `ros2_run` 更强（实机复现：PoC setup.bash 的 marker 以 uid=1000 写入）→ 落地 `fix(security)` 加审批门 + fail-closed；顺带查出**同类第二处**：`ros2_vision_describe` / `ros2_vlm_analyze` 的 `imagePath` 不做任何校验就把文件 base64 后 POST 到第三方网关（旧逻辑按扩展名猜 MIME、未知扩展名回落 `image/png`）——CodeQL 的 `file-access-to-http` 报了**三轮**都被当作"by design"放过，**没人问过路径该不该无限** → 落地按**文件内容**（magic bytes）判定，TS/Python 两侧各一道；用例 **371 → 375**（+4；两处防线各自删掉都会让 2 条断言当场变红）；**CodeQL 首跑抓出我自己引入的 4 条告警**（3 条真实 = 测试用可预测 `/tmp/<name>`、1 条误报 = `fs.open` 被当写型 sink）→ 改用 `mkdtempSync` + 有界 `createReadStream` 后 **5/5 绿**，且顺带把 `tools.spec.ts` 的两条**存量**告警一并关掉，**CodeQL open 10 → 8**；PR #76（修复）与 #77（本记录 + 测试去噪）先后合入，`main 757aa17 → 412e49f → 301224e`，登记 gen-29（本轮的 `lib/` 变更要在跑着的 dsh 里生效）。**
+> **第二十二轮 2026-10-15（§27，本轮）：0 open issue / 0 open PR → 走 step 5；先闭环上一轮唯一的未闭环观测（gen-28 于 10-13 04:19:38 `loaded`，state 为 `running`、`deferDeadline: 0` —— 逐字命中）→ 安全扫描沿用同口径（audit prod/含 dev 干净、Dependabot 0、密钥 0、发布面 9/9、`ros2_env_check` 实时对账全绿）→ **高价值发现依旧不是扫描器给的**，而是上一轮 §6 第 6 条明确要求的"执行面 × 审批面"对照：`ros2_workspace use <ws>` 把命令前缀换成 `source <ws>/install/setup.bash` 却**无审批**——而 source 即**执行**该文件，且覆盖作用于**本进程所有会话**后续每一条命令，比要审批的 `ros2_run` 更强（实机复现：PoC setup.bash 的 marker 以 uid=1000 写入）→ 落地 `fix(security)` 加审批门 + fail-closed；顺带查出**同类第二处**：`ros2_vision_describe` / `ros2_vlm_analyze` 的 `imagePath` 不做任何校验就把文件 base64 后 POST 到第三方网关（旧逻辑按扩展名猜 MIME、未知扩展名回落 `image/png`）——CodeQL 的 `file-access-to-http` 报了**三轮**都被当作"by design"放过，**没人问过路径该不该无限** → 落地按**文件内容**（magic bytes）判定，TS/Python 两侧各一道；用例 **371 → 375**（+4；两处防线各自删掉都会让 2 条断言当场变红）；**CodeQL 首跑抓出我自己引入的 4 条告警**（3 条真实 = 测试用可预测 `/tmp/<name>`、1 条误报 = `fs.open` 被当写型 sink）→ 改用 `mkdtempSync` + 有界 `createReadStream` 后 **5/5 绿**，且顺带把 `tools.spec.ts` 的两条**存量**告警一并关掉，**CodeQL open 10 → 8**；本轮 3 个 PR（**#76** 修复 · **#77** 本记录+去噪 · **#78** 引用修正）全部合入，`main` 起点 `757aa17`、修复后 `412e49f`，登记 gen-29（本轮的 `lib/` 变更要在跑着的 dsh 里生效）。**
 
 本文件记录 dsh-ros2 插件的一次完整日常维护循环：**查 issue → 评估建议 → 分支开发 → 验证 → 推送 → 交付维护文档**。每次维护在下方追加一节。
 
@@ -5326,9 +5326,12 @@ Oct 13 04:19:38  [dsh-phoenix] loaded (graceful restart + client reconnect + lif
 
 ### 27.7 结论与下一步建议
 
-- **交付**：**2 个 PR 合入 `main`**——**#76**（两枚 `fix(security)` + 一枚 `docs(safety)`，**CI/CodeQL 5/5 绿**）
-  `main` **`757aa17` → `412e49f`**，随后 **#77**（本记录 + `test(vision)` 去噪，**CI/CodeQL 5/5 绿**）
-  `main` **`412e49f` → `301224e`**；用例 **371 → 375**（+4）；CodeQL open **10 → 8**（**改善**）；
+- **交付**：本轮 **3 个 PR 全部合入 `main`**（**#76** 两枚 `fix(security)` + 一枚 `docs(safety)`；
+  **#77** 本记录 + `test(vision)` 去噪；**#78** 本记录内的引用修正），CI/CodeQL **逐一 5/5 绿**。
+  `main` 起点 **`757aa17`**，修复 PR 后为 **`412e49f`**。
+  **故意不写"本轮终点 SHA"**：记录自身所在的 docs PR 会把 `main` 继续前推，
+  写死的终点每加一个 docs PR 就过期一次——正是第七～八轮"文档计数漂移"的同一类问题。
+  用例 **371 → 375**（+4）；CodeQL open **10 → 8**（**改善**）；
   audit prod/含 dev 干净；密钥 0；发布面 **9/9 CLEAN**；Dependabot 0；**open issue / open PR 均为 0**；远程分支仅 `main`。
 - **线上价值**：堵住两条**不需要审批就能进宿主/出宿主**的路径——
   ① `ros2_workspace use` 从此要人确认（`show`/`reset` 照旧免审批，`ros2-bringup-recovery` 的既有配方
