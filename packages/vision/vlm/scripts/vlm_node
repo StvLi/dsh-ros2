@@ -17,7 +17,6 @@ API key comes from parameters or the VLM_API_KEY env var, never logged.
 
 import base64
 import json
-import mimetypes
 import os
 import sys
 import time
@@ -44,9 +43,27 @@ LATEST_QOS = QoSProfile(
 )
 
 
-def image_mime(path: str) -> str:
-    guess, _ = mimetypes.guess_type(path)
-    return guess if guess and guess.startswith("image/") else "image/png"
+# Magic numbers for the four formats the gateway accepts. `image_path` is
+# caller-chosen and the bytes are shipped to a third-party endpoint, so the
+# CONTENT decides — never the extension, which any file can carry. Labelling
+# whatever we were handed `image/png` (the previous behaviour) turned this
+# service into "read any readable file and POST it off-host" without approval.
+_IMAGE_MAGIC = (
+    (b"\x89PNG\r\n\x1a\n", "image/png"),
+    (b"\xff\xd8\xff", "image/jpeg"),
+    (b"GIF87a", "image/gif"),
+    (b"GIF89a", "image/gif"),
+)
+
+
+def sniff_image_mime(head: bytes) -> str:
+    """Image type from the leading bytes, or "" when it is not an image."""
+    for magic, mime in _IMAGE_MAGIC:
+        if head.startswith(magic):
+            return mime
+    if len(head) >= 12 and head.startswith(b"RIFF") and head[8:12] == b"WEBP":
+        return "image/webp"
+    return ""
 
 
 def call_vlm(base_url: str, api_key: str, model: str, image_bytes: bytes, mime: str, prompt: str) -> str:
@@ -110,9 +127,18 @@ class VlmNode(Node):
                 source = "(inline)"
             elif request.image_path:
                 image_path = request.image_path
+                # Read the header first so a non-image is refused WITHOUT
+                # loading the whole file: only a real image ever reaches
+                # call_vlm. The trailing read() picks up the remaining bytes.
                 with open(image_path, "rb") as fh:
-                    image = fh.read()
-                mime = image_mime(image_path)
+                    head = fh.read(12)
+                    mime = sniff_image_mime(head)
+                    if not mime:
+                        raise ValueError(
+                            "not a supported image (PNG/JPEG/GIF/WebP); "
+                            f"refusing to upload {image_path}"
+                        )
+                    image = head + fh.read()
                 source = image_path
             else:
                 raise ValueError("provide image_path or image_bytes_b64")
