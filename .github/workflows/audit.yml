@@ -1,0 +1,90 @@
+# Supply-chain re-check on a schedule — the half nobody was watching.
+#
+# WHY THIS EXISTS (round 23 of the maintenance log, 2026-10-26)
+#
+# Four advisories against vite@7.3.6 were published on 2026-10-20/21
+# (GHSA-9jrq-w75r-8gcw low · GHSA-rq7h-c2jc-7f22 moderate ·
+# GHSA-vfpm-58rq-9qcg moderate · GHSA-587h-7wmj-h5pm high). Five days later
+# nothing in this repository had said a word about them, and here is why — each
+# existing channel is blind to this exact shape, for a *different* reason:
+#
+#   ci.yml `pnpm run audit`   prod graph only, and it only runs on a push. No
+#                             push happened between the advisory and the next
+#                             maintenance run, so the gate never looked.
+#   ci.yml `pnpm run test`    unaffected — the tree still builds and the suite
+#                             still passes with a vulnerable dev-server in it.
+#   CodeQL                    scans code we wrote, not the dependency graph.
+#   Dependabot alerts         DID fire — and opened no PR, because the security
+#                             update run failed three times on 2026-10-23/24.
+#                             `vite` reaches this workspace only as a *peer* of
+#                             vitest, with no importer edge to bump.
+#   `pnpm run audit:all`      would have caught it, and is local-only, so it
+#                             runs exactly as often as someone remembers to.
+#
+# The alert channel worked and the fix channel did not, and the one gate that
+# could see the finding was manual. This workflow is that gate, unattended.
+#
+# SCOPE — deliberately narrow, so it stays a signal:
+#
+#   `pnpm run audit`          prod graph, high/critical (= the CI gate, verbatim)
+#   `pnpm run audit:dev-high` dev graph, high/critical only
+#
+# High/critical only on the dev side, on purpose. The dev half of this graph is
+# build tooling, and its advisory stream is dominated by Windows-only and
+# low/moderate dev-server issues (launch-editor, server.fs paths) that no
+# consumer of these packages can reach. Gating on those would paint this job red
+# permanently, which is the documented way to make a real finding invisible.
+# Severities below high stay in `pnpm run audit:all`, which a maintainer runs.
+#
+# An unfixable advisory is handled in the open, not by deleting this job: record
+# the GHSA id and the reason in `pnpm.auditConfig.ignoreGhsas` in the root
+# package.json, which `pnpm audit` honours and reviewers can diff.
+#
+# No `pull_request` trigger. A dependency advisory is a property of the
+# repository, not of one author's patch — failing every PR until someone bumps
+# a transitive pin would block unrelated work. Weekly + on demand is enough to
+# keep the lag under a maintenance cycle.
+
+name: Supply chain
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    # Weekly, Monday — same day as CodeQL, a different minute so the two jobs do
+    # not queue behind each other.
+    - cron: '41 2 * * 1'
+  workflow_dispatch:
+
+# Least privilege: this workflow reads the lockfile and calls the advisory
+# endpoint. It never writes to the repository.
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # Same reason as codeql.yml: a Dependabot-triggered run gets a read-only
+    # token and would add constant noise to dependency PRs. The merged result
+    # gets audited on the push to main that follows.
+    if: github.actor != 'dependabot[bot]'
+
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.22.0  # must match the root package.json packageManager field
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: pnpm
+
+      # The advisory endpoint only exists on registry.npmjs.org; the audit
+      # scripts pin it, so a mirror in ~/.npmrc cannot turn this into
+      # ERR_PNPM_AUDIT_ENDPOINT_NOT_EXISTS. Install is needed for the lockfile
+      # to be materialised, nothing else in this job builds the tree.
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run audit
+      - run: pnpm run audit:dev-high
