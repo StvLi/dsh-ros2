@@ -236,8 +236,62 @@ $ pnpm run build         # 全绿
    它是**普通 dependencies**（不是 peer），所以插件会从自己的 `node_modules` 解析 3.18.4，
    即进程里存在**两份 schemastery**。schema 对象是鸭子类型，本轮**没有观测到**故障，
    但"仓库比宿主新"这种方向与规则 A 相反，值得下一轮带着证据再判。
+   > **第二十三轮已带证据判定（本条到此为止）。** 证据来自 Dependabot PR #82
+   > （floor `^3.18.4` → `^3.18.5`）：把 floor 抬到高于**开发依赖链**解析出的 3.18.4 之后，
+   > 工作区里就同时存在 `schemastery@3.18.4`（来自 `dsh-tools@0.1.0-rc.6 → dsh-invariants
+   > → schemastery`）与 `3.18.5`（来自 9 个包自己的 dependencies）两份副本，
+   > 于是 4 个包的**声明产出**直接编译失败：
+   > `error TS2883: The inferred type of 'Config' cannot be named without a reference to
+   > 'Schema' from …schemastery`. **结论：floor 不能高于开发依赖链解析出的那一份**，
+   > 否则"类型只声明一次"的前提就没了。PR #82 因此应当**拒绝**（它也没有任何功能变更：
+   > 3.18.4 与 3.18.5 的 `lib/types/index.d.ts` 逐字节相同，唯一差异是 cosmokit
+   > `~1.8.5` → `~1.8.6`）。复现方式见维护日志第二十三轮。
 2. **`dsh-tools@0.1.0-rc.6` 的运行期 import 会把 9 个 harness 包拉进仓库的 `node_modules`**
    （证明 2 暴露）。也就是除 harness 自己那份之外，还有一份平行副本。
    当前工作正常，但这决定了"关掉 peer 自动安装"这条路走不通。
 3. **本文所有数字都可以独立重算**——凡是区间语义的结论都附了可复制的 `node -e` 命令，
    凡是安装行为都附了真实报错。
+
+## 规则 D · peer 解析出来的开发工具要显式声明下界（第二十三轮新增）
+
+规则 A/B/C 管的是**自己写的**声明。还有一种版本**没有任何 importer 写它**：peer。
+
+`vitest` 把 `vite` 声明为 **peer**（`^6.4.0 || ^7.0.0 || ^8.0.0`，非 optional），而本工作区
+没有任何包声明过 `vite`。pnpm 于是按"自动安装 peer"的规则，在写 lockfile 那一刻挑了当时
+最新的 7.x —— `vite@7.3.6`。这个版本随后被 2026-10-20/21 公布的四条公告覆盖
+（`GHSA-9jrq-w75r-8gcw` low / `GHSA-rq7h-c2jc-7f22` moderate / `GHSA-vfpm-58rq-9qcg` moderate /
+`GHSA-587h-7wmj-h5pm` high，全部修在 **7.3.7**）。
+
+**为什么三个自动渠道都没解决它：**
+
+| 渠道 | 结果 | 原因 |
+| --- | --- | --- |
+| `pnpm update vite` | **no-op** | peer 不是任何 importer 的依赖边，`update <pkg>` 没有可改的 specifier |
+| Dependabot 版本更新 | 没开 PR | 同上：没有 importer 可改 |
+| Dependabot **安全**更新 | **连跑三次全失败**（2026-10-23/24） | 同上；它只能改 lockfile，改不动一个没有边的包 |
+| `pnpm run audit:all` | ✅ 抓到了（5 条） | 但只在本地手动跑，没人跑就等于没有 |
+
+**规则 D：凡是"只有 peer 边"的开发工具，必须在 `pnpm-workspace.yaml` 的 `overrides`
+里写下界，并在注释里写清"为什么不能用 `parent>child` 收窄"。** 本轮落地：
+
+```yaml
+overrides:
+  'postcss>source-map-js': '^1.2.2'   # 有 importer 边 ⇒ 可以按父包收窄
+  'vite': '^7.3.7'                    # 只有 peer 边 ⇒ 无法收窄，只能全局声明
+```
+
+可证伪：把 `'vite': '^7.3.7'` 删掉、lockfile 回到 `vite@7.3.6`，则
+`pnpm audit --dev --audit-level high` **退出 1** 并报出那条 high；加回去则
+`No known vulnerabilities found`。两个方向都实测过（第二十三轮）。
+
+## 防复发 2 · 定时复核（第二十三轮新增）
+
+上面那张表真正的缺口不是"哪个命令不好用"，而是**没有任何东西在无 push 的情况下复核依赖图**：
+CI 只在 push 时跑，CodeQL 只读源码，Dependabot 报警了但修不动。于是新增
+`.github/workflows/audit.yml`：每周一 `cron: '41 2 * * 1'`（与 CodeQL 同一天、不同分钟）
+跑 `pnpm run audit` + `pnpm run audit:dev-high`（新增脚本，dev 图只卡 high/critical）。
+
+只卡 high/critical 是刻意的：dev 图的公告流被 Windows-only、dev-server 类的中低危塞满
+（launch-editor、`server.fs` 路径），而这些包的消费者根本到不了那些代码路径。
+把它们也做成门禁，就等于把这条 job 永久涂红——那正是"噪声淹没信号"的教科书做法。
+确实无解的那一条，写进 `pnpm.auditConfig.ignoreGhsas` 并留下理由，而不是删掉这个 job。
