@@ -5552,6 +5552,13 @@ Oct 13 04:19:38  [dsh-phoenix] loaded (graceful restart + client reconnect + lif
 `mkdirSync` 与 `writeFileSync` 之间先把路径建好（或放一个符号链接）。本轮全部改成 `mkdtempSync`，
 并给新目录补 `afterEach` 清理（固定名是复用的、`mkdtemp` 是新建的，不加清理就会攒）。
 
+**本轮的一个自身失误（如实登记）**：这份 `afterEach` 清理**漏进了提交**——第一次推送的分支里只带着
+`mkdtemp` 改造，而清理还躺在本地工作树里，于是 **#83 先合入了"会攒目录"的那一半**。
+发现于合并后切回 `main` 时 `git checkout` 报 `local changes would be overwritten`。
+补成 **#84**（`test(hygiene): remove the mkdtemp fixtures`）。
+**教训**：`git add <file>` 逐个点名时，**先 `git status` 看一眼有没有同主题的未暂存改动**；
+"本地跑绿了"不等于"推上去的就是跑绿的那份"——与第十九轮"未提交的工作不算工作"同族。
+
 **故意没改的一处（如实）**：`scripts/verification/measure.mjs` 的默认
 `/tmp/dsh-ros2-verification` 是它与 `scripts/verification/system.sh` 之间的**约定坐标**，
 两边必须指同一个目录 ⇒ 它需要的是**属主/权限校验**而不是 `mkdtemp`。半改会把这个验证装置弄坏，
@@ -5626,8 +5633,9 @@ Oct 13 04:19:38  [dsh-phoenix] loaded (graceful restart + client reconnect + lif
 
 ### 28.9 结论与下一步建议
 
-- **交付**：本轮 **1 个 PR（#83）**，10 个提交（`fix(deps)` / `ci(security)` ×2 / `docs(deps)` ×3 /
-  `fix(security)` / `test(hygiene)` / `fix(common)` / `ci(deps)`），另加 **#81 合入** 与 **#82 close**。
+- **交付**：本轮 **2 个 PR**——**#83**（10 个提交：`fix(deps)` / `ci(security)` ×2 / `docs(deps)` ×3 /
+  `fix(security)` / `test(hygiene)` / `fix(common)` / `ci(deps)`）与补漏的 **#84**（1 个提交，
+  见 §28.5.5 末尾的自身失误登记），另加 **#81 合入** 与 **#82 close**。
   `main` 起点 **`5a82f61`**；**故意不写本轮终点 SHA**（记录自身所在的 docs PR 会继续前推 `main`，
   写死的终点每加一个 docs PR 就过期一次——第七～八轮"文档计数漂移"的同一类问题）。
 - **数字**：用例 **375 → 376**（+1 新测试）；CodeQL open **8**（本轮修 4 条，合入后重扫预期 **8 → 4**：
