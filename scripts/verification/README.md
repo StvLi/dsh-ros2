@@ -29,6 +29,29 @@ within the RFC's `<=2 tool calls` budget; it prints a JSON summary on stdout.
 Environment overrides: `VERIF_RUN_DIR`, `VERIF_PROFILES_DIR`, `VERIF_ROBOT`,
 `ROS_SETUP`.
 
+### The run directory must be yours and private
+
+`system.sh` and `measure.mjs` have to agree on one run directory, so it cannot
+be a fresh random name per run — the default is the fixed coordinate
+`/tmp/dsh-ros2-verification`. `/tmp` is world-writable, so **both scripts refuse
+to use that path** unless it is already in a state they would have created:
+it must be a directory (not a symlink), owned by the invoking user, with mode
+`0700` or tighter. A missing directory is created `0700`. A pre-existing
+directory owned by someone else, or with group/other bits set, stops the rig
+with exit code `3` and a message telling you to point `VERIF_RUN_DIR` at a
+directory you own:
+
+```console
+$ VERIF_RUN_DIR=/tmp/shared-verif scripts/verification/system.sh start
+refusing to use the verification run directory /tmp/shared-verif: mode is 755, which is wider than 700
+Point VERIF_RUN_DIR at a directory you own (mode 0700) or remove the existing one.
+```
+
+This is a refusal, not a sandbox: it stops the rig from writing its URDF and
+profile fixtures into a directory someone else prepared (and could read, or
+pre-seed the file names in). It does not make the rig safe to run as a user
+who can already write the path it is told to use.
+
 ## What the system gives you
 
 | origin | node | semantic contribution |
