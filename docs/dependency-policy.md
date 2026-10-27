@@ -274,9 +274,22 @@ $ pnpm run build         # 全绿
 
 `vitest` 把 `vite` 声明为 **peer**（`^6.4.0 || ^7.0.0 || ^8.0.0`，非 optional），而本工作区
 没有任何包声明过 `vite`。pnpm 于是按"自动安装 peer"的规则，在写 lockfile 那一刻挑了当时
-最新的 7.x —— `vite@7.3.6`。这个版本随后被 2026-10-20/21 公布的四条公告覆盖
-（`GHSA-9jrq-w75r-8gcw` low / `GHSA-rq7h-c2jc-7f22` moderate / `GHSA-vfpm-58rq-9qcg` moderate /
-`GHSA-587h-7wmj-h5pm` high，全部修在 **7.3.7**）。
+最新的 7.x —— `vite@7.3.6`。这个版本随后被 2026-10-20/21 公布的五条公告覆盖，全部修在 **7.3.7**
+（下表是 `pnpm run audit:all` 在 `vite@7.3.6` 上**实测**报出的五条，不是抄来的清单）：
+
+| GHSA | 严重度 | 内容 |
+| --- | --- | --- |
+| `GHSA-9jrq-w75r-8gcw` | low | Vite：自定义 middleware 导致的跨源脚本执行 |
+| `GHSA-rq7h-c2jc-7f22` | moderate | Vite：`server.fs.allow` 之外的文件可被服务（非 Windows） |
+| `GHSA-r825-w8mm-5pxw` | moderate | launch-editor：编辑器 CLI 参数误解析 ⇒ 对部分编辑器可任意执行命令 |
+| `GHSA-698v-4r3x-3vcv` | moderate | launch-editor：`escapeCmdArgs()` 在 Windows 上不转义 `%` |
+| `GHSA-587h-7wmj-h5pm` | **high** | launch-editor：`fs.existsSync()` 存在性检查在 Windows 上可被绕过 |
+
+> **一处必须写清的边界**：五条里两条（`698v…`/`587h…`，含唯一那条 high）是 **Windows-only**，
+> 另一条（`r825…`）只在"某些编辑器 + 起 dev server"时可达；而本工作区**从不跑 vite dev server**
+> （vitest 只把 vite 当 transform/pool 后端）。所以这个 floor 的收益是
+> **关掉 5 个告警 + 不给将来启 dev server 的人留地雷**，不是"修掉一条当前可打的洞"。
+> 把它当成后者写，就是第二十二轮那条教训的反面——**结论要覆盖它真正证明的那一段**。
 
 **为什么三个自动渠道都没解决它：**
 
@@ -296,9 +309,19 @@ overrides:
   'vite': '^7.3.7'                    # 只有 peer 边 ⇒ 无法收窄，只能全局声明
 ```
 
-可证伪：把 `'vite': '^7.3.7'` 删掉、lockfile 回到 `vite@7.3.6`，则
-`pnpm audit --dev --audit-level high` **退出 1** 并报出那条 high；加回去则
-`No known vulnerabilities found`。两个方向都实测过（第二十三轮）。
+**可证伪（两个方向都实测过，第二十三轮）**：把 `'vite': '^7.3.7'` 改成精确的 `'7.3.6'`
+重解 lockfile 之后——
+
+| 命令 | `vite@7.3.6` | `vite@7.3.7` |
+| --- | --- | --- |
+| `pnpm run audit`（**prod**, high） | `No known vulnerabilities found`，**exit 0** | 同左 |
+| `pnpm run audit:dev-high`（dev, high） | 报 1 条 high，**exit 1** | `No known…`，exit 0 |
+| `pnpm run audit:all` | **5 vulnerabilities**（1 low / 3 moderate / 1 high），exit 1 | `No known…`，exit 0 |
+
+> **第二行与第一行的对比就是这条规则存在的全部理由**：既有的 CI 门禁是
+> `audit --prod --audit-level high`，它在 `vite@7.3.6` 上**照样绿**——因为 `vite` 只经
+> `vitest` 的 peer 边存在，在被 audit 的图里**不是 prod 依赖**。所以"CI 绿"从来没覆盖过它，
+> 这不属于 CI 失效，而属于**门禁的可见范围从来没包括这一块**。
 
 ## 防复发 2 · 定时复核（第二十三轮新增）
 

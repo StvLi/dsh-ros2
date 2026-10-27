@@ -2,11 +2,22 @@
 #
 # WHY THIS EXISTS (round 23 of the maintenance log, 2026-10-26)
 #
-# Four advisories against vite@7.3.6 were published on 2026-10-20/21
-# (GHSA-9jrq-w75r-8gcw low · GHSA-rq7h-c2jc-7f22 moderate ·
-# GHSA-vfpm-58rq-9qcg moderate · GHSA-587h-7wmj-h5pm high). Five days later
-# nothing in this repository had said a word about them, and here is why — each
-# existing channel is blind to this exact shape, for a *different* reason:
+# Five advisories against vite@7.3.6 were published on 2026-10-20/21, all
+# patched in 7.3.7:
+#   GHSA-9jrq-w75r-8gcw low       Vite: cross-origin script execution via middleware
+#   GHSA-rq7h-c2jc-7f22 moderate  Vite: files outside server.fs.allow served
+#   GHSA-r825-w8mm-5pxw moderate  launch-editor: editor CLI flag misinterpretation
+#   GHSA-698v-4r3x-3vcv moderate  launch-editor: escapeCmdArgs() omits % on Windows
+#   GHSA-587h-7wmj-h5pm high      launch-editor: fs.existsSync() bypass on Windows
+# That list is what `pnpm run audit:all` actually prints against 7.3.6 — measured,
+# not transcribed (docs/dependency-policy.md, rule D). Note two of the five are
+# Windows-only and this workspace never starts a vite dev server, so the floor's
+# value is closing the alerts and defusing a trap for future use, not patching a
+# currently reachable hole.
+#
+# Five days later nothing in this repository had said a word about them, and
+# here is why — each existing channel is blind to this exact shape, for a
+# *different* reason:
 #
 #   ci.yml `pnpm run audit`   prod graph only, and it only runs on a push. No
 #                             push happened between the advisory and the next
@@ -37,8 +48,15 @@
 # Severities below high stay in `pnpm run audit:all`, which a maintainer runs.
 #
 # An unfixable advisory is handled in the open, not by deleting this job: record
-# the GHSA id and the reason in `pnpm.auditConfig.ignoreGhsas` in the root
-# package.json, which `pnpm audit` honours and reviewers can diff.
+# the GHSA id and the reason under `auditConfig.ignoreGhsas` in
+# `pnpm-workspace.yaml`, which `pnpm audit` honours and reviewers can diff.
+#
+# NOT in package.json's `pnpm` field — pnpm 11 stopped reading it, and the
+# mistake is silent rather than loud: `pnpm install` only prints
+#   [WARN] The "pnpm" field in package.json is no longer read by pnpm.
+#          The following keys were ignored: "pnpm.auditConfig".
+# so an ignore written there looks applied, does nothing, and leaves this job
+# red forever — the exact failure mode the workflow exists to prevent.
 #
 # No `pull_request` trigger. A dependency advisory is a property of the
 # repository, not of one author's patch — failing every PR until someone bumps
