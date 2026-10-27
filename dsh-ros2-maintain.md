@@ -5364,7 +5364,7 @@ Oct 13 04:19:38  [dsh-phoenix] loaded (graceful restart + client reconnect + lif
 
 ---
 
-## 28. 维护记录（2026-10-27 22:25 CST / UTC 2026-10-27 14:25 · 第二十三轮：0 open issue / **2 open PR** → 接手前一日被中断会话的在途实现并逐条复算 → 落地"依赖图的 peer 盲区"（`vite` floor + 定时复核）→ 两条 Dependabot PR 一合一度 → 安全扫描挖出**扫描器不报**的 `/tmp/ros-log-<uid>` 与**静默失效**的运维指示 → 用例 375 → 376，CodeQL 基线待合入后 8 → 5）
+## 28. 维护记录（2026-10-27 22:25 CST / UTC 2026-10-27 14:25 · 第二十三轮：0 open issue / **2 open PR** → 接手前一日被中断会话的在途实现并逐条复算 → 落地"依赖图的 peer 盲区"（`vite` floor + 定时复核）→ 两条 Dependabot PR 一合一度 → 安全扫描挖出**扫描器不报**的 `/tmp/ros-log-<uid>` 与**静默失效**的运维指示 → 用例 375 → 376，CodeQL 基线 8 → 3、Dependabot 5 → 0（均为合入后实测））
 
 ### 28.1 起点快照
 
@@ -5438,7 +5438,7 @@ Oct 13 04:19:38  [dsh-phoenix] loaded (graceful restart + client reconnect + lif
 | `pnpm run audit:all`（含 dev，全部严重度） | `No known vulnerabilities found` | 不变 |
 | 密钥（tracked 文件 + 全历史新增行） | **0 条真实密钥**（命中项全在维护日志/测试注释里，是**说明文字**不是密钥） | 不变 |
 | 发布面（tarball：入口 + patch + `robot_profile.py` + 无 `.pyc`） | **9/9 CLEAN**（本地重跑 CI 的同一条命令） | 不变 |
-| CodeQL open | **8**（2 × `file-access-to-http` + 6 × `insecure-temporary-file`） | 持平；**本轮修掉其中 4 条**，待合入后重扫（§28.5 第 5 条） |
+| CodeQL open | **8**（2 × `file-access-to-http` + 6 × `insecure-temporary-file`） | **改善：合入后实测 8 → 3**（修掉 5 条 `insecure-temporary-file`；剩 2 条 by design + `measure.mjs` 那 1 条，见 §28.5.5 与 §5） |
 | **Dependabot open** | **5**（1 high / 3 moderate / 1 low，全部 `vite@7.3.6`） | **上一轮记的是 0** ⇒ 这是本轮真正在修的东西 |
 | `ros2_env_check` 实时对账 | `totalTools: 81` / `totalSkills: 9` / 六 bundle `drifted` 全 `false` / `stale: false` / `missing: []` / `undeclared: []` | 不变 |
 | 线上环境 | `visiblePackages: 450` / `visibleNodes: 0`（无 ROS2 节点在跑，正常） | — |
