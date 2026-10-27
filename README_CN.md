@@ -238,7 +238,7 @@ GUI 生命周期 + 截图 + 多模态视觉（"先能看，再谈动"）+ xdotoo
 | `ros2_gui_list` | 被跟踪会话 + X11 窗口（`wmctrl -lG`） |
 | `ros2_gui_close` | 关闭会话（SIGTERM） |
 | `ros2_screenshot` | 截屏或按窗口标题截图到 PNG |
-| `ros2_vision_describe` | 用配置的多模态模型描述一张图片（Gemini / OpenAI / mock）。路径必须是真正的 PNG/JPEG/GIF/WebP——上传前按**文件内容**（magic bytes）判定 |
+| `ros2_vision_describe` | 用配置的多模态模型描述一张图片（Gemini / OpenAI / mock）。路径必须是真正的 PNG/JPEG/GIF/WebP——上传前按**文件内容**（magic bytes）判定；且**上限 20 MiB**，超出或非常规文件**不被读取**直接拒绝 |
 | `ros2_gui_observe` | 确保 GUI 运行 → 截图 → 返回多模态描述（"看"工作流） |
 | `ros2_gui_interact` | 统一 xdotool 交互：`action=click`（点击/滚动，`button` 4/5 = 滚动）、`action=drag`（拖拽：RViz2 orbit/pan/zoom）、`action=key`（组合键如 `ctrl+shift+r` 或输入文本）。**交互限定在应用白名单内**（默认 `rviz2` / `rqt` / `rqt_graph`，可用 `guiAllowedApplications` 配置）；其它目标——包括不传 `windowTitle`（作用于当前焦点窗口）——**一律先审批** |
 

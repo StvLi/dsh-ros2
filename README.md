@@ -229,7 +229,7 @@ GUI lifecycle + screenshots + multimodal vision ("see first, then move") + xdoto
 | `ros2_gui_list` | Tracked sessions + X11 windows (`wmctrl -lG`) |
 | `ros2_gui_close` | Close a session (SIGTERM) |
 | `ros2_screenshot` | Capture the screen or one window to a PNG |
-| `ros2_vision_describe` | Describe an image with the configured multimodal model (Gemini / OpenAI / mock). The path must be a real PNG/JPEG/GIF/WebP — the **content** is sniffed before anything is uploaded |
+| `ros2_vision_describe` | Describe an image with the configured multimodal model (Gemini / OpenAI / mock). The path must be a real PNG/JPEG/GIF/WebP — the **content** is sniffed before anything is uploaded — and **at most 20 MiB**; a larger or non-regular file is refused without being read |
 | `ros2_gui_observe` | Ensure a GUI is running → screenshot → return the multimodal description (the "see it" workflow) |
 | `ros2_gui_interact` | unified xdotool interaction: `action=click` (click/scroll, `button` 4/5 = scroll), `action=drag` (press-drag-release: RViz2 orbit/pan/zoom), `action=key` (combos like `ctrl+shift+r` or typed text). **Confined to an application allowlist** (default `rviz2` / `rqt` / `rqt_graph`, configurable via `guiAllowedApplications`); any other target — including omitting `windowTitle`, which acts on whatever is focused — **requires approval** |
 
