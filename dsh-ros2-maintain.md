@@ -5591,7 +5591,23 @@ Oct 13 04:19:38  [dsh-phoenix] loaded (graceful restart + client reconnect + lif
   ⇒ 重启**已完整落地**、无残留期限。
 - **本轮需不需要重启？——需要，且理由与上一轮同一类**：`packages/common/lib/runner.js` 变了
   （兜底日志目录 + 退出清理），而当前进程（PID 2115，`Oct 27 22:10:58 loaded`）加载的是**旧** `lib/`。
-- **登记 gen-30**（按既有最小失败面：一个空实现的动态 plugin + `cordis_run`，作为**本轮最后一个动作**）。
+- **登记 gen-30**（按既有最小失败面：一个空实现的动态 plugin `rsttrg-1/pkg-1` + `cordis_run`，
+  作为**本轮最后一个动作**；空 `apply()` ⇒ 没有 service/event/tool/timer 需要回收）：
+
+  ```text
+  Oct 27 22:30:11  [dsh-phoenix] cordis tool: cordis_run
+  Oct 27 22:30:14  [dsh-phoenix] restart requested (gen 30): plugin-change
+  ```
+
+  ```json
+  { "generation": 30, "lifecycleState": "deferred", "goalId": null,
+    "pendingResume": false, "resumeAttempt": 0,
+    "deferDeadline": 1793112314761, "updatedAt": 1793111414761, "coalesced": false }
+  ```
+
+  `deferDeadline − updatedAt = 900000 ms` ⇒ 正好是文档化的 **900 s 硬期限**
+  （与第十四～二十二轮逐字一致），`coalesced: false`。**落地（`executing deferred restart (gen 30)`
+  → 新进程 `loaded`）留给下一轮开工时的 journal 确认。**
 - **另有一条本轮观察**：`Oct 26 10:28:50` 与 `Oct 27 22:10:58` 各有一次 `loaded`，
   都不是本轮的登记产生的——也就是**在途会话被中断后，进程另行重载过**。
   所以"上一轮登记的 generation 已落地"这件事**只能靠 journal 逐字确认，不能靠推测**（本轮照做）。
