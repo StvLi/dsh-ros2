@@ -394,6 +394,20 @@ function probeRosLogFallback(): string | undefined {
   // logs written there and pre-plant the file names those processes create.
   // mkdtemp gives an unpredictable path, created 0700, owned by this user.
   rosLogFallback = makePrivateRosLogDir()
+  if (rosLogFallback !== undefined) {
+    // One directory per process — that is the price of an unguessable name — so
+    // it has to go when this process ends. Without this, every short-lived CLI
+    // or test process leaves an empty directory in the temp root, which is the
+    // regression the old reused fixed path was accidentally avoiding.
+    const dir = rosLogFallback
+    process.once('exit', () => {
+      try {
+        rmSync(dir, { recursive: true, force: true })
+      } catch {
+        // best effort: a locked or already-removed directory is not an error
+      }
+    })
+  }
   return rosLogFallback
 }
 
