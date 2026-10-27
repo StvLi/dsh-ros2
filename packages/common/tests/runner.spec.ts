@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { ensureWritableRosLogDir } from '../src/runner.js'
 
 describe('ensureWritableRosLogDir', () => {
@@ -60,14 +60,23 @@ describe('ensureWritableRosLogDir', () => {
 })
 
 describe('resolveSetup fallback chain + session override', () => {
+  const tempRoots: string[] = []
+  afterEach(() => {
+    const { rmSync } = require('node:fs')
+    for (const dir of tempRoots.splice(0)) rmSync(dir, { recursive: true, force: true })
+  })
+
   function tempSetup(_sub: string): string {
     const { mkdirSync, mkdtempSync, writeFileSync } = require('node:fs')
     const { tmpdir } = require('node:os')
     const { join } = require('node:path')
     // mkdtemp, not `/tmp/dsh-runner-<sub>-<pid>`: a predictable path under a
     // world-writable directory can be pre-created (or symlinked) by any local
-    // user before the test runs. `js/insecure-temporary-file`.
+    // user before the test runs. `js/insecure-temporary-file`. A fresh directory
+    // per call also has to be removed — the old fixed name was reused, so it
+    // never accumulated.
     const dir = mkdtempSync(join(tmpdir(), 'dsh-runner-'))
+    tempRoots.push(dir)
     mkdirSync(`${dir}/install`, { recursive: true })
     writeFileSync(`${dir}/install/setup.bash`, 'true\n')
     return `${dir}/install/setup.bash`

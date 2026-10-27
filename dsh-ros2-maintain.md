@@ -5552,6 +5552,13 @@ Oct 13 04:19:38  [dsh-phoenix] loaded (graceful restart + client reconnect + lif
 `mkdirSync` 与 `writeFileSync` 之间先把路径建好（或放一个符号链接）。本轮全部改成 `mkdtempSync`，
 并给新目录补 `afterEach` 清理（固定名是复用的、`mkdtemp` 是新建的，不加清理就会攒）。
 
+**本轮的一个自身失误（如实登记）**：这份 `afterEach` 清理**漏进了提交**——第一次推送的分支里只带着
+`mkdtemp` 改造，而清理还躺在本地工作树里，于是 **#83 先合入了"会攒目录"的那一半**。
+发现于合并后切回 `main` 时 `git checkout` 报 `local changes would be overwritten`。
+补成 **#84**（`test(hygiene): remove the mkdtemp fixtures`）。
+**教训**：`git add <file>` 逐个点名时，**先 `git status` 看一眼有没有同主题的未暂存改动**；
+"本地跑绿了"不等于"推上去的就是跑绿的那份"——与第十九轮"未提交的工作不算工作"同族。
+
 **故意没改的一处（如实）**：`scripts/verification/measure.mjs` 的默认
 `/tmp/dsh-ros2-verification` 是它与 `scripts/verification/system.sh` 之间的**约定坐标**，
 两边必须指同一个目录 ⇒ 它需要的是**属主/权限校验**而不是 `mkdtemp`。半改会把这个验证装置弄坏，
@@ -5584,7 +5591,23 @@ Oct 13 04:19:38  [dsh-phoenix] loaded (graceful restart + client reconnect + lif
   ⇒ 重启**已完整落地**、无残留期限。
 - **本轮需不需要重启？——需要，且理由与上一轮同一类**：`packages/common/lib/runner.js` 变了
   （兜底日志目录 + 退出清理），而当前进程（PID 2115，`Oct 27 22:10:58 loaded`）加载的是**旧** `lib/`。
-- **登记 gen-30**（按既有最小失败面：一个空实现的动态 plugin + `cordis_run`，作为**本轮最后一个动作**）。
+- **登记 gen-30**（按既有最小失败面：一个空实现的动态 plugin `rsttrg-1/pkg-1` + `cordis_run`，
+  作为**本轮最后一个动作**；空 `apply()` ⇒ 没有 service/event/tool/timer 需要回收）：
+
+  ```text
+  Oct 27 22:30:11  [dsh-phoenix] cordis tool: cordis_run
+  Oct 27 22:30:14  [dsh-phoenix] restart requested (gen 30): plugin-change
+  ```
+
+  ```json
+  { "generation": 30, "lifecycleState": "deferred", "goalId": null,
+    "pendingResume": false, "resumeAttempt": 0,
+    "deferDeadline": 1793112314761, "updatedAt": 1793111414761, "coalesced": false }
+  ```
+
+  `deferDeadline − updatedAt = 900000 ms` ⇒ 正好是文档化的 **900 s 硬期限**
+  （与第十四～二十二轮逐字一致），`coalesced: false`。**落地（`executing deferred restart (gen 30)`
+  → 新进程 `loaded`）留给下一轮开工时的 journal 确认。**
 - **另有一条本轮观察**：`Oct 26 10:28:50` 与 `Oct 27 22:10:58` 各有一次 `loaded`，
   都不是本轮的登记产生的——也就是**在途会话被中断后，进程另行重载过**。
   所以"上一轮登记的 generation 已落地"这件事**只能靠 journal 逐字确认，不能靠推测**（本轮照做）。
@@ -5601,7 +5624,7 @@ Oct 13 04:19:38  [dsh-phoenix] loaded (graceful restart + client reconnect + lif
 4. **【已修·自我纠正】** 在途稿的"floor 不能高于开发链那一份"**过宽**：整图一起动即可单副本。
    规则改成"**被两条链共同解析的包必须整图一起动**"；拒绝 #82 的理由改为"零收益 + 方向相反"（§28.5.4）。
 5. **【已修·卫生】** 剩余 4 处可预测 `/tmp` fixture 改 `mkdtempSync` + 补 `afterEach` 清理
-   （CodeQL `insecure-temporary-file` 基线 6 → 2，待合入后重扫确认）（§28.5.5）。
+   （CodeQL `insecure-temporary-file` 基线 **6 → 1**，合入后重扫**实测**）（§28.5.5）。
 6. **【已处置·Dependabot】** 5 个 open 告警（`vite@7.3.6`）由 `vite` floor 7.3.7 处置；
    两条 Dependabot PR：**#81 合入 / #82 close**，并给 #82 补 `ignore` 防复发。
 7. **【闭环·跨轮】** 第二十二轮的 gen-29 **逐字命中**（§28.6）。
@@ -5626,13 +5649,17 @@ Oct 13 04:19:38  [dsh-phoenix] loaded (graceful restart + client reconnect + lif
 
 ### 28.9 结论与下一步建议
 
-- **交付**：本轮 **1 个 PR（#83）**，10 个提交（`fix(deps)` / `ci(security)` ×2 / `docs(deps)` ×3 /
-  `fix(security)` / `test(hygiene)` / `fix(common)` / `ci(deps)`），另加 **#81 合入** 与 **#82 close**。
+- **交付**：本轮 **2 个 PR**——**#83**（10 个提交：`fix(deps)` / `ci(security)` ×2 / `docs(deps)` ×3 /
+  `fix(security)` / `test(hygiene)` / `fix(common)` / `ci(deps)`）与补漏的 **#84**（1 个提交，
+  见 §28.5.5 末尾的自身失误登记），另加 **#81 合入** 与 **#82 close**。
   `main` 起点 **`5a82f61`**；**故意不写本轮终点 SHA**（记录自身所在的 docs PR 会继续前推 `main`，
   写死的终点每加一个 docs PR 就过期一次——第七～八轮"文档计数漂移"的同一类问题）。
-- **数字**：用例 **375 → 376**（+1 新测试）；CodeQL open **8**（本轮修 4 条，合入后重扫预期 **8 → 4**：
-  剩下 2 × `file-access-to-http`（by design）+ `measure.mjs` 那 1 条 + 尚未重扫的 1 条）；
-  Dependabot open **5 → 0**（合入后自动关闭，它们指向的正是 7.3.6）；audit 三档干净；密钥 0；发布面 9/9；
+- **数字**（合入后**实测**，不是预期）：用例 **375 → 376**（+1 新测试）；
+  **CodeQL open 8 → 3**（修掉 5 条 `insecure-temporary-file`；剩下 2 × `file-access-to-http`
+  ——第二十二轮已按内容判定、属 by design——与 `measure.mjs` 那 1 条，即 §5 登记的那条）；
+  **Dependabot open 5 → 0**（合入后自动关闭——实测，它们指向的正是 7.3.6）；
+  **新增的 `Supply chain` workflow 已在 `main` 的那次 push 上跑过一次并 success（23 s）**；
+  audit 三档干净；密钥 0；发布面 9/9；
   open issue / open PR **0 / 0**（#82 close、#81 与 #83 合入后）。
 - **线上价值**：① 5 条依赖告警的**根因**（peer-only 的 `vite` 没有任何自动渠道能修）被一条 floor 堵住，
   并且**从此每周有东西在没有 push 的情况下复核依赖图**；② 沙箱/受限宿主上真实的
