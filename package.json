@@ -8,6 +8,7 @@
     "test": "pnpm run build && pnpm -r test",
     "build": "pnpm -r build",
     "audit": "pnpm audit --prod --audit-level high --registry https://registry.npmjs.org/",
+    "audit:dev-high": "pnpm audit --dev --audit-level high --registry https://registry.npmjs.org/",
     "audit:all": "pnpm audit --registry https://registry.npmjs.org/"
   },
   "engines": {

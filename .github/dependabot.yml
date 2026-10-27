@@ -46,6 +46,19 @@ updates:
       - dependency-name: "@deepseek-ai/cordis"
       - dependency-name: "@deepseek-ai/dsh-skill"
       - dependency-name: "@deepseek-ai/dsh-tools"
+      # Same class, one step down the graph. 7 of the 9 packages declare
+      # `@deepseek-ai/schemastery`, but its floor is bounded from *below* by a
+      # development-dependency edge nobody here writes:
+      #   @deepseek-ai/dsh-tools → dsh-invariants → schemastery ^3.18.1
+      # A floor bump that moves only the 7 workspace specs leaves that edge on
+      # the old version, so the workspace ends up with two copies and TS2883
+      # fails the build in 4 packages (PR #82, measured). The fix for that would
+      # be to move the whole graph together — and it buys nothing: 3.18.4 and
+      # 3.18.5 ship byte-identical files apart from one cosmokit patch. So the
+      # version is decided by the harness, like the three above: bump by hand
+      # when the harness moves. `ignore` covers version updates only; a real
+      # advisory still comes through as a security update.
+      - dependency-name: "@deepseek-ai/schemastery"
       # Runtime stand-in types must track the `engines` floor (^22.19.0), not
       # the newest major: typing against a newer Node lets a Node-26-only API
       # pass typecheck and then TypeError on the oldest supported runtime.

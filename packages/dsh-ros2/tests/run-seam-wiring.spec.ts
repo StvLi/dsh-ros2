@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context, LoggerService } from '@deepseek-ai/cordis'
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -53,7 +53,9 @@ describe('configured rosSetup reaches the tools that resolve it', () => {
 const tempDirs: string[] = []
 
 function tempWorkspace(tag: string): string {
-  const dir = path.join(tmpdir(), `dsh-runseam-${tag}-${process.pid}`)
+  // mkdtemp, not a `<tag>-<pid>` name under tmpdir(): predictable names can be
+  // pre-created by another local user. `js/insecure-temporary-file`.
+  const dir = mkdtempSync(path.join(tmpdir(), `dsh-runseam-${tag}-`))
   mkdirSync(path.join(dir, 'install'), { recursive: true })
   writeFileSync(path.join(dir, 'install', 'setup.bash'), 'true\n')
   tempDirs.push(dir)

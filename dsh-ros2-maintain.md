@@ -163,8 +163,9 @@ dsh-phoenix 已在 web profile 安装并生效：
 | `docs/feedback-env-recovery.md:97` | 为历史反馈记录（截图数字 166 / core 89→94），非用户入口 | 保留为历史快照 |
 | sidecar / state | sidecar 为“纯模板框架”（reducer 未实现），state 是控制面客户端，且**故意不在聚合包依赖里**（issue #68 的决定） | 符合设计，无动作 |
 | **GUI 白名单只是便利性控制，不是边界**（第二十一轮新增） | `ros2_gui_interact` 现在按**解析后的**窗口标题比对白名单，但任何进程都能改自己的窗口标题 ⇒ 标题匹配**不能证明**窗口身份。真正的边界是审批门（fail-closed）。 | 无动作（已如实写进代码注释 + README + `docs/safety.md`）；若将来要硬边界，需按 xdotool 的 `_NET_WM_PID` 校验属主进程，属新设计 |
-| **未加审批的相邻写面**（第二十一轮如实登记，未修） | `ros2_gui_close`（对自己启动的会话发 SIGTERM/SIGKILL）、`ros2_screenshot` / `ros2_image_snapshot`（`output` 接受任意绝对路径，写入内容固定为 PNG/JPEG） | 前者只作用于**自己跟踪的**会话；后者影响是**完整性**（可用图片字节覆盖任意文件），不是 RCE。若判定需要，单独一轮做"输出路径限定 + 审批" |
+| **未加审批的相邻写面**（第二十一轮如实登记，未修） | `ros2_gui_close`（对自己启动的会话发 SIGTERM/SIGKILL）、`ros2_screenshot` / `ros2_image_snapshot` / `ros2_gui_observe`（`output` 接受任意绝对路径，写入内容固定为 PNG/JPEG） | 前者只作用于**自己跟踪的**会话；后者影响是**完整性**（可用图片字节覆盖任意文件），不是 RCE。若判定需要，单独一轮做"输出路径限定 + 审批" |
 | **`ros2_workspace` 的覆盖是进程级，不是会话级**（第二十二轮如实登记，未修） | `sessionRosSetup` 是 `runner.ts` 里**一个模块级变量**，`use` 改一次就作用于**本进程内所有会话**后续的每一条命令（第二十二轮已给它加审批门 + 把措辞改成 `process-wide`，但**隔离本身没做**）。多会话/多 agent 共用一个 DSH 进程时，A 的切换会影响 B。 | 要真隔离得把会话键从 `exec` 一路传到 ~60 个 `deps.run` 调用点（或引入 per-session 作用域），属**新设计**，单开一轮 |
+| **`scripts/verification/measure.mjs` 的运行目录是固定 `/tmp` 路径**（第二十三轮新增，未修） | 默认 `/tmp/dsh-ros2-verification`，是它与 `scripts/verification/system.sh` 之间的**约定坐标**（两边必须指同一目录）⇒ **不能**直接换 `mkdtemp`。当前：本机其他用户可先建该目录（或做成符号链接），验证装置随后往里写 URDF/画像并 `spawnSync` 消费 | 需要的是**属主 + 权限校验**（存在但属主不是自己、或权限宽于 `0700` 时拒绝并提示设 `VERIF_RUN_DIR`），属验证装置的改动，单开一轮；**半改会把这套装置弄坏** |
 | 审计 JSONL（§18） | 仍**未做**（`docs/safety.md` §4 仍如实写着"本版未做"） | 晚批独立项，不影响边界 |
 
 ---
@@ -172,9 +173,12 @@ dsh-phoenix 已在 web profile 安装并生效：
 ## 6. 下次维护建议动作
 
 1. 若需重载运行时变更：走 §4 的 dsh-phoenix 优雅重启循环，而非手动 `systemctl restart`。
+   （第二十三轮登记 **gen-30**，原因是 `packages/common/lib/runner.js` 变了：ROS 日志兜底目录从
+   `/tmp/ros-log-<uid>` 改为 `mkdtemp` 的 `0700` 私有目录 + 退出清理。重载后应能从
+   `ROS_LOG_DIR` 观察到 `/tmp/ros-log-<随机后缀>`。）
    （第二十二轮登记 gen-29 的原因同样是**真正的运行时变更**：`packages/core/lib/*.js` 与
    `packages/vision/lib/*.js` 都变了——新审批门与图片内容校只有在重载后才会在跑着的 dsh 里生效。）
-2. 全量用例基数：**375 例（374 过 + 1 pty-skip）**。在 pty 可用机器（如 CI）跑 `pnpm run test` 可看到 375/375。
+2. 全量用例基数：**376 例（375 过 + 1 pty-skip）**。在 pty 可用机器（如 CI）跑 `pnpm run test` 可看到 376/376。
 3. 远端分支卫生：第二十轮把 16 → 1；第二十一/二十二轮**合入即删**保持 `origin` 只有 `main`。
 4. 保持“提交前 typecheck+test+build 全绿 + 行为变更补测试 + push 后 CI 绿”的验收线。
 5. **凡文档里出现"已知限制 / 静默 / 无输出"这类词，都当作"待复现的假设"**（第十九轮教训的正面用法）。
@@ -5357,3 +5361,293 @@ Oct 13 04:19:38  [dsh-phoenix] loaded (graceful restart + client reconnect + lif
   4. **自己写的 fixture 也算扫描面**：别在仓库里留字面量 PEM 头之类的"永久噪声"。
   5. **CodeQL 报"新告警"先分三类**再下结论（§27.4.4）。
   6. `pnpm audit` 一律走脚本；`gh` 失败先重试再换 REST（§27.3 的教训）；**合入即删分支**。
+
+---
+
+## 28. 维护记录（2026-10-27 22:25 CST / UTC 2026-10-27 14:25 · 第二十三轮：0 open issue / **2 open PR** → 接手前一日被中断会话的在途实现并逐条复算 → 落地"依赖图的 peer 盲区"（`vite` floor + 定时复核）→ 两条 Dependabot PR 一合一度 → 安全扫描挖出**扫描器不报**的 `/tmp/ros-log-<uid>` 与**静默失效**的运维指示 → 用例 375 → 376，CodeQL 基线待合入后 8 → 5）
+
+### 28.1 起点快照
+
+| 项 | 值 |
+| --- | --- |
+| 当前分支 | `fix/dev-dependency-audit`（**未推送**，3 个提交，2026-10-26 10:36 落盘） |
+| `origin/main` | `5a82f61`（= 第二十二轮终点，工作树干净） |
+| open issue / open PR | **0 / 2**（`#81` vitest 5.0.3→5.0.5、`#82` schemastery 3.18.4→3.18.5） |
+| Dependabot open 告警 | **5**（1 high / 3 moderate / 1 low，全部指向 `vite@7.3.6`） |
+| CodeQL open 告警 | **8**（6 × `insecure-temporary-file` + 2 × `file-access-to-http`） |
+| 工具 / 技能面 | `totalTools: 81` / `totalSkills: 9`（六 bundle，`drifted` 全 `false`） |
+| 用例基线 | **375（374 过 + 1 pty-skip）** |
+| 维护日志 | 停在 §27（第二十二轮，2026-10-15） |
+
+> **起点与以往不同的一点**：工作树里躺着一份**别人（前一日被中断的会话）留下的在途实现**，
+> 而它所指向的"第二十三轮"在维护日志里**并不存在**。本轮的第一件事因此不是扫描，
+> 而是**把这份在途实现当成待验证的假设逐条复算**（§28.2）。这是第十八轮同一情形的重演。
+
+### 28.2 承接在途实现：先复算，再提交
+
+在途分支有 3 个提交，方向清楚：`fix(deps)` 给只有 peer 边的 `vite` 写下界、
+`ci(security)` 加每周定时复核、`docs(deps)` 写规则 D。**先逐条复算，不沿用结论**：
+
+| 在途结论 | 本轮复算结果 |
+| --- | --- |
+| 三个提交装得上、跑得动 | ✅ `pnpm install --frozen-lockfile` + `build` 9/9 + `pnpm -r test` 375 例 + `audit` 三档全绿 |
+| lockfile 只解析一个 `vite@7.3.7` | ✅ 且 `packages/*/node_modules/vitest` 实测链到 `vite@7.3.7` 那份（另一份 7.3.6 是磁盘残留，未被引用） |
+| "floor 不能高于开发依赖链解析出的那一份" | ❌ **过宽，本轮推翻**（§28.5 第 4 条） |
+| "四条公告"清单 | ❌ **数目与 id 都不准**（§28.5 第 3 条） |
+| "无解告警写进 `pnpm.auditConfig`" | ❌ **pnpm 11 已不读该字段 ⇒ 静默失效**（§28.5 第 2 条） |
+| `ros2_workspace use` 已加门 / VLM 上传面已按内容判定 | ✅ 代码在位（`tools.ts` 有 `ros2_workspace` 审批、`vision.ts` 有 `sniffImageMime`） |
+
+**⇒ 正是"复算"这一步产出了本轮 3 条真实缺陷中的 3 条**：在途实现的功能面是对的，
+错的是它**写下来的那几句结论**。**"能跑通"不等于"说得对"** —— 与第二十二轮
+`ros2_workspace` 那条（"注释宣称 L1，掩盖真实权限"）是同一个形状。
+
+### 28.3 open issue / open PR 的判定（step 1 → step 2）
+
+`0 open issue`、`2 open PR`，两条都判了（判据三条：**必要性**＝有没有收益；**合理性**＝这个改法可不可行；
+**方向**＝与规则 A/B/C 是否同向）：
+
+| PR | 提议 | CI | 判定 | 依据 |
+| --- | --- | --- | --- | --- |
+| **#81** | vitest `5.0.3` → `5.0.5` | 2/2 绿 | **合入** | dev-only 工具 patch；peer 区间（`vite ^6.4.0 \|\| ^7.0.0 \|\| ^8.0.0`）逐字未变；含 5.0.4/5.0.5 的 bug fix。已 `--merge --delete-branch` 合入，本地随即 rebase |
+| **#82** | schemastery `3.18.4` → `3.18.5` | **双红** | **close / not planned** | 见下 |
+
+**#82 的完整判定**（三条都实测，评论已发在 PR 上）：
+
+1. **必要性 = 0**：两个 tarball 解开逐字节比 —— 文件清单相同，**除 `package.json` 外全部文件字节相同**
+   （含 `lib/types/index.d.ts`，正是 TS2883 关心的那份声明）；`package.json` 只有 `"version"` 与
+   `@deepseek-ai/cosmokit` `~1.8.5 → ~1.8.6` 两处差异。而 `pnpm audit` 三档在 3.18.4 + cosmokit 1.8.5 上全绿。
+2. **合理性 = 这个改法不可行，但升级本身可行**：CI 双红是
+   `TS2883 ... reference to 'Schema' from '.pnpm/@deepseek-ai+schemastery@3.18.4/…'`（4 个包），
+   报错点名 3.18.4、而这 7 个包声明 `^3.18.5` ⇒ 两份副本。**但只抬 7 个 floor 动不到开发链那条边**
+   （`dsh-tools@0.1.0-rc.6 → dsh-invariants@0.1.0-rc.8 → schemastery ^3.18.1`，lockfile 钉在 3.18.4）。
+   加全局 `overrides: {'@deepseek-ai/schemastery': '^3.18.5'}` 让整图一起动 ⇒ lockfile 只剩
+   **一个** `schemastery@3.18.5`，`build` **全绿**（本轮实测）。所以拒绝的理由**不是**"做不到"。
+3. **方向 = 相反**：宿主提供 `schemastery@3.18.2`，本仓库 floor 已高出两档（§5 残留观察 1），
+   再抬一档只会更远 ⇒ 与规则 A 反向。
+
+**顺带把机械半边补上**：`@deepseek-ai/schemastery` 进 `.github/dependabot.yml` 的 `ignore`
+（与 cordis / dsh-skill / dsh-tools 同组：**版本由宿主决定，harness 动时手工跟**；
+`ignore` 只管版本更新，**安全更新照旧会报**），免得同一条 patch 每周重开一次。
+
+### 28.4 安全扫描（step 5）与既有基线对账
+
+| 面 | 本轮结果 | 与上一轮 |
+| --- | --- | --- |
+| `pnpm run audit`（prod, high） | `No known vulnerabilities found` | 不变 |
+| **`pnpm run audit:dev-high`（本轮新增）** | `No known vulnerabilities found` | **新增门禁** |
+| `pnpm run audit:all`（含 dev，全部严重度） | `No known vulnerabilities found` | 不变 |
+| 密钥（tracked 文件 + 全历史新增行） | **0 条真实密钥**（命中项全在维护日志/测试注释里，是**说明文字**不是密钥） | 不变 |
+| 发布面（tarball：入口 + patch + `robot_profile.py` + 无 `.pyc`） | **9/9 CLEAN**（本地重跑 CI 的同一条命令） | 不变 |
+| CodeQL open | **8**（2 × `file-access-to-http` + 6 × `insecure-temporary-file`） | 持平；**本轮修掉其中 4 条**，待合入后重扫（§28.5 第 5 条） |
+| **Dependabot open** | **5**（1 high / 3 moderate / 1 low，全部 `vite@7.3.6`） | **上一轮记的是 0** ⇒ 这是本轮真正在修的东西 |
+| `ros2_env_check` 实时对账 | `totalTools: 81` / `totalSkills: 9` / 六 bundle `drifted` 全 `false` / `stale: false` / `missing: []` / `undeclared: []` | 不变 |
+| 线上环境 | `visiblePackages: 450` / `visibleNodes: 0`（无 ROS2 节点在跑，正常） | — |
+
+**五个 GHSA 是本轮从 `pnpm run audit:all` 的实跑输出里抄的，不是转述**（严重度以 GitHub 公告页为准）：
+
+| GHSA | 严重度 | 内容 | 平台条件 |
+| --- | --- | --- | --- |
+| `GHSA-9jrq-w75r-8gcw` | low | Vite：自定义 middleware 导致的跨源脚本执行 | — |
+| `GHSA-rq7h-c2jc-7f22` | moderate | Vite：`server.fs.allow` 之外的文件可被服务 | 非 Windows |
+| `GHSA-r825-w8mm-5pxw` | moderate | launch-editor：编辑器 CLI 参数误解析 ⇒ 部分编辑器可任意执行命令 | 部分编辑器 |
+| `GHSA-698v-4r3x-3vcv` | moderate | launch-editor：`escapeCmdArgs()` 不转义 `%` | **Windows-only** |
+| `GHSA-587h-7wmj-h5pm` | **high** | launch-editor：`fs.existsSync()` 存在性检查可被绕过 | **Windows-only** |
+
+**一处必须写清的边界**：五条里两条 Windows-only、一条只在"某些编辑器 + 起 dev server"时可达，
+而**本工作区从不跑 vite dev server**（vitest 只把 vite 当 transform/pool 后端）。
+⇒ 这个 floor 的收益是**关掉 5 个告警 + 不给将来启 dev server 的人留地雷**，
+**不是**"修掉一条当前可打的洞"。把它写成后者，就是第二十二轮那条教训的反面。
+
+#### 28.4.1 "执行面 × 审批面"对照（§6 第 6 条要求的固定动作，第三轮连做）
+
+工具面 **81** 条不变。逐个问**"它凭什么不需要审批"**：
+
+**A. 有审批门的（27 条）**：`moveit_move`、`robot_register`、`robot_topology`、
+`robot_safety_start|lock|unlock`、`ros2_zero_pose_semantics`（**analyze 与 confirm 都过门**，本轮核过）、
+`ros2_run`、`ros2_launch`、`ros2_colcon_build`、`ros2_component`、`ros2_daemon`、`ros2_install`、
+`ros2_interface_create`、`ros2_lifecycle`、`ros2_param_set|delete`、`ros2_process_cleanup`、
+`ros2_rosdep_install`、`ros2_service_call`、`ros2_topic_pub`、`ros2_bag_record|play`、
+`ros2_action_send_goal`、`ros2_vision_set_key`、`ros2_workspace`（第二十二轮新增 —
+本轮实测**在位**：`core/src/tools.ts` 的 `use` 分支有 `requestApproval(deps, exec, 'ros2_workspace', …)`）
+—— 外加**条件门** `ros2_gui_interact`（白名单外才审批）。源码侧共 **35 处** `requestApproval` 调用点。
+
+**B. 无门但"有副作用"的，逐条交代**：
+
+| 工具 | 副作用 | 本轮判断 |
+| --- | --- | --- |
+| **`runner.ts` 的 ROS 日志兜底目录** | `~/.ros/log` 不可写时，把 **`/tmp/ros-log-<uid>`** 作为 `ROS_LOG_DIR` 交给**每一条** ros2 命令 | **发现 1：不可接受，本轮修（§28.5）** |
+| `ros2_screenshot` / `ros2_image_snapshot` / `ros2_gui_observe` | `output` 接受任意绝对路径 | 写入内容固定为 PNG/JPEG 字节 ⇒ 影响**完整性**不是 RCE。§5 既有条目，**本轮不动** |
+| `ros2_vision_describe` / `ros2_vlm_analyze` | 读调用方指定文件 → base64 → POST 第三方网关 | 第二十二轮已改成**按内容判定**（非图片拒绝）；本轮复核代码在位 |
+| `ros2_gui_start/close/observe` | 预设应用生命周期 | 应用名是 **enum**，`close` 只对自己跟踪的会话；维持不加门 |
+| `robot_safety_arbitrate` / `ros2_vision_analyze` | 把关节状态+渲染帧 / 话题最新帧发给 VLM | 只读语义仲裁 / 只读话题；不接受任意文件路径。维持 |
+| `motion_validate` / `moveit_move --planOnly` | 读调用方给的轨迹 JSON路径 | 只读 + 校验，无执行、无外发。维持 |
+
+> **这张表连着三轮都是唯一产出真实缺陷的动作**（第二十一轮 GUI 注入、第二十二轮
+> `ros2_workspace`+VLM 上传面、本轮 ROS 日志兜底目录）——而三层扫描器在前两轮是绿的、
+> 本轮对第三条**一条提示都没有**。
+
+### 28.5 本轮发现与修复
+
+#### 28.5.1 发现 1【已修·真实·扫描器 0 提示】`/tmp/ros-log-<uid>`：可预测的、被全进程复用的 `ROS_LOG_DIR`
+
+- **代码事实**：`runner.ts: probeRosLogFallback()` —— `~/.ros/log` 不可写时
+  `rosLogFallback = '/tmp/ros-log-' + getuid()`，`mkdirSync(recursive)` 后把它作为
+  `ROS_LOG_DIR` 塞进**每一条** `bash -lc 'source … && ros2 …'` 的 env。
+- **为什么可预测就是问题**：`/tmp` 是 1777 粘滞位，**任何本机用户都能先建** `/tmp/ros-log-1000`
+  （或把它做成指向别处的符号链接）。`mkdirSync(recursive)` 对"已存在的目录"不报错，
+  于是这个进程后续写的 ROS 日志**落在别人拥有的目录里**：对方可读，还能预置我们将要创建的文件名。
+- **这不是假想**：本仓库**自己的沙箱化测试**就写不了 `~/.ros/log`，所以兜底是**活路径**——
+  旧代码在 `/tmp` 里真的留下了 `/tmp/ros-log-1000`（本轮实测发现的）。
+- **修法**：`mkdtempSync(tmpdir()/ros-log-…)`（不可预测 + 创建即 `0700` + 属主是自己）；
+  顺带把 `~/.ros/log` 里的**探测文件名**也改成随机后缀（`writeFileSync` 跟随符号链接，
+  固定名有同一个形状）。
+- **副作用自查（本轮自己引入、自己收尾）**：固定路径换成每进程一个目录 ⇒ **目录会攒**。
+  补 `process.once('exit')` 清理。**如实边界**：exit 钩子只管正常退出，
+  vitest 强杀 worker 不会执行它 ⇒ 一次全量测试仍可能留几个空目录（无害，且**不再是可猜的路径**）。
+- **可证伪测试**（新增 1 例）：断言兜底目录 ① 在平台临时根下 ② 权限 `0700`
+  ③ **不匹配** `/ros-log-<数字>$/` ④ 两次调用不是同一个路径。
+
+#### 28.5.2 发现 2【已修·真实·静默失效】运维指示把 `auditConfig` 写在了 pnpm 11 不再读的地方
+
+- **代码事实**：在途实现在 `.github/workflows/audit.yml` 里指示后来者把无解告警记到
+  **`package.json` 的 `pnpm.auditConfig.ignoreGhsas`**。而 pnpm 11 **不再读 `package.json` 的 `pnpm` 字段**
+  ——**本仓库 `pnpm-workspace.yaml` 顶部的注释早就写了这件事**，这条指示恰好违反了同一仓库一行以外的自述。
+- **实测**（两处都写上，问 pnpm 认哪个）：
+
+  ```console
+  $ pnpm install --frozen-lockfile
+  [WARN] The "pnpm" field in package.json is no longer read by pnpm. The following keys were
+         ignored: "pnpm.auditConfig". See https://pnpm.io/settings for the new home of each setting.
+  $ pnpm config list | grep -A3 auditConfig
+    "auditConfig": { "ignoreGhsas": [ "GHSA-test-from-workspace-yaml" ] }   # 只有 workspace.yaml 那份生效
+  ```
+
+- **为什么值得记一笔**：它的失效**是静默的**——ignore 看着写了、其实没生效，job 永远红着，
+  而人以为已经"合法豁免"过了。**这正是这个新 workflow 本身要防的那个失败模式**。
+- **修法**：`audit.yml` 与 `docs/dependency-policy.md` 都改成 `pnpm-workspace.yaml` 的 `auditConfig`，
+  并把上面那段实测附在注释里。
+
+#### 28.5.3 发现 3【已修·真实】公告清单与实际不符（"四条" → 五条，且 id 有两个错）
+
+- 在途稿写的是"四条公告"，其中 `GHSA-vfpm-58rq-9qcg` **确实是一条真实 vite 公告，但 7.3.6 不触发它**；
+  而**真正触发的两条**（`GHSA-r825-w8mm-5pxw`、`GHSA-698v-4r3x-3vcv`）**没写**。
+- 本轮以 `pnpm audit:all` 在 `vite@7.3.6` 上的**实跑输出**为准重写（§28.4 那张表），
+  并补上"两条 Windows-only、本工作区不跑 dev server"的边界。
+  **教训**：清单类的"证据"必须**从命令输出里抄**，从记忆里抄就会错得看不出来。
+
+#### 28.5.4 发现 4【已修·真实·推翻自己前一版结论】"floor 不能高于开发链那一份"是过宽的规则
+
+- 在途稿把 PR #82 的失败总结成一条普适规则：**floor 不能高于开发依赖链解析出的那一份**。
+  本轮实测：**那是 lockfile 惯性的后果，不是硬约束**——整图一起动（全局 override）就只剩一个副本、
+  `build` 全绿（§28.3 第 2 条）。
+- **准确的说法**：**升一条被两条链共同解析的包，必须整图一起动**；只抬其中一侧的 floor，
+  就会得到两份副本和一个 `TS2883`。拒绝 #82 的理由与这条规则**无关**（是"零收益 + 方向相反"）。
+- 这正是第十八轮"修正了自己刚写进 main 的过宽结论"的重演。**规则写得比证据宽，下一个人就会照它做错事。**
+
+#### 28.5.5 发现 5【已修·卫生】剩下的 4 处可预测临时路径（CodeQL 基线的收尾）
+
+第二十二轮把 `packages/core/tests/tools.spec.ts` 里的可预测 `/tmp` fixture 改成了 `mkdtempSync`，
+但**同样形状还留在三个测试文件里**（`common/tests/runner.spec.ts` × 3、`vision/tests/tools.spec.ts`、
+`dsh-ros2/tests/run-seam-wiring.spec.ts`）。pid 不是秘密：别的本机用户可以在
+`mkdirSync` 与 `writeFileSync` 之间先把路径建好（或放一个符号链接）。本轮全部改成 `mkdtempSync`，
+并给新目录补 `afterEach` 清理（固定名是复用的、`mkdtemp` 是新建的，不加清理就会攒）。
+
+**故意没改的一处（如实）**：`scripts/verification/measure.mjs` 的默认
+`/tmp/dsh-ros2-verification` 是它与 `scripts/verification/system.sh` 之间的**约定坐标**，
+两边必须指同一个目录 ⇒ 它需要的是**属主/权限校验**而不是 `mkdtemp`。半改会把这个验证装置弄坏，
+所以登记进 §5 而不是"顺手改一行"。
+
+#### 28.5.6 本轮改了什么、没改什么（边界如实）
+
+| 项 | 结论 |
+| --- | --- |
+| **改了运行时行为** | 是。`packages/common/lib/runner.js` 变了（兜底日志目录的位置与权限、退出清理）⇒ **需要重载**（§28.7） |
+| **没改 L1 只读面** | 所有 `ros2_*_list|info|echo|show|type|find` 仍是只读；`ros2_workspace show/reset` 仍是免审批 |
+| **没改 L2 运动/安全路径** | `moveit_move`、`motion_validate`、`safety_monitor`、审批时序**一行未动** |
+| **依赖面** | vitest 5.0.5（合入）+ `vite` floor 7.3.7（override）；schemastery **不动** |
+| **没做（有意）** | ① `sessionRosSetup` 按会话隔离（新设计）；② `ros2_screenshot`/`ros2_image_snapshot` 的 `output` 路径门（§5）；③ 审计 JSONL（§18 晚批）；④ `measure.mjs` 的 `/tmp` 约定坐标（§28.5.5） |
+
+### 28.6 dsh-phoenix 循环（step 4）
+
+- **接线核对**：`dsh-ros2` 全家仍以 **`link:`** 装在 web profile
+  （`~/.dsh/profiles/web/node_modules/dsh-ros2-core -> …/packages/core`），本轮未动线。
+- **闭环第二十二轮唯一的未闭环观测（gen-29）——逐字命中**：
+
+  ```text
+  Oct 15 18:49:06  [dsh-phoenix] restart requested (gen 29): plugin-change
+  Oct 15 19:01:36  [dsh-phoenix] agent idle; executing deferred restart (gen 29)
+  Oct 15 19:01:48  [dsh-phoenix] loaded (graceful restart + client reconnect + lifecycle)
+  ```
+
+  开工时读 `DSH_PHOENIX_STATE_FILE`（由 **systemd unit 环境变量**给出）：
+  `{"generation": 29, "lifecycleState": "running", "deferDeadline": 0, "pendingResume": false}`
+  ⇒ 重启**已完整落地**、无残留期限。
+- **本轮需不需要重启？——需要，且理由与上一轮同一类**：`packages/common/lib/runner.js` 变了
+  （兜底日志目录 + 退出清理），而当前进程（PID 2115，`Oct 27 22:10:58 loaded`）加载的是**旧** `lib/`。
+- **登记 gen-30**（按既有最小失败面：一个空实现的动态 plugin + `cordis_run`，作为**本轮最后一个动作**）。
+- **另有一条本轮观察**：`Oct 26 10:28:50` 与 `Oct 27 22:10:58` 各有一次 `loaded`，
+  都不是本轮的登记产生的——也就是**在途会话被中断后，进程另行重载过**。
+  所以"上一轮登记的 generation 已落地"这件事**只能靠 journal 逐字确认，不能靠推测**（本轮照做）。
+
+### 28.7 本轮发现（汇总）
+
+1. **【已修·真实·扫描器 0 提示·最有价值】** ROS 日志兜底目录用 **`/tmp/ros-log-<uid>`**：
+   可预测 ⇒ 本机任何用户能先建/符号链接 ⇒ 这个进程的 ROS 日志写进**别人拥有的目录**。
+   而且**本仓库自己的沙箱测试就在走这条路**（旧代码真的留下了 `/tmp/ros-log-1000`）。
+   **根因与第二十一/二十二轮同族**：一行"兜底"代码没人问过"这个路径凭什么是安全的"（§28.5.1）。
+2. **【已修·真实·静默失效】** 新 workflow 的运维指示把 `auditConfig` 写在 pnpm 11 **不再读**的
+   `package.json` 字段里 ⇒ 按它操作**等于没豁免**，job 永远红而人以为已处理（§28.5.2）。
+3. **【已修·真实】** "四条公告"清单与实际不符（一条不触发、漏两条）⇒ 以 `audit:all` 实跑输出重写（§28.5.3）。
+4. **【已修·自我纠正】** 在途稿的"floor 不能高于开发链那一份"**过宽**：整图一起动即可单副本。
+   规则改成"**被两条链共同解析的包必须整图一起动**"；拒绝 #82 的理由改为"零收益 + 方向相反"（§28.5.4）。
+5. **【已修·卫生】** 剩余 4 处可预测 `/tmp` fixture 改 `mkdtempSync` + 补 `afterEach` 清理
+   （CodeQL `insecure-temporary-file` 基线 6 → 2，待合入后重扫确认）（§28.5.5）。
+6. **【已处置·Dependabot】** 5 个 open 告警（`vite@7.3.6`）由 `vite` floor 7.3.7 处置；
+   两条 Dependabot PR：**#81 合入 / #82 close**，并给 #82 补 `ignore` 防复发。
+7. **【闭环·跨轮】** 第二十二轮的 gen-29 **逐字命中**（§28.6）。
+8. **【未变·如实】** audit prod/dev/all 三档干净、密钥 0、发布面 9/9 CLEAN、`ros2_env_check` 对账全绿、
+   工具面 81 / 技能 9。**唯一"正在发生"的老风险仍是 VLM 网关明文 `http://`**（第十四轮 #38，属运维决定）。
+9. **【卫生】** 合入即删：`origin` 上 `#81` 的分支已随合入删除；本轮 `fix/dev-dependency-audit` 合入后同样删除。
+
+### 28.8 本轮最有价值的三个"读法"
+
+1. **"能跑通"和"说得对"是两件事——接手的在途实现要按"假设"复算，不要按"成果"继承。**
+   本轮 3 条真实缺陷**全部**产自复算：实现的功能面（vite floor、定时 workflow）是对的，
+   错的是它**顺手写下的三句结论**（一条过宽规则、一份错清单、一条无效运维指示）。
+   第十八轮同形、第二十二轮 `ros2_workspace` 那条同因。
+2. **扫描器给你的是"清单"，不是"优先级"。** 本轮 Dependabot 报了 5 条（`vite`），
+   全部 Windows-only 或 dev-server-only，而**真正落在活路径上的那条（`/tmp/ros-log-<uid>`）
+   三层扫描器一条都没报**。反过来，CodeQL 那 6 条 `insecure-temporary-file` 全是测试 fixture。
+   ⇒ 每轮固定动作应当是"**执行面 × 审批面**对照 + 把扫描器的清单**分诊**"，而不是"把清单清空"。
+3. **"边界"必须写进结论本身。** 本轮两处：`vite` floor 的收益是"关告警 + 拆地雷"（**不是**修可打的洞）、
+   `mkdtemp` 的代价是"目录会攒，exit 钩子只管正常退出"。
+   把边界写掉，下一个读的人就会把它当成更强的结论去引用——第二十二轮 §27.6 第 2 条
+   （"by design 必须回答被问的那个问题"）的正面用法。
+
+### 28.9 结论与下一步建议
+
+- **交付**：本轮 **1 个 PR（#83）**，10 个提交（`fix(deps)` / `ci(security)` ×2 / `docs(deps)` ×3 /
+  `fix(security)` / `test(hygiene)` / `fix(common)` / `ci(deps)`），另加 **#81 合入** 与 **#82 close**。
+  `main` 起点 **`5a82f61`**；**故意不写本轮终点 SHA**（记录自身所在的 docs PR 会继续前推 `main`，
+  写死的终点每加一个 docs PR 就过期一次——第七～八轮"文档计数漂移"的同一类问题）。
+- **数字**：用例 **375 → 376**（+1 新测试）；CodeQL open **8**（本轮修 4 条，合入后重扫预期 **8 → 4**：
+  剩下 2 × `file-access-to-http`（by design）+ `measure.mjs` 那 1 条 + 尚未重扫的 1 条）；
+  Dependabot open **5 → 0**（合入后自动关闭，它们指向的正是 7.3.6）；audit 三档干净；密钥 0；发布面 9/9；
+  open issue / open PR **0 / 0**（#82 close、#81 与 #83 合入后）。
+- **线上价值**：① 5 条依赖告警的**根因**（peer-only 的 `vite` 没有任何自动渠道能修）被一条 floor 堵住，
+  并且**从此每周有东西在没有 push 的情况下复核依赖图**；② 沙箱/受限宿主上真实的
+  日志目录可预测问题被修掉；③ 两条 Dependabot PR 有了可复用的**判据**（零收益 + 方向 + 整图一致）。
+- **明确没有做的事（以及理由）**：见 §28.5.6 的"没做（有意）"四行。
+- **待运维**：
+  1. **确认 gen-30 落地**（下一轮开工看 journal 的 `restart requested (gen 30)` →
+     `executing deferred restart (gen 30)` → `loaded`），并在重载后确认
+     `ROS_LOG_DIR` 指向 `/tmp/ros-log-<随机>` 且权限 `0700`。
+  2. 视需要决定 VLM 网关的 `https://` / 回环迁移（第十四轮以来的老项）。
+- **下次维护建议**：
+  1. **继续做"执行面 × 审批面"对照**（§28.4.1 的 A/B 两张表）——**第三轮连做，第三轮都是唯一真产出**。
+  2. **接手在途实现时，把它写的每一句结论当假设复算**（§28.8 第 1 条）；本轮 3 条缺陷全来自这一步。
+  3. **清单从命令输出里抄**，别从记忆里抄（§28.5.3）。
+  4. 读 §5 当待办清单：本轮新增 `measure.mjs` 一条；已解决的（schemastery 方向问题）在 §5 就地标注。
+  5. `pnpm audit` 一律走脚本；`gh` 失败**先重试**（本轮 `gh auth` 又是先报 token 无效、
+     第二次自动走 keyring 正常——第二十二轮同一条教训，**已经第二次复现**）；
+     **合入即删分支**。

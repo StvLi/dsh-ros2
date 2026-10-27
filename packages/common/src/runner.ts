@@ -1,6 +1,8 @@
 import { execFile, spawn, type ExecFileOptions } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import path from 'node:path'
-import { accessSync, existsSync, readdirSync } from 'node:fs'
+import { accessSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { expandShellWord, parseSourceWord, resolveSourcePath } from './shellword.js'
 
 export interface RosResult {
@@ -351,6 +353,20 @@ export function runRos2(args: string[], opts: RunOptions = {}): Promise<RosResul
 let rosLogProbed = false
 let rosLogFallback: string | undefined
 
+/**
+ * Create the private fallback directory used when `~/.ros/log` cannot be
+ * written. Unpredictable and 0700 by construction — see probeRosLogFallback for
+ * why a fixed name is not acceptable. Exported so the test can pin that shape
+ * without mutating HOME or resetting the module graph.
+ */
+export function makePrivateRosLogDir(): string | undefined {
+  try {
+    return mkdtempSync(path.join(tmpdir(), 'ros-log-'))
+  } catch {
+    return undefined
+  }
+}
+
 function probeRosLogFallback(): string | undefined {
   if (rosLogProbed) return rosLogFallback
   rosLogProbed = true
@@ -358,22 +374,39 @@ function probeRosLogFallback(): string | undefined {
   if (home) {
     const target = `${home}/.ros/log`
     try {
-      const { mkdirSync, writeFileSync, rmSync } = require('node:fs')
       mkdirSync(target, { recursive: true })
-      const probe = `${target}/.dsh-writable-probe`
+      // The probe name must be unguessable even here: `~/.ros/log` is frequently
+      // group- or world-readable on shared/CI hosts, and writeFileSync follows
+      // symlinks, so a fixed name lets someone else plant `<name>` -> any file
+      // this user can write. Same class as the /tmp fixtures closed in round 22.
+      const probe = `${target}/.dsh-writable-probe-${process.pid}-${randomUUID()}`
       writeFileSync(probe, 'ok')
       rmSync(probe)
       return undefined // writable — no fallback needed
     } catch {
-      // fall through to /tmp
+      // fall through to a private temp dir
     }
   }
-  const uid = typeof process.getuid === 'function' ? process.getuid() : 0
-  rosLogFallback = `/tmp/ros-log-${uid}`
-  try {
-    require('node:fs').mkdirSync(rosLogFallback, { recursive: true })
-  } catch {
-    rosLogFallback = undefined
+  // `mkdtemp`, not `/tmp/ros-log-<uid>`. The uid is guessable, so on a
+  // multi-user host any local user can pre-create `/tmp/ros-log-1000` (or a
+  // symlink to a directory of their choosing) before this ever runs — and then
+  // they own the ROS_LOG_DIR handed to every ros2 process: they can read the
+  // logs written there and pre-plant the file names those processes create.
+  // mkdtemp gives an unpredictable path, created 0700, owned by this user.
+  rosLogFallback = makePrivateRosLogDir()
+  if (rosLogFallback !== undefined) {
+    // One directory per process — that is the price of an unguessable name — so
+    // it has to go when this process ends. Without this, every short-lived CLI
+    // or test process leaves an empty directory in the temp root, which is the
+    // regression the old reused fixed path was accidentally avoiding.
+    const dir = rosLogFallback
+    process.once('exit', () => {
+      try {
+        rmSync(dir, { recursive: true, force: true })
+      } catch {
+        // best effort: a locked or already-removed directory is not an error
+      }
+    })
   }
   return rosLogFallback
 }

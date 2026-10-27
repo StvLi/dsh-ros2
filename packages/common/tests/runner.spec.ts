@@ -33,12 +33,41 @@ describe('ensureWritableRosLogDir', () => {
       if (prev !== undefined) process.env.ROS_LOG_DIR = prev
     }
   })
+
+  it('creates the fallback log dir privately and unpredictably', async () => {
+    // The fallback fires on any host where `~/.ros/log` is not writable — a
+    // locked-down box, or this repository's own sandboxed test runs (the old
+    // code left /tmp/ros-log-1000 behind here, which is how this was noticed).
+    const { makePrivateRosLogDir } = await import('../src/runner.js')
+    const { rmSync, statSync } = require('node:fs')
+    const { tmpdir } = require('node:os')
+    const a = makePrivateRosLogDir()
+    const b = makePrivateRosLogDir()
+    try {
+      expect(a).toBeDefined()
+      expect(a!.startsWith(tmpdir())).toBe(true)
+      // 0700 — another local user cannot read the ROS logs written there.
+      expect(statSync(a!).mode & 0o777).toBe(0o700)
+      // Unpredictable. The superseded `/tmp/ros-log-<uid>` was guessable, so any
+      // local user could pre-create it (or symlink it) and own our ROS_LOG_DIR.
+      expect(/\bros-log-\d+$/.test(a!)).toBe(false)
+      expect(a).not.toBe(b)
+    } finally {
+      if (a) rmSync(a, { recursive: true, force: true })
+      if (b) rmSync(b, { recursive: true, force: true })
+    }
+  })
 })
 
 describe('resolveSetup fallback chain + session override', () => {
-  function tempSetup(sub: string): string {
-    const { mkdirSync, writeFileSync } = require('node:fs')
-    const dir = `/tmp/dsh-runner-${sub}-${process.pid}`
+  function tempSetup(_sub: string): string {
+    const { mkdirSync, mkdtempSync, writeFileSync } = require('node:fs')
+    const { tmpdir } = require('node:os')
+    const { join } = require('node:path')
+    // mkdtemp, not `/tmp/dsh-runner-<sub>-<pid>`: a predictable path under a
+    // world-writable directory can be pre-created (or symlinked) by any local
+    // user before the test runs. `js/insecure-temporary-file`.
+    const dir = mkdtempSync(join(tmpdir(), 'dsh-runner-'))
     mkdirSync(`${dir}/install`, { recursive: true })
     writeFileSync(`${dir}/install/setup.bash`, 'true\n')
     return `${dir}/install/setup.bash`
@@ -110,8 +139,11 @@ describe('resolveSetup fallback chain + session override', () => {
     // must return the RAW path so the existence check runs against the real file
     // and the prefix round-trips unchanged instead of falsely auto-falling-back.
     const { resolveSetup } = await import('../src/runner.js')
-    const dir = `/tmp/dsh runner ${process.pid}`
-    const { mkdirSync, writeFileSync, rmSync } = require('node:fs')
+    const { mkdirSync, mkdtempSync, writeFileSync, rmSync } = require('node:fs')
+    const { tmpdir } = require('node:os')
+    const { join } = require('node:path')
+    // The space is the point of this test, so it lives in the mkdtemp prefix.
+    const dir = mkdtempSync(join(tmpdir(), 'dsh runner '))
     mkdirSync(`${dir}/install`, { recursive: true })
     writeFileSync(`${dir}/install/setup.bash`, 'true\n')
     const src = `${dir}/install/setup.bash`
@@ -294,8 +326,10 @@ describe('runCommand setup prefix joining', () => {
   // the separator while the reported prefix stays faithful to the config.
   it('inserts the separator when the prefix ends at && and still runs the command', async () => {
     const { runCommand } = await import('../src/runner.js')
-    const { mkdirSync, writeFileSync, rmSync } = require('node:fs')
-    const dir = `/tmp/dsh-runner-join-${process.pid}`
+    const { mkdirSync, mkdtempSync, writeFileSync, rmSync } = require('node:fs')
+    const { tmpdir } = require('node:os')
+    const { join } = require('node:path')
+    const dir = mkdtempSync(join(tmpdir(), 'dsh-runner-join-'))
     mkdirSync(`${dir}/install`, { recursive: true })
     writeFileSync(`${dir}/install/setup.bash`, 'true\n')
     const src = `${dir}/install/setup.bash`

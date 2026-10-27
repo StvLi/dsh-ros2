@@ -15,3 +15,19 @@ overrides:
   # the lockfile. Scoped to postcss so it cannot silently constrain a future,
   # unrelated consumer of source-map-js.
   'postcss>source-map-js': '^1.2.2'
+  # Same class of finding, one edge harder to reach. `vitest` takes `vite` as a
+  # *peer* (`^6.4.0 || ^7.0.0 || ^8.0.0`, not optional) and no workspace project
+  # ever declared it, so pnpm auto-installed the newest 7.x when the lockfile was
+  # first written — vite@7.3.6, one release short of 7.3.7, the first patched
+  # version for the four advisories published 2026-10-20/21:
+  #   GHSA-9jrq-w75r-8gcw (low)      · cross-origin script execution via middleware
+  #   GHSA-rq7h-c2jc-7f22 (moderate) · files outside `server.fs.allow` served
+  #   GHSA-vfpm-58rq-9qcg (moderate) · first 4 bytes of out-of-root files exposed
+  #   GHSA-587h-7wmj-h5pm (high)     · launch-editor `fs.existsSync` bypass (via vite)
+  # `pnpm update vite` cannot fix this (a peer is not an edge in any importer),
+  # which is also why Dependabot opened no PR and its security-update run failed
+  # three times on 2026-10-23/24 — so the floor is stated explicitly instead.
+  # Unscoped on purpose: there is no `parent>vite` edge to scope it to, and no
+  # workspace project consumes vite directly, so it cannot constrain a runtime
+  # dependency.
+  'vite': '^7.3.7'
