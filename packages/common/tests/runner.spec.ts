@@ -33,6 +33,30 @@ describe('ensureWritableRosLogDir', () => {
       if (prev !== undefined) process.env.ROS_LOG_DIR = prev
     }
   })
+
+  it('creates the fallback log dir privately and unpredictably', async () => {
+    // The fallback fires on any host where `~/.ros/log` is not writable — a
+    // locked-down box, or this repository's own sandboxed test runs (the old
+    // code left /tmp/ros-log-1000 behind here, which is how this was noticed).
+    const { makePrivateRosLogDir } = await import('../src/runner.js')
+    const { rmSync, statSync } = require('node:fs')
+    const { tmpdir } = require('node:os')
+    const a = makePrivateRosLogDir()
+    const b = makePrivateRosLogDir()
+    try {
+      expect(a).toBeDefined()
+      expect(a!.startsWith(tmpdir())).toBe(true)
+      // 0700 — another local user cannot read the ROS logs written there.
+      expect(statSync(a!).mode & 0o777).toBe(0o700)
+      // Unpredictable. The superseded `/tmp/ros-log-<uid>` was guessable, so any
+      // local user could pre-create it (or symlink it) and own our ROS_LOG_DIR.
+      expect(/\bros-log-\d+$/.test(a!)).toBe(false)
+      expect(a).not.toBe(b)
+    } finally {
+      if (a) rmSync(a, { recursive: true, force: true })
+      if (b) rmSync(b, { recursive: true, force: true })
+    }
+  })
 })
 
 describe('resolveSetup fallback chain + session override', () => {
