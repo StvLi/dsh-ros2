@@ -78,6 +78,12 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 
 ### Changed
 
+- **工作区 vitest 用例 376 → 379 例**（第二十四轮 +3，全部在 vision：图片大小预算 2 例 +
+  非常规文件 1 例）。分布：common 88 + core 156(155 过 +1 skip) + moveit 16 + profile 14 +
+  safety 10 + vision 58 + state 8 + dsh-ros2 29 = **379**（pty 用例在无 pty 的机器上 skip）。
+  **行为变更（验证装置）**：`scripts/verification/` 现在**拒绝**一个不是自己所有、或权限宽于
+  `0700` 的 `VERIF_RUN_DIR`（退出码 3）。此前已留下一个 `0755` 默认目录的机器需要
+  `chmod 700 /tmp/dsh-ros2-verification` 或改用一个私有路径——这是有意的破坏性变更，理由见 Fixed。
 - **`docs/compatibility.md` 的本机现状描述**：L4 ROS2 包一行原写"本机 `/tmp/vlm_ws`"——该工作区已删除，
   这句已是**假的现状**；改为"colcon 构建在**你自己的** workspace，由 `rosSetup` source，doctor 的安装根
   由该链派生"。同一文档新增一条环境注意：**colcon workspace 不要建在 `/tmp`**（会被清理），
@@ -132,6 +138,32 @@ All notable changes to **dsh-ros2** are documented here. Format follows
   common 包 `test` 现同时运行 `robot_profile.py --selftest`（17 项档案名/路径边界检查）。
 
 ### Fixed
+
+- **VLM 上传面只查了"是不是图片"，没查"有多大"**（第二十四轮）：第二十二轮把
+  `ros2_vision_describe` 的 `imagePath` 改为**按文件内容**判定（扩展名不再可信），但头部嗅探通过之后
+  仍是一句 `readFile` 把**整个文件**读进内存、base64（4/3）后一次性 POST 到第三方网关。实测
+  300 MB、头部为合法 PNG 签名的文件：通过校验、耗时 400 ms、RSS **59 MB → 759 MB**（+701 MB，
+  即缓冲区 + base64 字符串）。再往上就是宿主 agent 进程（连同其中**所有会话**）被 OOM 杀掉；
+  外发量同时是文件的 4/3 且**无审批**。讽刺的是 `readHead` 的注释（同文件上方十余行）已经写下了
+  这条规则——"多 GB 的视频、或者 `/dev/zero` 这种永不 EOF 的字符设备，都必须在不整体读入内存的
+  前提下被拒绝"——**有界读取被用在了嗅探上，没有用在加载上**。
+  现在 `stat` 先判：必须是**常规文件**（FIFO/设备/目录按类型拒绝）、大小 ≤ **20 MiB**（两个网关
+  文档化的内联图片上限量级），符合才进入有界流读取，且**实际读到的长度必须等于 `stat` 报的长度**
+  （读取期间被改动即报错）。顺序是**有意义的**：`detectImageMime` 要开流，而对 FIFO 开流会阻塞到
+  有写者出现，所以类型检查必须排在嗅探**之前**，否则永远到不了。新增 3 例测试（`/图片过大/` 断言
+  + 拒绝时 RSS 不得按预算量级增长 + 恰好等于上限仍为图片 + `/dev/null` 与目录按非常规文件拒绝），
+  分别删掉两道门各有 2 例 / 1 例立即变红。**边界**：这条只限住 TS 侧的外发路径；
+  `ros2_vlm_analyze` 把路径交给仓库外的 `dsh_ros2_vlm` 节点。
+- **验证装置的固定 `/tmp` 运行目录可被他人预置**（第二十四轮）：`scripts/verification/measure.mjs`
+  与 `system.sh` 必须指向**同一个**运行目录，所以它不是测试 fixture、不能换成 `mkdtemp`。代价就是
+  固定路径的老问题：它在一个 1777 的目录里，本机任何用户都能先建 `/tmp/dsh-ros2-verification`
+  （或做成符号链接），装置随后把 URDF / 机器人档案写进这个**不属于自己**的目录，并 `spawnSync`
+  一个 helper 把它们读回来。两侧现在**同一套拒绝**（同一判据、同一顺序、同一句措辞、退出码 3，
+  并提示改 `VERIF_RUN_DIR`）：符号链接**直接拒绝**（不按目标判定——链接可在检查与写入之间被换掉，
+  而"指向真实路径"正是 `VERIF_RUN_DIR` 的用途）；不是目录拒绝；属主不是自己拒绝；权限宽于 `0700`
+  拒绝；不存在则以 `0700` 创建。实测五种情形（`0755` / root 所有 / 普通文件 / 符号链接 / 全新路径）
+  两侧给出**逐字相同**的结论。**边界**：这是"拒绝"，不是沙箱——它对一个本来就能写该路径的用户无效，
+  预置目录那一类残留竞态由属主校验兜住。
 
 - **`ros2_vision_doctor` 的 API Key 报告按"形状"判断，于是自己说反话**：`apiKeyPlaintext` 只看 key 是否
   `startsWith('sk-')`，`source` 则从**已经被折叠成单个字符串**的 key 重新推断。两个后果都在本机现场成立：

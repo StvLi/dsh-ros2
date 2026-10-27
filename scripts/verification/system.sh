@@ -25,11 +25,50 @@ export ROS_HOME="$RUN_DIR/ros_home"
 # over UDP-only transport the graph is smaller and the logs stay clean.
 export FASTDDS_BUILTIN_TRANSPORTS="${FASTDDS_BUILTIN_TRANSPORTS:-UDPv4}"
 
+# Ownership/permission gate, shared with measure.mjs — the two scripts must
+# agree on RUN_DIR, so it cannot be a random `mkdtemp` name. It can refuse a
+# directory that is not ours or that other local users can write: /tmp is 1777,
+# so the fixed coordinate can be pre-created (or replaced by a symlink) by any
+# local user, and this rig would then drop its logs, pid file and fixtures into
+# a directory it does not own. A symlink is refused outright rather than judged
+# by its target: the link can be swapped between the check and the write, and
+# the legitimate case (pointing at the real path) is exactly what VERIF_RUN_DIR
+# is for. Same checks, same order, same refusal as the Node side.
+check_run_dir() {
+  if [[ -e "$RUN_DIR" || -L "$RUN_DIR" ]]; then
+    if [[ -L "$RUN_DIR" ]]; then
+      refuse_run_dir "is a symlink (point VERIF_RUN_DIR at the real path)"
+    fi
+    if [[ ! -d "$RUN_DIR" ]]; then
+      refuse_run_dir "not a directory"
+    fi
+    local owner perms
+    owner="$(stat -c '%u' "$RUN_DIR")"
+    perms="$(stat -c '%a' "$RUN_DIR")"
+    if [[ "$owner" != "$(id -u)" ]]; then
+      refuse_run_dir "owned by uid $owner, not you (uid $(id -u))"
+    fi
+    if (( (8#$perms & 8#077) != 0 )); then
+      refuse_run_dir "mode is $perms, which is wider than 700"
+    fi
+    return 0
+  fi
+  # Private at birth; umask can only remove bits, so 0700 is a ceiling.
+  mkdir -p -m 0700 "$RUN_DIR"
+}
+
+refuse_run_dir() {
+  echo "refusing to use the verification run directory $RUN_DIR: $1" >&2
+  echo "Point VERIF_RUN_DIR at a directory you own (mode 0700) or remove the existing one." >&2
+  exit 3
+}
+
 start() {
   if [[ -f "$PID_FILE" ]] && kill -0 "$(head -1 "$PID_FILE")" 2>/dev/null; then
     echo "already running (pids in $PID_FILE); run '$0 stop' first" >&2
     exit 1
   fi
+  check_run_dir
   mkdir -p "$LOG_DIR" "$ROS_HOME"
   : > "$PID_FILE"
   # shellcheck disable=SC1090

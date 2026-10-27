@@ -114,9 +114,9 @@ export function bridgeServiceForTopic(topic: string): string {
 function makeVisionDescribeTool(deps: VisionToolDeps) {
   return defineTool({
     name: 'ros2_vision_describe',
-    description: 'Describe an image file with the configured multimodal model (Gemini/OpenAI, or mock). API key resolution: config apiKey → ${ENV} reference → local secrets file (~/.dsh-ros2/secrets.json, written by ros2_vision_set_key). When no key is found the tool returns VLM_API_KEY_REQUIRED — ask the user for the key and store it with ros2_vision_set_key.',
+    description: 'Describe an image file with the configured multimodal model (Gemini/OpenAI, or mock). The type is decided by the file content, and a file above the 20 MiB inline budget is refused WITHOUT being read. API key resolution: config apiKey → ${ENV} reference → local secrets file (~/.dsh-ros2/secrets.json, written by ros2_vision_set_key). When no key is found the tool returns VLM_API_KEY_REQUIRED — ask the user for the key and store it with ros2_vision_set_key.',
     parameters: {
-      imagePath: { type: 'string', required: true, description: 'Path to a PNG/JPEG/WebP/GIF image.' },
+      imagePath: { type: 'string', required: true, description: 'Path to a PNG/JPEG/WebP/GIF image (content-checked, max 20 MiB).' },
       prompt: { type: 'string', default: '', description: 'Optional instruction for the vision model.' },
     },
     output: { schema: resultSchema, render: renderResult },

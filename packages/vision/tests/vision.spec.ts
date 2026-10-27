@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile, truncate } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { createVisionProvider, readImageBase64 } from '../src/vision.js'
+import { MAX_IMAGE_BYTES, createVisionProvider, readImageBase64 } from '../src/vision.js'
 import { createRos2Tools } from '../src/tools.js'
 import { type ToolResult, type VisionProvider } from 'dsh-ros2-common'
+
+const PNG_HEAD = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
 
 describe('vision providers', () => {
   it('mock provider returns a description', async () => {
@@ -17,6 +19,55 @@ describe('vision providers', () => {
     expect(() => createVisionProvider({ provider: 'gemini' })).toThrow(/apiKey/)
     expect(() => createVisionProvider({ provider: 'openai' })).toThrow(/apiKey/)
     expect(() => createVisionProvider({ provider: 'bogus' })).toThrow(/unknown vision provider/)
+  })
+
+  // The content check answers "is this an image?"; it never answered "how much
+  // of it is there?". Before the budget, a file whose first 8 bytes are a PNG
+  // signature was read whole, base64'd (4/3 the bytes) and POSTed in one
+  // request — a 300 MB file measured ~700 MB of RSS in a 400 ms read, and a
+  // multi-gigabyte one takes the host agent process (and every session in it)
+  // down with an OOM. Delete the size gate and this goes red: the read then
+  // succeeds on a file far past the documented gateway ceiling.
+  it('readImageBase64 REFUSES an image larger than the budget instead of reading it', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'dsh-vision-'))
+    try {
+      // Sparse: a real PNG header then a hole out to just past the budget, so
+      // the test asserts the gate without allocating the bytes it is gating.
+      const huge = path.join(dir, 'huge.png')
+      await writeFile(huge, PNG_HEAD)
+      await truncate(huge, MAX_IMAGE_BYTES + 1)
+
+      const before = process.memoryUsage().rss
+      await expect(readImageBase64(huge)).rejects.toThrow(/图片过大/)
+      const grew = process.memoryUsage().rss - before
+      // The refusal must cost nothing: reading first and complaining after
+      // would still be the bug.
+      expect(grew).toBeLessThan(MAX_IMAGE_BYTES)
+
+      // The budget is inclusive: exactly at the limit is still an image.
+      const atLimit = path.join(dir, 'at-limit.png')
+      await writeFile(atLimit, PNG_HEAD)
+      await truncate(atLimit, MAX_IMAGE_BYTES)
+      const { mime } = await readImageBase64(atLimit)
+      expect(mime).toBe('image/png')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  // `stat` decides the type BEFORE the head sniff opens a stream. That order is
+  // the point: `detectImageMime` on a FIFO blocks in open() until a writer
+  // appears, so a type check placed after the sniff is unreachable. A char
+  // device is the same hazard from the other side (a read that never reaches
+  // EOF), and it is safe to assert here because the gate rejects it by type.
+  it('readImageBase64 REFUSES a non-regular file without opening it', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'dsh-vision-'))
+    try {
+      await expect(readImageBase64('/dev/null')).rejects.toThrow(/不是常规文件/)
+      await expect(readImageBase64(dir)).rejects.toThrow(/不是常规文件/)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
   })
 
   it('readImageBase64 decides the mime from the file content, not the extension', async () => {
@@ -111,6 +162,25 @@ describe('ros2_vision_describe tool', () => {
       expect(out.ok).toBe(false)
       expect(out.error?.code).toBe('VISION_FAILED')
       expect(out.error?.message).toMatch(/不是受支持的图片文件/)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('refuses an oversized image path instead of uploading it to the gateway', async () => {
+    const execStub = { agent: { id: 'test' } } as never
+    const run = async () => ({ ok: true, command: '', stdout: '', stderr: '', exitCode: 0, timedOut: false, durationMs: 0 })
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'dsh-vision-'))
+    try {
+      const huge = path.join(dir, 'huge.png')
+      await writeFile(huge, PNG_HEAD)
+      await truncate(huge, MAX_IMAGE_BYTES + 1)
+      const t = createRos2Tools({ run, vision: new ReadingVP() }).find((x) => x.name === 'ros2_vision_describe')
+      if (!t) throw new Error('ros2_vision_describe not registered')
+      const out = (await t.execute({ imagePath: huge }, execStub)) as ToolResult
+      expect(out.ok).toBe(false)
+      expect(out.error?.code).toBe('VISION_FAILED')
+      expect(out.error?.message).toMatch(/图片过大/)
     } finally {
       await rm(dir, { recursive: true, force: true })
     }

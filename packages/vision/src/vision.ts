@@ -1,5 +1,5 @@
 import { createReadStream } from 'node:fs'
-import { readFile } from 'node:fs/promises'
+import { stat } from 'node:fs/promises'
 import { type DescribeOptions, type VisionConfig, type VisionProvider } from 'dsh-ros2-common'
 
 export type { DescribeOptions, VisionConfig, VisionProvider }
@@ -68,12 +68,95 @@ export async function detectImageMime(imagePath: string): Promise<string | null>
   return sniffImageMime(await readHead(imagePath, IMAGE_HEAD_BYTES))
 }
 
+/**
+ * Largest image we will pull into memory and hand to a gateway.
+ *
+ * The content check above answers "is this an image?"; it does not answer "how
+ * much of it is there?". Without this budget, any file whose first 8 bytes are
+ * a PNG signature was read whole, base64'd (4/3 the bytes) and POSTed in one
+ * request: a 300 MB file cost ~700 MB of RSS in a 400 ms read (measured), and
+ * scaling that to a multi-gigabyte image takes the host agent process — every
+ * session in it — down with an OOM. Both VLM gateways cap inline images well
+ * below this anyway, so a bigger file cannot succeed; it can only fail loudly
+ * or fail fatally, and loud is the point.
+ *
+ * 20 MiB is the ceiling the Gemini inline_data path documents for the whole
+ * request; a 4/3 base64 expansion of 20 MiB is ~27 MiB, so the effective
+ * gateway-side limit stays the binding one for anything under this.
+ */
+export const MAX_IMAGE_BYTES = 20 * 1024 * 1024
+
+/** Human-readable byte count for error messages (`12.5 MiB`). */
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`
+  const units = ['KiB', 'MiB', 'GiB', 'TiB']
+  let value = n / 1024
+  let unit = 0
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024
+    unit += 1
+  }
+  return `${value.toFixed(1)} ${units[unit]}`
+}
+
+/**
+ * Refuse a path that is not a regular file, or that is bigger than the budget,
+ * and return the `stat` the caller then uses as the expected length.
+ *
+ * Type and size are decided from `stat` alone, BEFORE the content sniff — not
+ * after it: `detectImageMime` opens a read stream, and opening one on a FIFO
+ * blocks until a writer shows up, so a type check that only ran after the sniff
+ * could never be reached. `/dev/zero` is the same story from the other side: it
+ * is a regular-looking char device whose read never reaches EOF.
+ */
+async function statReadableImage(imagePath: string, maxBytes: number): Promise<{ size: number }> {
+  const info = await stat(imagePath)
+  if (!info.isFile()) {
+    throw new Error(`不是常规文件（拒绝读取管道/设备/目录）：${imagePath}`)
+  }
+  if (info.size > maxBytes) {
+    throw new Error(
+      `图片过大：${formatBytes(info.size)} 超过上限 ${formatBytes(maxBytes)}，拒绝读取并发送（${imagePath}）`)
+  }
+  return { size: info.size }
+}
+
+/**
+ * Read exactly `expected` bytes, never more than `maxBytes`.
+ *
+ * The stream's `end` is the length we already validated, so a file that grows
+ * after the `stat` cannot push the buffer past the budget on its own; a file
+ * that shrinks or is swapped for a shorter one is caught by the length check
+ * rather than silently handed to the gateway truncated.
+ */
+async function readBoundedFile(imagePath: string, expected: number, maxBytes: number): Promise<Buffer> {
+  if (expected === 0) return Buffer.alloc(0)
+  const chunks: Buffer[] = []
+  let total = 0
+  const stream = createReadStream(imagePath, { start: 0, end: expected - 1 })
+  for await (const chunk of stream) {
+    const buf = chunk as Buffer
+    total += buf.length
+    if (total > maxBytes) {
+      stream.destroy()
+      throw new Error(`读取超过上限 ${formatBytes(maxBytes)}，中止（${imagePath}）`)
+    }
+    chunks.push(buf)
+  }
+  if (total !== expected) {
+    throw new Error(
+      `读取期间文件被改动：stat 报 ${expected} 字节，实际读到 ${total} 字节（${imagePath}）`)
+  }
+  return Buffer.concat(chunks)
+}
+
 export async function readImageBase64(imagePath: string): Promise<{ data: string; mime: string }> {
+  const { size } = await statReadableImage(imagePath, MAX_IMAGE_BYTES)
   const mime = await detectImageMime(imagePath)
   if (mime === null) {
     throw new Error(`不是受支持的图片文件（PNG/JPEG/GIF/WebP，按文件内容判定）：${imagePath}`)
   }
-  const buffer = await readFile(imagePath)
+  const buffer = await readBoundedFile(imagePath, size, MAX_IMAGE_BYTES)
   return { data: buffer.toString('base64'), mime }
 }
 

@@ -17,13 +17,59 @@
  *
  * Uses the workspace's *built* lib/ output, so run `pnpm run build` first.
  */
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, statSync, writeFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 
 const RUN_DIR = process.env.VERIF_RUN_DIR ?? '/tmp/dsh-ros2-verification'
 const ROS_SETUP = process.env.ROS_SETUP ?? '/opt/ros/jazzy/setup.bash'
 const ROBOT = process.env.VERIF_ROBOT ?? 'labbot'
 const PROFILES_DIR = process.env.VERIF_PROFILES_DIR ?? `${RUN_DIR}/profiles`
+
+/**
+ * The run directory is a fixed, SHARED coordinate — `system.sh` and this script
+ * have to agree on it, so unlike a fixture it cannot be a fresh `mkdtemp` path
+ * per run. That leaves the one thing a fixed path in `/tmp` always leaves: it
+ * is in a 1777 sticky directory, so any local user can create
+ * `/tmp/dsh-ros2-verification` first (or make it a symlink to somewhere else),
+ * and this rig then writes URDF/profile fixtures into a directory it does not
+ * own — and `spawnSync`s a helper that reads them back out.
+ *
+ * The fix is therefore not a random name but a REFUSAL: a pre-existing run
+ * directory must be ours and private, or the rig stops and says so.
+ * `system.sh` makes the same check, in the same order, so the two cannot
+ * disagree about which directory is acceptable.
+ */
+function ensureRunDir(dir) {
+  const refuse = (why) => {
+    console.error(`refusing to use the verification run directory ${dir}: ${why}\n` +
+      'Point VERIF_RUN_DIR at a directory you own (mode 0700) or remove the existing one.')
+    process.exit(3)
+  }
+  if (existsSync(dir)) {
+    // Refuse a symlink OUTRIGHT rather than judging its target. Following it
+    // and checking the target's owner is not equivalent: the coordinate is in
+    // a 1777 directory, so the link can be swapped between this check and the
+    // write that follows it. A refusal has no such window, and the case it
+    // removes (someone pointing the run dir somewhere else) has no legitimate
+    // use — set VERIF_RUN_DIR to the real path instead.
+    if (lstatSync(dir).isSymbolicLink()) refuse('is a symlink (point VERIF_RUN_DIR at the real path)')
+    // Past the symlink refusal this describes the directory itself.
+    const st = statSync(dir)
+    if (!st.isDirectory()) refuse('not a directory')
+    // process.getuid is absent on Windows; the rig is Linux-only (ROS2, setsid,
+    // /dev/shm), so treat "no getuid" as "cannot verify ownership" and refuse
+    // rather than silently accepting.
+    if (typeof process.getuid !== 'function') refuse('cannot verify ownership on this platform')
+    if (st.uid !== process.getuid()) refuse(`owned by uid ${st.uid}, not you (uid ${process.getuid()})`)
+    const perms = st.mode & 0o777
+    if ((perms & 0o077) !== 0) refuse(`mode is ${perms.toString(8).padStart(3, '0')}, which is wider than 700`)
+    return
+  }
+  // Create it private at birth. umask can only remove bits, so 0700 is a ceiling.
+  mkdirSync(dir, { recursive: true, mode: 0o700 })
+}
+
+ensureRunDir(RUN_DIR)
 
 // UDP-only transport keeps the rig working where /dev/shm is not writable
 // (otherwise FastDDS logs shared-memory errors — to stdout, hence the lesson
