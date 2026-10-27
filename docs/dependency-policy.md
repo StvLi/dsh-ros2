@@ -333,4 +333,22 @@ CI 只在 push 时跑，CodeQL 只读源码，Dependabot 报警了但修不动�
 只卡 high/critical 是刻意的：dev 图的公告流被 Windows-only、dev-server 类的中低危塞满
 （launch-editor、`server.fs` 路径），而这些包的消费者根本到不了那些代码路径。
 把它们也做成门禁，就等于把这条 job 永久涂红——那正是"噪声淹没信号"的教科书做法。
-确实无解的那一条，写进 `pnpm.auditConfig.ignoreGhsas` 并留下理由，而不是删掉这个 job。
+
+确实无解的那一条，**写进 `pnpm-workspace.yaml` 的 `auditConfig.ignoreGhsas` 并留下理由**，
+而不是删掉这个 job。
+
+> **第二十三轮修正（上一版这里写的是 `package.json` 的 `pnpm.auditConfig`，那是错的）**：
+> pnpm 11 **不再读 `package.json` 的 `pnpm` 字段**——本仓库 `pnpm-workspace.yaml` 顶部的注释
+> 早就写了这件事，而这条运维指示恰好违反了它。实测（把两处都写上，看 pnpm 认哪个）：
+>
+> ```console
+> $ # package.json: {"pnpm":{"auditConfig":{"ignoreGhsas":["GHSA-…"]}}}  +  pnpm-workspace.yaml 同名条目
+> $ pnpm install --frozen-lockfile
+> [WARN] The "pnpm" field in package.json is no longer read by pnpm. The following keys were
+>        ignored: "pnpm.auditConfig". See https://pnpm.io/settings for the new home of each setting.
+> $ pnpm config list | grep -A3 auditConfig
+>   "auditConfig": { "ignoreGhsas": [ "GHSA-test-from-workspace-yaml" ] }    # ← 只有 workspace.yaml 那份生效
+> ```
+>
+> 这条修正的价值不在措辞：**按旧写法操作，ignore 会静默不生效**，于是 job 永远红着，
+> 而人以为已经"合法豁免"过了——正是这个 workflow 本身要防的那个失败模式。
