@@ -186,9 +186,12 @@ describe('ros2_vision_doctor install roots (no hardcoded machine path)', () => {
   // local workspace whose directory had been deleted — so every report named a
   // build location that could not exist. Roots are now derived from the
   // environment the command seam actually sources.
-  function tempWorkspace(sub: string): string {
-    const { mkdirSync, writeFileSync } = require('node:fs')
-    const dir = `/tmp/dsh-vision-${sub}-${process.pid}`
+  function tempWorkspace(_sub: string): string {
+    const { mkdirSync, mkdtempSync, writeFileSync } = require('node:fs')
+    const { tmpdir } = require('node:os')
+    const { join } = require('node:path')
+    // mkdtemp, not `/tmp/dsh-vision-<sub>-<pid>` — see runner.spec.ts.
+    const dir = mkdtempSync(join(tmpdir(), 'dsh-vision-'))
     mkdirSync(`${dir}/install`, { recursive: true })
     writeFileSync(`${dir}/install/setup.bash`, 'true\n')
     return dir
