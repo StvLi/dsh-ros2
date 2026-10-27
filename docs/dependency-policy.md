@@ -237,15 +237,31 @@ $ pnpm run build         # 全绿
    即进程里存在**两份 schemastery**。schema 对象是鸭子类型，本轮**没有观测到**故障，
    但"仓库比宿主新"这种方向与规则 A 相反，值得下一轮带着证据再判。
    > **第二十三轮已带证据判定（本条到此为止）。** 证据来自 Dependabot PR #82
-   > （floor `^3.18.4` → `^3.18.5`）：把 floor 抬到高于**开发依赖链**解析出的 3.18.4 之后，
-   > 工作区里就同时存在 `schemastery@3.18.4`（来自 `dsh-tools@0.1.0-rc.6 → dsh-invariants
-   > → schemastery`）与 `3.18.5`（来自 9 个包自己的 dependencies）两份副本，
-   > 于是 4 个包的**声明产出**直接编译失败：
+   > （floor `^3.18.4` → `^3.18.5`）：CI `check (22)` / `check (24)` 双红，4 个包的
+   > **声明产出**失败——
    > `error TS2883: The inferred type of 'Config' cannot be named without a reference to
-   > 'Schema' from …schemastery`. **结论：floor 不能高于开发依赖链解析出的那一份**，
-   > 否则"类型只声明一次"的前提就没了。PR #82 因此应当**拒绝**（它也没有任何功能变更：
-   > 3.18.4 与 3.18.5 的 `lib/types/index.d.ts` 逐字节相同，唯一差异是 cosmokit
-   > `~1.8.5` → `~1.8.6`）。复现方式见维护日志第二十三轮。
+   > 'Schema' from '.pnpm/@deepseek-ai+schemastery@3.18.4/…'`。
+   > 报错里点名的是 **3.18.4** 那份副本，而声明它的 **7** 个包（9 个包里有 7 个）
+   > 此刻声明的是 `^3.18.5` ⇒ 工作区里同时存在两份。
+   >
+   > **但"两份"是这种改法的后果，不是升级的必然后果——上一版写在这里的宽结论是错的。**
+   > 本工作区还有一条开发链的边：
+   > `@deepseek-ai/dsh-tools@0.1.0-rc.6 → dsh-invariants@0.1.0-rc.8 → schemastery ^3.18.1`，
+   > 它被 lockfile 钉在 3.18.4；只抬 7 个 workspace floor 动不到它，于是分叉。
+   > 实测：加一条全局 `overrides: {'@deepseek-ai/schemastery': '^3.18.5'}` 让整图一起动之后，
+   > lockfile 里只剩 **一个** `schemastery@3.18.5`，`pnpm run build` **全绿**。
+   > ⇒ 准确的规则是 **"升一条被两条链共同解析的包，必须整图一起动"**；
+   > "floor 不能高于开发链解析出的那一份"把一次 lockfile 惯性说成了硬约束。
+   >
+   > **仍然拒绝 PR #82**，理由换成下面两条（都可复现）：
+   > ① **升级零收益**——把两个 tarball 解开逐字节比：文件清单相同，除 `package.json` 外
+   > **全部文件字节相同**（含 `lib/types/index.d.ts`，正是 TS2883 关心的那份声明），
+   > `package.json` 只有 `"version"` 与 `@deepseek-ai/cosmokit` `~1.8.5` → `~1.8.6` 两处差异；
+   > 而 `pnpm audit` 三档在 3.18.4 + cosmokit 1.8.5 上全绿（没有任何公告指向它们）。
+   > ② **方向与规则 A 相反**——宿主提供 3.18.2，floor 已高出两档，再抬一档只会更远。
+   > 机械半边：`@deepseek-ai/schemastery` 已进 `.github/dependabot.yml` 的 `ignore`，
+   > 免得同一条 patch 每周重开一次（`ignore` 只作用于版本更新，安全更新照旧会报）。
+   > 完整实测与判定见维护日志第二十三轮。
 2. **`dsh-tools@0.1.0-rc.6` 的运行期 import 会把 9 个 harness 包拉进仓库的 `node_modules`**
    （证明 2 暴露）。也就是除 harness 自己那份之外，还有一份平行副本。
    当前工作正常，但这决定了"关掉 peer 自动安装"这条路走不通。
