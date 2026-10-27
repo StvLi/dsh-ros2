@@ -5608,7 +5608,7 @@ Oct 13 04:19:38  [dsh-phoenix] loaded (graceful restart + client reconnect + lif
 4. **【已修·自我纠正】** 在途稿的"floor 不能高于开发链那一份"**过宽**：整图一起动即可单副本。
    规则改成"**被两条链共同解析的包必须整图一起动**"；拒绝 #82 的理由改为"零收益 + 方向相反"（§28.5.4）。
 5. **【已修·卫生】** 剩余 4 处可预测 `/tmp` fixture 改 `mkdtempSync` + 补 `afterEach` 清理
-   （CodeQL `insecure-temporary-file` 基线 6 → 2，待合入后重扫确认）（§28.5.5）。
+   （CodeQL `insecure-temporary-file` 基线 **6 → 1**，合入后重扫**实测**）（§28.5.5）。
 6. **【已处置·Dependabot】** 5 个 open 告警（`vite@7.3.6`）由 `vite` floor 7.3.7 处置；
    两条 Dependabot PR：**#81 合入 / #82 close**，并给 #82 补 `ignore` 防复发。
 7. **【闭环·跨轮】** 第二十二轮的 gen-29 **逐字命中**（§28.6）。
@@ -5638,9 +5638,12 @@ Oct 13 04:19:38  [dsh-phoenix] loaded (graceful restart + client reconnect + lif
   见 §28.5.5 末尾的自身失误登记），另加 **#81 合入** 与 **#82 close**。
   `main` 起点 **`5a82f61`**；**故意不写本轮终点 SHA**（记录自身所在的 docs PR 会继续前推 `main`，
   写死的终点每加一个 docs PR 就过期一次——第七～八轮"文档计数漂移"的同一类问题）。
-- **数字**：用例 **375 → 376**（+1 新测试）；CodeQL open **8**（本轮修 4 条，合入后重扫预期 **8 → 4**：
-  剩下 2 × `file-access-to-http`（by design）+ `measure.mjs` 那 1 条 + 尚未重扫的 1 条）；
-  Dependabot open **5 → 0**（合入后自动关闭，它们指向的正是 7.3.6）；audit 三档干净；密钥 0；发布面 9/9；
+- **数字**（合入后**实测**，不是预期）：用例 **375 → 376**（+1 新测试）；
+  **CodeQL open 8 → 3**（修掉 5 条 `insecure-temporary-file`；剩下 2 × `file-access-to-http`
+  ——第二十二轮已按内容判定、属 by design——与 `measure.mjs` 那 1 条，即 §5 登记的那条）；
+  **Dependabot open 5 → 0**（合入后自动关闭——实测，它们指向的正是 7.3.6）；
+  **新增的 `Supply chain` workflow 已在 `main` 的那次 push 上跑过一次并 success（23 s）**；
+  audit 三档干净；密钥 0；发布面 9/9；
   open issue / open PR **0 / 0**（#82 close、#81 与 #83 合入后）。
 - **线上价值**：① 5 条依赖告警的**根因**（peer-only 的 `vite` 没有任何自动渠道能修）被一条 floor 堵住，
   并且**从此每周有东西在没有 push 的情况下复核依赖图**；② 沙箱/受限宿主上真实的
