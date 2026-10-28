@@ -1,6 +1,9 @@
 import { describe, expect, it, afterEach, beforeEach } from 'vitest'
 import { createRos2Tools } from '../src/tools.js'
 import { type RunFn, type ToolResult, type RosResult } from 'dsh-ros2-common'
+import { mkdir, mkdtemp, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
 
 function makeRun(handler: (bin: string, args: string[]) => Partial<RosResult>): RunFn {
   return async (bin, args) => {
@@ -30,19 +33,97 @@ async function call(name: string, run: RunFn, args: Record<string, unknown>): Pr
   return (await tool(name, run).execute(args, execStub)) as ToolResult
 }
 
+/** Call with an approval service and no other deps (capture-path gate tests). */
+async function callWithApproval(name: string, run: RunFn, args: Record<string, unknown>, approval: () => Promise<string>): Promise<ToolResult> {
+  const found = createRos2Tools({ run, approval }).find((t) => t.name === name)
+  if (!found) throw new Error(`tool ${name} not found`)
+  return (await found.execute(args, execStub)) as ToolResult
+}
+
 
 
 describe('ros2_image_snapshot (decoupled, no custom package)', () => {
   it('invokes the standalone python script and parses the snapshot JSON', async () => {
     const run = makeRun(() => ({ stdout: JSON.stringify({ ok: true, path: '/tmp/dsh-ros2/f.jpg', width: 500, height: 500, source: 'topic' }) }))
-    const out = await call('ros2_image_snapshot', run, { topic: '/camera/image', output: '/tmp/f.jpg', timeoutMs: 3000 })
+    const out = await call('ros2_image_snapshot', run, { topic: '/camera/image', timeoutMs: 3000 })
     expect(out.ok).toBe(true)
     expect(out.command).toContain('python3')
     expect(out.command).toContain('image_snapshot.py')
     expect(out.command).toContain('--topic /camera/image')
-    expect(out.command).toContain('--output /tmp/f.jpg')
+    expect(out.command).toContain(`--output ${path.join(os.tmpdir(), 'dsh-ros2')}/snapshot_`)
     expect(out.command).not.toContain('dsh_ros2_vlm')
     expect(out.data).toMatchObject({ ok: true, path: '/tmp/dsh-ros2/f.jpg', width: 500 })
+  })
+
+  // ── capture destination gate ───────────────────────────────────────────
+  //
+  // The helper does `os.makedirs(dirname(output))` and writes there, so a
+  // caller-chosen absolute path used to be an UNAPPROVED write of image bytes
+  // to any file the agent can write, and a relative `..` escaped the capture
+  // directory. Measured against the old code: `output:
+  // '../../etc/evil.png'` resolved to `/etc/evil.png`.
+  it('refuses a relative output that climbs out of the capture directory', async () => {
+    const out = await call('ros2_image_snapshot', makeRun(() => ({ stdout: 'SHOULD NOT RUN' })), { output: '../../../../tmp/evil.jpg' })
+    expect(out.ok).toBe(false)
+    expect(out.error?.code).toBe('OUTPUT_TRAVERSAL')
+  })
+
+  it('refuses an output path that is not a JPEG name', async () => {
+    const out = await call('ros2_image_snapshot', makeRun(() => ({ stdout: 'SHOULD NOT RUN' })), { output: '/tmp/notes.txt' })
+    expect(out.ok).toBe(false)
+    expect(out.error?.code).toBe('OUTPUT_NOT_IMAGE')
+  })
+
+  it('requires approval for a destination outside the capture directory', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'dsh-snapshot-test-'))
+    try {
+      const outside = path.join(dir, 'frame.jpg')
+      const denied = await call('ros2_image_snapshot', makeRun(() => ({ stdout: 'SHOULD NOT RUN' })), { output: outside })
+      expect(denied.ok).toBe(false)
+      expect(denied.error?.code).toBe('APPROVAL_DENIED')
+      const allowed = await callWithApproval('ros2_image_snapshot', makeRun(() => ({ stdout: '{"ok":true}' })), { output: outside }, async () => 'allowed-once')
+      expect(allowed.ok).toBe(true)
+      expect(allowed.command).toContain(`--output ${outside}`)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('refuses a symlinked destination (the link can be swapped)', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'dsh-snapshot-test-'))
+    try {
+      const real = path.join(dir, 'real.jpg')
+      await writeFile(real, 'x')
+      const link = path.join(dir, 'link.jpg')
+      await symlink(real, link)
+      const out = await callWithApproval('ros2_image_snapshot', makeRun(() => ({ stdout: 'SHOULD NOT RUN' })), { output: link }, async () => 'allowed-once')
+      expect(out.ok).toBe(false)
+      expect(out.error?.code).toBe('OUTPUT_SYMLINK')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('refuses a directory as the destination', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'dsh-snapshot-test-'))
+    try {
+      const sub = path.join(dir, 'shots.jpg')
+      await mkdir(sub)
+      const out = await callWithApproval('ros2_image_snapshot', makeRun(() => ({ stdout: 'SHOULD NOT RUN' })), { output: sub }, async () => 'allowed-once')
+      expect(out.ok).toBe(false)
+      expect(out.error?.code).toBe('OUTPUT_NOT_REGULAR_FILE')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps the capture directory private (no group/other access)', async () => {
+    await call('ros2_image_snapshot', makeRun(() => ({ stdout: '{"ok":true}' })), {})
+    const dir = path.join(os.tmpdir(), 'dsh-ros2')
+    const st = await stat(dir)
+    expect(st.isDirectory()).toBe(true)
+    expect(st.mode & 0o077).toBe(0)
+    expect(st.uid).toBe(process.getuid?.())
   })
   it('defaults the topic and supports compressed + v4l', async () => {
     const run = makeRun(() => ({ stdout: '{"ok": true, "path": "/tmp/f.jpg", "width": 1, "height": 1}' }))

@@ -41,6 +41,8 @@ import {
   tail,
   jsonOf,
   setSessionRosSetup,
+  assessCaptureOutput,
+  ensurePrivateRuntimeDir,
   getSessionRosSetup,
   resolveSetup,
   shq,
@@ -722,6 +724,12 @@ function makeRos2InstallTool(deps: CoreToolDeps) {
         const installer = strOrUndefined(params.installer) ?? FISHROS_INSTALL_URL
         const bootDir = path.join(process.env.TMPDIR ?? '/tmp', 'dsh-ros2')
         const boot = path.join(bootDir, 'fishros-install')
+        // The installer script is downloaded here and then EXECUTED (`bash boot`
+        // inside the PTY). A pre-created directory, or a symlink at `boot`,
+        // would redirect that write; the directory must be ours and private
+        // before the download runs.
+        const bootDirOk = await ensurePrivateRuntimeDir(bootDir, { label: '安装脚本目录' })
+        if (!bootDirOk.ok) return toolError('ros2_install', command, bootDirOk.code, bootDirOk.reason)
         let dl: { ok: boolean; stderr: string }
         dl = await execFileP('bash', ['-lc', buildRos2InstallDownloadCommand(installer, bootDir, boot)])
         if (!dl.ok || dl.stderr.includes('not found')) {
@@ -729,6 +737,8 @@ function makeRos2InstallTool(deps: CoreToolDeps) {
         }
         const sid = `ros2install-${Date.now()}`
         const dir = ptyDir()
+        const ptyDirOk = await ensurePrivateRuntimeDir(dir, { label: 'PTY 会话目录' })
+        if (!ptyDirOk.ok) return toolError('ros2_install', command, ptyDirOk.code, ptyDirOk.reason)
         const helper = ptyHelperPath()
         const start = await execFileP('python3', [helper, '--dir', dir, 'start', sid, 'bash', boot])
         if (!start.ok) {
@@ -767,6 +777,11 @@ function makeRos2InstallTool(deps: CoreToolDeps) {
       }
       const helper = ptyHelperPath()
       const dir = ptyDir()
+      // `<sid>.in` is the stdin of the process being driven, so the directory
+      // holding it is a command channel: a fixed name under the temp root may
+      // have been created by someone else, and then read/replace is theirs.
+      const ptyDirOk = await ensurePrivateRuntimeDir(dir, { label: 'PTY 会话目录' })
+      if (!ptyDirOk.ok) return toolError('ros2_install', command, ptyDirOk.code, ptyDirOk.reason)
       if (action === 'send') {
         const input = String(params.input ?? '')
         // `--dir` must precede the action: the helper's `rest` is a REMAINDER,
@@ -913,6 +928,41 @@ function makeGuiCloseTool(deps: CoreToolDeps) {
   })
 }
 
+/**
+ * Decide where a capture may be written, asking for approval when it leaves
+ * the capture directory.
+ *
+ * The write itself stays unapproved in the common case (a filename under the
+ * screenshot dir, which is where every screenshot has always gone). Absolute
+ * paths elsewhere are what needed a gate: measured against the old code,
+ * `output: '/home/<user>/…/index.html'` was accepted verbatim and overwritten
+ * with PNG bytes, and `output: '../../etc/evil.png'` escaped the directory.
+ * Symlinks, directories, hardlinked files, a missing parent and a non-image
+ * extension are refused outright — an approval cannot make those safe, because
+ * the link (or the inode) can be swapped after the check.
+ */
+async function gateCaptureOutput(
+  deps: CoreToolDeps,
+  exec: { agent?: unknown; signal?: AbortSignal },
+  toolName: string,
+  command: string,
+  dir: string,
+  output: string,
+): Promise<{ ok: true; path: string } | { ok: false; result: ToolResult }> {
+  const decision = await assessCaptureOutput(output, { captureDir: dir, extensions: ['.png'] })
+  if (!decision.ok) return { ok: false, result: toolError(toolName, command, decision.code, decision.reason) }
+  if (decision.confined) return { ok: true, path: decision.path }
+  const overwrite = decision.notes.length > 0 ? `（${decision.notes.join('；')}）` : ''
+  const approval = await requestApproval(
+    deps,
+    exec,
+    toolName,
+    `将把 PNG 写到截图目录 ${dir} 之外的路径 ${decision.path}${overwrite}。图片字节会创建/覆盖该文件——无审批的任意路径写入正是这道门要拦的事。是否继续？`,
+  )
+  if (!approval.allowed) return { ok: false, result: deniedResult(toolName, command, approval.outcome) }
+  return { ok: true, path: decision.path }
+}
+
 function makeScreenshotTool(deps: CoreToolDeps) {
   return defineTool({
     name: 'ros2_screenshot',
@@ -922,11 +972,16 @@ function makeScreenshotTool(deps: CoreToolDeps) {
       output: { type: 'string', default: '', description: 'Output path (absolute, or filename under the screenshot dir).' },
     },
     output: { schema: resultSchema, render: renderResult },
-    async execute(args) {
+    async execute(args, exec) {
       const params = args as Record<string, unknown>
       const command = 'screenshot'
       if (!deps.gui) return toolError('ros2_screenshot', command, 'GUI_UNAVAILABLE', 'GUI 管理器未启用')
-      const result = await deps.gui.capture({ windowTitle: strOrUndefined(params.windowTitle), output: strOrUndefined(params.output) })
+      const gate = await gateCaptureOutput(
+        deps, exec, 'ros2_screenshot', command, deps.gui.captureDir,
+        strOrUndefined(params.output) ?? `screen_${Date.now()}.png`,
+      )
+      if (!gate.ok) return gate.result
+      const result = await deps.gui.capture({ windowTitle: strOrUndefined(params.windowTitle), output: gate.path })
       if (!result.ok) return toolError('ros2_screenshot', command, 'CAPTURE_FAILED', result.error ?? '截图失败')
       const value: ToolResult = { ok: true, tool: 'ros2_screenshot', command, data: { path: result.path, note: '可传给 ros2_vision_describe 读取，或在对话中引用图片路径' } }
       return value
@@ -954,6 +1009,12 @@ function makeGuiObserveTool(deps: CoreToolDeps) {
       if (!deps.gui) return toolError('ros2_gui_observe', command, 'GUI_UNAVAILABLE', 'GUI 管理器未启用')
       const preset = GUI_PRESETS[app]
       if (!preset) return toolError('ros2_gui_observe', command, 'UNKNOWN_APP', `未知 app：${app}`)
+      // Decide the destination BEFORE launching a window for it.
+      const gate = await gateCaptureOutput(
+        deps, exec, 'ros2_gui_observe', command, deps.gui.captureDir,
+        strOrUndefined(params.output) ?? `screen_${Date.now()}.png`,
+      )
+      if (!gate.ok) return gate.result
       if (deps.gui.list().every((s) => s.label !== label)) {
         const started = deps.gui.start({ label, bin: preset.bin, args: preset.args(undefined, []), windowTitle: preset.windowTitle })
         if (!started.ok) return toolError('ros2_gui_observe', command, 'START_FAILED', started.error)
@@ -961,10 +1022,10 @@ function makeGuiObserveTool(deps: CoreToolDeps) {
       // Wait briefly for the window to map, then capture.
       await new Promise((resolve) => setTimeout(resolve, 500))
       const windowTitle = strOrUndefined(params.windowTitle) ?? label
-      const captured = await deps.gui.capture({ windowTitle, output: strOrUndefined(params.output) })
+      const captured = await deps.gui.capture({ windowTitle, output: gate.path })
       if (!captured.ok) {
         // Fall back to a full-screen capture so observation still works.
-        const full = await deps.gui.capture({ output: strOrUndefined(params.output) })
+        const full = await deps.gui.capture({ output: gate.path })
         if (!full.ok) return toolError('ros2_gui_observe', command, 'CAPTURE_FAILED', captured.error ?? full.error ?? '截图失败')
         const value: ToolResult = { ok: true, tool: 'ros2_gui_observe', command, data: { label, imagePath: full.path, warning: captured.error ?? '窗口未匹配，已截全屏' } }
         return value

@@ -1,6 +1,21 @@
 import { describe, expect, it } from 'vitest'
 import { createRos2Tools } from '../src/tools.js'
 import { type RunFn, type ToolResult, type RosResult } from 'dsh-ros2-common'
+import { mkdtemp, open, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
+
+/**
+ * Trajectory inputs are real files now: the tool refuses a path that is not a
+ * plain, bounded regular file, so a fake string like '/x.json' is a REFUSAL by
+ * design (see the "trajectory input gate" block below), not a fixture.
+ */
+async function realTrajectory(content = '{"joint_names":[],"points":[]}'): Promise<{ dir: string; file: string }> {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'dsh-moveit-test-'))
+  const file = path.join(dir, 'plan.json')
+  await writeFile(file, content)
+  return { dir, file }
+}
 
 function makeRun(handler: (bin: string, args: string[]) => Partial<RosResult>): RunFn {
   return async (bin, args) => {
@@ -154,11 +169,16 @@ describe('moveit_discover / moveit_status / moveit_move', () => {
     if (!t) throw new Error('moveit_move not registered')
     const pose = (await t.execute({ mode: 'pose_rel', group: 'right_arm', deltaPose: '0.05 0 0 0 0 0', frame: 'ee', srdf: '/x.srdf' }, execStub)) as ToolResult
     expect(pose.ok).toBe(true)
-    const tt = createRos2Tools({ run: moveitFlowRun(), approval }).find((x) => x.name === 'moveit_move')
-    if (!tt) throw new Error('not registered')
-    const traj = (await tt.execute({ mode: 'trajectory', group: 'right_arm', trajectory: '/x.json' }, execStub)) as ToolResult
-    expect(traj.ok).toBe(true)
-    expect((traj.data as { mode: string }).mode).toBe('trajectory')
+    const { dir, file } = await realTrajectory()
+    try {
+      const tt = createRos2Tools({ run: moveitFlowRun(), approval }).find((x) => x.name === 'moveit_move')
+      if (!tt) throw new Error('not registered')
+      const traj = (await tt.execute({ mode: 'trajectory', group: 'right_arm', trajectory: file }, execStub)) as ToolResult
+      expect(traj.ok).toBe(true)
+      expect((traj.data as { mode: string }).mode).toBe('trajectory')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
   })
 
   it('moveit_move rejects on fingerprint change before execution (TOCTOU)', async () => {
@@ -207,9 +227,75 @@ describe('moveit_discover / moveit_status / moveit_move', () => {
       if (bin === 'python3' && args.includes('robot_profile.py')) return { stdout: JSON.stringify({ ok: true, robot: { joints: [], moveit: { groups: {} }, safety: {} } }) }
       return { stdout: '' }
     })
-    const out = await call('motion_validate', run, { trajectory: '/tmp/plan.json', robot: 'lite' })
+    const { dir, file } = await realTrajectory()
+    try {
+      const out = await call('motion_validate', run, { trajectory: file, robot: 'lite' })
+      expect(out.ok).toBe(true)
+      expect(out.warnings?.[0]).toContain('校验未通过')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  // ── trajectory input gate ──────────────────────────────────────────────
+  //
+  // Both trajectory-taking tools read a CALLER-CHOSEN path (readFile here,
+  // open().read() in the helper). Before the gate, `/dev/zero` — a character
+  // device that never reaches EOF — was handed straight to both, and a symlink
+  // was followed. The refusal must happen before anything is read.
+  it('refuses a trajectory that does not exist', async () => {
+    const out = await call('motion_validate', makeRun(() => ({ stdout: '' })), { trajectory: '/tmp/definitely-not-here.json' })
+    expect(out.ok).toBe(false)
+    expect(out.error?.code).toBe('TRAJECTORY_NOT_FOUND')
+  })
+
+  it('refuses a device as a trajectory (never reads it)', async () => {
+    const out = await call('motion_validate', makeRun(() => ({ stdout: 'SHOULD NOT RUN' })), { trajectory: '/dev/zero' })
+    expect(out.ok).toBe(false)
+    expect(out.error?.code).toBe('TRAJECTORY_NOT_REGULAR_FILE')
+  })
+
+  it('refuses a symlinked trajectory (the target can be swapped)', async () => {
+    const { dir, file } = await realTrajectory()
+    const link = path.join(dir, 'link.json')
+    await symlink(file, link)
+    try {
+      const out = await call('motion_validate', makeRun(() => ({ stdout: '' })), { trajectory: link })
+      expect(out.ok).toBe(false)
+      expect(out.error?.code).toBe('TRAJECTORY_SYMLINK')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('refuses a trajectory above the size budget without reading it', async () => {
+    const { dir, file } = await realTrajectory()
+    // Sparse file: size on disk is ~0, size as stat() reports it is over the budget.
+    const fh = await open(file, 'r+')
+    await fh.truncate(64 * 1024 * 1024 + 1)
+    await fh.close()
+    try {
+      const out = await call('motion_validate', makeRun(() => ({ stdout: '' })), { trajectory: file })
+      expect(out.ok).toBe(false)
+      expect(out.error?.code).toBe('TRAJECTORY_TOO_LARGE')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('plans into a private plan directory (no group/other access)', async () => {
+    // The plan written here is the file that is validated and then EXECUTED; a
+    // directory another local user can write is a motion-integrity hole.
+    const approval = async () => 'allowed-once'
+    const t = createRos2Tools({ run: moveitFlowRun({ jointState: { a: 0.1 } }), approval }).find((x) => x.name === 'moveit_move')
+    if (!t) throw new Error('moveit_move not registered')
+    const out = (await t.execute({ mode: 'joint_abs', group: 'right_arm', robot: 'lite', joints: 'a:=0.1', srdf: '/x.srdf' }, execStub)) as ToolResult
     expect(out.ok).toBe(true)
-    expect(out.warnings?.[0]).toContain('校验未通过')
+    const dir = path.join(os.tmpdir(), 'dsh-ros2-moveit')
+    const st = await stat(dir)
+    expect(st.isDirectory()).toBe(true)
+    expect(st.mode & 0o077).toBe(0)
+    expect(st.uid).toBe(process.getuid?.())
   })
 })
 

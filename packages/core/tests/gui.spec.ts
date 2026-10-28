@@ -4,7 +4,7 @@ import { type VisionProvider } from 'dsh-ros2-common'
 // CoreToolDeps comes from ../src/tools.js (createRos2Tools accepts plain ToolDeps)
 import { createRos2Tools } from '../src/tools.js'
 import { type ToolDeps, type ToolResult } from 'dsh-ros2-common'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
@@ -276,6 +276,26 @@ function tool(deps: ToolDeps, name: string) {
   return found
 }
 
+/** visualDeps, plus the screenshot recorder (to assert WHERE the write went). */
+function visualDeps2(opts: { approval?: () => Promise<string> } = {}) {
+  const spawnLog: Array<{ bin: string; args: string[]; env: Record<string, string> }> = []
+  const shotLog: Array<{ output: string; opts: unknown }> = []
+  const manager = new GuiManager({
+    spawn: fakeSpawn(spawnLog),
+    windowCmd: fakeWindowCmd(),
+    screenshot: fakeScreenshot(shotLog),
+    interact: fakeInteract([]),
+    screenshotDir: '/tmp/dsh-ros2-test',
+  })
+  const deps: ToolDeps = {
+    run: async () => ({ ok: true, command: '', stdout: '', stderr: '', exitCode: 0, timedOut: false, durationMs: 0 }),
+    gui: manager,
+    vision: new LocalMockVision(),
+    ...(opts.approval ? { approval: opts.approval } : {}),
+  }
+  return { deps, manager, shotLog }
+}
+
 describe('L3 visualization tools', () => {
   it('ros2_gui_start launches a preset', async () => {
     const { deps, manager } = visualDeps()
@@ -310,6 +330,75 @@ describe('L3 visualization tools', () => {
     const out = (await tool(deps, 'ros2_screenshot').execute({}, execStub)) as ToolResult
     expect(out.ok).toBe(true)
     expect(out.data).toMatchObject({ path: expect.stringContaining('.png') })
+  })
+
+  // ── capture destination gate ───────────────────────────────────────────
+  //
+  // `ros2_screenshot` / `ros2_gui_observe` write image bytes to a caller-chosen
+  // path. Measured against the old code with the built lib:
+  //   'shot.png'                 -> /tmp/dsh-ros2/shot.png      (fine)
+  //   '../../etc/evil.png'       -> /etc/evil.png               (escaped)
+  //   '/home/…/index.html'       -> accepted, .html and all
+  // so the destination is assessed (and gated) before anything is captured.
+
+  it('ros2_screenshot refuses a relative output that climbs out of the capture dir', async () => {
+    const { deps } = visualDeps()
+    const out = (await tool(deps, 'ros2_screenshot').execute({ output: '../../../../tmp/evil.png' }, execStub)) as ToolResult
+    expect(out.ok).toBe(false)
+    expect(out.error?.code).toBe('OUTPUT_TRAVERSAL')
+  })
+
+  it('ros2_screenshot refuses an output that is not a PNG name', async () => {
+    const { deps } = visualDeps()
+    const out = (await tool(deps, 'ros2_screenshot').execute({ output: '/tmp/notes.html' }, execStub)) as ToolResult
+    expect(out.ok).toBe(false)
+    expect(out.error?.code).toBe('OUTPUT_NOT_IMAGE')
+  })
+
+  it('ros2_screenshot needs approval for a destination outside the screenshot dir', async () => {
+    const outside = '/tmp/dsh-ros2-outside-shot.png'
+    const denied = (await tool(visualDeps().deps, 'ros2_screenshot').execute({ output: outside }, execStub)) as ToolResult
+    expect(denied.ok).toBe(false)
+    expect(denied.error?.code).toBe('APPROVAL_DENIED')
+
+    const { deps, shotLog } = visualDeps2({ approval: async () => 'allowed-once' })
+    const allowed = (await tool(deps, 'ros2_screenshot').execute({ output: outside }, execStub)) as ToolResult
+    expect(allowed.ok).toBe(true)
+    expect(allowed.data).toMatchObject({ path: outside })
+    expect(shotLog[0]?.output).toBe(outside)
+  })
+
+  it('ros2_screenshot refuses a symlinked destination', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'dsh-shot-test-'))
+    try {
+      const real = path.join(dir, 'real.png')
+      await writeFile(real, 'x')
+      const link = path.join(dir, 'link.png')
+      await symlink(real, link)
+      const { deps } = visualDeps2({ approval: async () => 'allowed-once' })
+      const out = (await tool(deps, 'ros2_screenshot').execute({ output: link }, execStub)) as ToolResult
+      expect(out.ok).toBe(false)
+      expect(out.error?.code).toBe('OUTPUT_SYMLINK')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('ros2_gui_observe decides the destination BEFORE launching a window', async () => {
+    const { deps, manager } = visualDeps()
+    const out = (await tool(deps, 'ros2_gui_observe').execute({ app: 'rviz2', output: '/tmp/elsewhere.png' }, execStub)) as ToolResult
+    expect(out.ok).toBe(false)
+    expect(out.error?.code).toBe('APPROVAL_DENIED')
+    expect(manager.list()).toHaveLength(0)
+  })
+
+  it('keeps the screenshot directory private (no group/other access)', async () => {
+    const { deps } = visualDeps()
+    await tool(deps, 'ros2_screenshot').execute({}, execStub)
+    const st = await stat('/tmp/dsh-ros2-test')
+    expect(st.isDirectory()).toBe(true)
+    expect(st.mode & 0o077).toBe(0)
+    expect(st.uid).toBe(process.getuid?.())
   })
 
 

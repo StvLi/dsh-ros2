@@ -78,6 +78,12 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 
 ### Changed
 
+- **`ros2_image_snapshot` 的 `output` 语义**（第二十五轮）：工具层自己算出默认的**绝对**路径
+  `$TMPDIR/dsh-ros2/snapshot_<ts>.jpg` 并交给 helper（此前不给 `--output`，相对名会落在**当前工作
+  目录**，与文档说的"默认在 `$TMPDIR/dsh-ros2`"不一致）；`output` 必须是 `.jpg`/`.jpeg`；
+  截图目录之外的路径需要审批。`ros2_screenshot` / `ros2_gui_observe` 同理（`.png`，
+  且 `ros2_gui_observe` 在**启动任何窗口之前**先决定目标）。
+
 - **工作区 vitest 用例 376 → 379 例**（第二十四轮 +3，全部在 vision：图片大小预算 2 例 +
   非常规文件 1 例）。分布：common 88 + core 156(155 过 +1 skip) + moveit 16 + profile 14 +
   safety 10 + vision 58 + state 8 + dsh-ros2 29 = **379**（pty 用例在无 pty 的机器上 skip）。
@@ -138,6 +144,36 @@ All notable changes to **dsh-ros2** are documented here. Format follows
   common 包 `test` 现同时运行 `robot_profile.py --selftest`（17 项档案名/路径边界检查）。
 
 ### Fixed
+
+- **固定 `$TMPDIR` 运行目录从来不是"自己的目录"**（第二十五轮）：`$TMPDIR` 是 1777 sticky
+  目录，所以**任何固定名字都可能被别人先建**——建成他拥有的目录，或建成符号链接。而这三处固定
+  路径此前都是直接 `mkdir -p` 后开写：`$TMPDIR/dsh-ros2-moveit`（**计划轨迹**）、
+  `$TMPDIR/dsh-ros2/pty`（**PTY 会话文件**，`<sid>.in` 就是被驱动进程的 stdin，即命令通道）、
+  `$TMPDIR/dsh-ros2`（截图、相机取帧，以及下载后**要被执行**的安装脚本）。
+  **实测修复前** `ls -ld /tmp/dsh-ros2-moveit` = `drwxrwxr-x`（umask 002 + `mkdir`）——
+  同组用户可读、可替换。这条落在运动路径上：`moveit_move` 写一条规划 → 校验 → 审批 →
+  **重新校验同一个路径** → 执行，而审批摘要展示的是校验结论、不是轨迹本身，于是"校验过的轨迹"
+  与"执行的轨迹"可以不是同一条（另一条仍然限位合法）。现在四处写之前统一走
+  `ensurePrivateRuntimeDir`：符号链接**直接拒绝**（不看目标——链接可在检查与写入之间被换掉）、
+  不是目录拒绝、属主不是自己拒绝、存在且是自己的则收紧到 `0700`、不存在则以 `0700` **逐层**
+  创建（每一层都 lstat 复核，递归 mkdir 不会穿过别人的目录）。判据与 `scripts/verification/`
+  同一套。新增 8 例测试（含"符号链接中间层不得被 mkdir 穿过"与"属主不是自己"的 uid 注入）。
+- **截图 / 取帧的 `output` 是免审批的任意路径写入**（第二十五轮）：`ros2_screenshot`、
+  `ros2_gui_observe`、`ros2_image_snapshot` 的写入目标是调用方给的，旧实现是
+  `path.isAbsolute(x) ? x : path.join(dir, x)`。用**已构建的 `lib/`** 实测：
+  `'shot.png'` → `/tmp/dsh-ros2/shot.png`（正常）；`'../../etc/evil.png'` → **`/etc/evil.png`**
+  （相对名静默逃出截图目录）；`'/home/…/index.html'` → **原样接受，`.html` 也照写**。
+  也就是说一个免审批工具可以用图片字节覆盖**任意可写文件**。现在目标先判：扩展名必须是
+  `.png`（截屏）/ `.jpg|.jpeg`（取帧）、不能是符号链接 / 目录 / 设备 / 多硬链接文件、父目录
+  必须存在；截图目录内免审批，**目录外需要审批**（fail-closed，`APPROVAL_DENIED`）。
+  这些"拒绝"不能由审批替代：链接或 inode 可以在检查之后被换掉。新增 6 例测试（core）+
+  6 例（vision），撤门实测分别 9 例 / 5 例变红。
+- **轨迹输入没有类型与大小门**（第二十五轮）：`moveit_move {mode:'trajectory'}` 与
+  `motion_validate` 读调用方给的路径。`/dev/zero` 这种**永不 EOF 的字符设备**会被直接
+  交给 `readFile` 与 helper 的 `open().read()`，一个符号链接会被跟随，任意大文件会被整体读入。
+  现在 `lstat` 先行：符号链接（`TRAJECTORY_SYMLINK`）、非常规文件
+  （`TRAJECTORY_NOT_REGULAR_FILE`）、超过 **64 MiB**（`TRAJECTORY_TOO_LARGE`，一条规划轨迹
+  通常 ~1 MB）一律拒绝且**不读**。新增 5 例测试（不存在 / 设备 / 符号链接 / 超预算 / 计划目录私有）。
 
 - **VLM 上传面只查了"是不是图片"，没查"有多大"**（第二十四轮）：第二十二轮把
   `ros2_vision_describe` 的 `imagePath` 改为**按文件内容**判定（扩展名不再可信），但头部嗅探通过之后

@@ -5,6 +5,7 @@ ROS2 **diagnostics (L1) + management (L2) + GUI (L3)** — 61 tools + `ros2-diag
 - L1 diagnostics: pkg/workspace/dependency checks, node/topic/service/action/param/interface enumeration, topic sampling/rate/bandwidth/delay, TF, graph, doctor, bag info
 - L2 management: colcon build (background job), rosdep install, interface create, param set/delete, topic pub, service call, action send_goal, bag record/play, launch/run, one-click install, lifecycle/component/daemon control, process cleanup, jobs list/status
 - L3 GUI: GUI lifecycle, screenshot, observe (via the optional `dshRos2.vision` service from **dsh-ros2-vision**), xdotool interact
+- **Capture destination gate**: `ros2_screenshot` / `ros2_gui_observe` write `.png` only, never through a symlink / into a directory / over a multi-linked file, and a path **outside** the capture directory (`screenshotDir`, default `$TMPDIR/dsh-ros2`) requires approval. The capture directory itself must be **ours and private (0700)**, because a fixed name under `$TMPDIR` can be pre-created by another local user.
 
 The tool count above is measured from `src/tools.ts` and asserted by
 `packages/dsh-ros2/tests/journeys.spec.ts`; the L1/L2/L3 lines describe the

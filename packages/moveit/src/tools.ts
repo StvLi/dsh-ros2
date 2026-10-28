@@ -5,7 +5,7 @@
  */
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
-import { mkdir, readFile } from 'node:fs/promises'
+import { lstat, readFile } from 'node:fs/promises'
 import os from 'node:os'
 import { defineTool, type ParameterSchemaSpec } from '@deepseek-ai/dsh-tools'
 import {
@@ -41,6 +41,7 @@ import {
   type NodeInfo,
   tail,
   jsonOf,
+  ensurePrivateRuntimeDir,
 } from 'dsh-ros2-common'
 import { spawnJob } from 'dsh-ros2-common'
 
@@ -133,10 +134,62 @@ function validationSummary(v: Record<string, unknown>): string {
   return Object.entries(checks).map(([k, s]) => `${k}=${s}`).join(', ')
 }
 
-async function planFileDir(): Promise<string> {
+/**
+ * Directory that holds planned trajectories between plan → validate → execute.
+ *
+ * It is a FIXED name under the temp root, so it must be provably ours and
+ * private before the first plan is written: `moveit_move` writes a plan there,
+ * validates it, asks for approval, re-validates the SAME path and then executes
+ * it. A directory another local user can write (measured on this host before
+ * the fix: `$TMPDIR/dsh-ros2-moveit` was 0775) is a motion-integrity hole — the
+ * plan can be read, or swapped for a different (still limit-valid) trajectory
+ * between validation and execution, and the approval summary only shows the
+ * validation verdict. Same rule as `scripts/verification/` and the PTY dir; see
+ * `ensurePrivateRuntimeDir`.
+ */
+async function planFileDir(): Promise<{ ok: true; dir: string } | { ok: false; code: string; reason: string }> {
   const dir = path.join(os.tmpdir(), 'dsh-ros2-moveit')
-  await mkdir(dir, { recursive: true })
-  return dir
+  const ensured = await ensurePrivateRuntimeDir(dir, { label: 'MoveIt 计划目录' })
+  return ensured.ok ? { ok: true, dir: ensured.path } : { ok: false, code: ensured.code, reason: ensured.reason }
+}
+
+/** Largest trajectory JSON we will hand to the validator (a plan is ~1 MB). */
+const TRAJECTORY_MAX_BYTES = 64 * 1024 * 1024
+
+/**
+ * Refuse a trajectory path that cannot honestly be one.
+ *
+ * `moveit_move {mode: trajectory}` and `motion_validate` both take a
+ * caller-chosen file and read it (`readFile` here, `open().read()` in the
+ * helper). `lstat` first, so `/dev/zero` — a character device that never
+ * reaches EOF — and a symlink are refused instead of hanging or being followed,
+ * and a file above the budget is refused without being read. This is the same
+ * "type + size of a caller-chosen path" check the VLM read path got; the
+ * trajectory path never had one.
+ */
+async function checkTrajectoryFile(file: string): Promise<{ ok: true } | { ok: false; code: string; reason: string }> {
+  let st: Awaited<ReturnType<typeof lstat>>
+  try {
+    st = await lstat(file)
+  } catch (error) {
+    const code = typeof error === 'object' && error !== null && 'code' in error ? String((error as { code?: unknown }).code) : ''
+    if (code === 'ENOENT') return { ok: false, code: 'TRAJECTORY_NOT_FOUND', reason: `轨迹文件不存在：${file}` }
+    return { ok: false, code: 'TRAJECTORY_UNREADABLE', reason: `无法检查轨迹文件 ${file}：${error instanceof Error ? error.message : String(error)}` }
+  }
+  if (st.isSymbolicLink()) {
+    return { ok: false, code: 'TRAJECTORY_SYMLINK', reason: `轨迹路径是符号链接（${file}）：链接目标可以在检查与读取之间被换掉，请给真实路径` }
+  }
+  if (!st.isFile()) {
+    return { ok: false, code: 'TRAJECTORY_NOT_REGULAR_FILE', reason: `轨迹路径不是常规文件（${file}）：设备 / FIFO / 目录不能作为轨迹来源` }
+  }
+  if (st.size > TRAJECTORY_MAX_BYTES) {
+    return {
+      ok: false,
+      code: 'TRAJECTORY_TOO_LARGE',
+      reason: `轨迹文件 ${st.size} 字节，超过 ${TRAJECTORY_MAX_BYTES} 字节上限（一条规划轨迹通常 ~1 MB）：拒绝读取`,
+    }
+  }
+  return { ok: true }
 }
 
 async function readTrajectoryJson(file: string): Promise<{ joint_names?: string[]; points?: Array<{ positions?: number[] }> } | null> {
@@ -243,6 +296,8 @@ function makeMotionValidateTool(deps: ToolDeps) {
         deltaPose: mode === 'pose_rel' ? strOrUndefined(params.target) : undefined,
         pose: mode === 'pose_abs' ? strOrUndefined(params.target) : undefined,
       }
+      const check = await checkTrajectoryFile(trajectory)
+      if (!check.ok) return toolError('motion_validate', `motion_validate trajectory=${trajectory}`, check.code, check.reason)
       const config = buildMotionValidationConfig(vparams, profile, mode, group, currentState)
       const command = `motion_validate trajectory=${trajectory}${robotName ? ` robot=${robotName}` : ''}`
       const v = await runMotionValidator(deps, trajectory, config)
@@ -345,9 +400,15 @@ function makeMoveitMoveTool(deps: ToolDeps) {
       }
 
       // ── execution modes: plan → validate → approve → execute → verify ──
-      const planFile = mode === 'trajectory'
-        ? (strOrUndefined(params.trajectory) ?? '')
-        : path.join(await planFileDir(), `moveit_plan_${Date.now()}.json`)
+      let planFile = strOrUndefined(params.trajectory) ?? ''
+      if (mode === 'trajectory') {
+        const check = await checkTrajectoryFile(planFile)
+        if (!check.ok) return toolError('moveit_move', command, check.code, check.reason)
+      } else {
+        const planDir = await planFileDir()
+        if (!planDir.ok) return toolError('moveit_move', command, planDir.code, planDir.reason)
+        planFile = path.join(planDir.dir, `moveit_plan_${Date.now()}.json`)
+      }
 
       // phase 1: plan (planning does not move the robot — no approval yet)
       if (mode !== 'trajectory') {
