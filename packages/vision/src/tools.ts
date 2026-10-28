@@ -4,6 +4,7 @@
  * responsibility domain. Tool names are globally unique and unchanged.
  */
 import { fileURLToPath } from 'node:url'
+import os from 'node:os'
 import path from 'node:path'
 import { existsSync } from 'node:fs'
 import { defineTool, type ParameterSchemaSpec } from '@deepseek-ai/dsh-tools'
@@ -20,6 +21,8 @@ import {
   strOrUndefined,
   numOrUndefined,
   requestApproval,
+  assessCaptureOutput,
+  ensurePrivateRuntimeDir,
   enforceSafetyLock,
   readSafetyState,
   ros2Tool,
@@ -151,27 +154,70 @@ function makeVisionDescribeTool(deps: VisionToolDeps) {
   })
 }
 
+/** Capture directory for headless frames — the same fixed name the helper uses. */
+function snapshotDir(): string {
+  return path.join(os.tmpdir(), 'dsh-ros2')
+}
+
 function makeImageSnapshotTool(deps: VisionToolDeps) {
-  return ros2Tool(deps, {
+  return defineTool({
     name: 'ros2_image_snapshot',
-    description: 'Grab the latest frame from a sensor_msgs/Image or sensor_msgs/CompressedImage topic (e.g. /camera/image or /rviz/scene) and save it as JPEG. Headless image acquisition — no X11/screenshots, and NO custom ROS2 package needed (plain rclpy; works on any host with ROS2 sourced). Optional v4l fallback grabs a frame from a camera device via ffmpeg when the topic is silent. The saved file can be consumed by the Agent\'s own multimodal model directly.',
+    description: 'Grab the latest frame from a sensor_msgs/Image or sensor_msgs/CompressedImage topic (e.g. /camera/image or /rviz/scene) and save it as JPEG. Headless image acquisition — no X11/screenshots, and NO custom ROS2 package needed (plain rclpy; works on any host with ROS2 sourced). Optional v4l fallback grabs a frame from a camera device via ffmpeg when the topic is silent. The saved file can be consumed by the Agent\'s own multimodal model directly. `output` defaults to the capture directory; a path outside it needs approval, and the destination must be a plain .jpg/.jpeg file (no symlinks, devices or directories).',
     parameters: {
       topic: { type: 'string', default: '/camera/image', description: 'Image topic to subscribe.' },
-      output: { type: 'string', default: '', description: 'Output JPEG path (default: $TMPDIR/dsh-ros2/snapshot_<ts>.jpg).' },
+      output: { type: 'string', default: '', description: 'Output JPEG path (default: $TMPDIR/dsh-ros2/snapshot_<ts>.jpg). A path outside the capture directory requires approval.' },
       timeoutMs: { type: 'number', default: 5000, description: 'How long to wait for a frame (ms).' },
       compressed: { type: 'boolean', default: false, description: 'Topic carries sensor_msgs/CompressedImage (true) instead of raw Image.' },
       v4l: { type: 'string', default: '', description: 'V4L2 device fallback (e.g. /dev/video0) — grabbed via ffmpeg when the topic yields nothing.' },
     },
-    bin: 'python3',
-    buildArgs: (params) => [
-      scriptPath('image_snapshot.py'),
-      '--topic', strOrUndefined(params.topic) ?? '/camera/image',
-      ...(strOrUndefined(params.output) ? ['--output', strOrUndefined(params.output)!] : []),
-      '--timeout', String(Math.max(1, Math.floor(numOrUndefined(params.timeoutMs) ?? 5000) / 1000)),
-      ...(params.compressed === true ? ['--compressed'] : []),
-      ...(strOrUndefined(params.v4l) ? ['--v4l', strOrUndefined(params.v4l)!] : []),
-    ],
-    parse: (res) => parseJsonOrRaw(res.stdout),
+    output: { schema: resultSchema, render: renderResult },
+    async execute(args, exec) {
+      const params = args as Record<string, unknown>
+      const dir = snapshotDir()
+      const command = `ros2_image_snapshot topic=${strOrUndefined(params.topic) ?? '/camera/image'}`
+      // The capture directory is a fixed name under a 1777 directory: require it
+      // to be ours and private before writing frames into it. Then assess the
+      // destination itself — the helper does `os.makedirs(dirname(output))` and
+      // writes there, so a caller-chosen absolute path used to be an unapproved
+      // arbitrary-path write with image bytes (and a relative `..` escaped the
+      // directory silently).
+      const ensured = await ensurePrivateRuntimeDir(dir, { label: '取帧目录' })
+      if (!ensured.ok) return toolError('ros2_image_snapshot', command, ensured.code, ensured.reason)
+      const wanted = strOrUndefined(params.output) ?? `snapshot_${Date.now()}.jpg`
+      const decision = await assessCaptureOutput(wanted, { captureDir: dir, extensions: ['.jpg', '.jpeg'] })
+      if (!decision.ok) return toolError('ros2_image_snapshot', command, decision.code, decision.reason)
+      if (!decision.confined) {
+        const overwrite = decision.notes.length > 0 ? `（${decision.notes.join('；')}）` : ''
+        const approval = await requestApproval(
+          deps,
+          exec,
+          'ros2_image_snapshot',
+          `将把 JPEG 写到取帧目录 ${dir} 之外的路径 ${decision.path}${overwrite}。图片字节会创建/覆盖该文件——请确认。`,
+        )
+        if (!approval.allowed) return deniedResult('ros2_image_snapshot', command, approval.outcome)
+      }
+      const commandArgs = [
+        scriptPath('image_snapshot.py'),
+        '--topic', strOrUndefined(params.topic) ?? '/camera/image',
+        '--output', decision.path,
+        '--timeout', String(Math.max(1, Math.floor(numOrUndefined(params.timeoutMs) ?? 5000) / 1000)),
+        ...(params.compressed === true ? ['--compressed'] : []),
+        ...(strOrUndefined(params.v4l) ? ['--v4l', strOrUndefined(params.v4l)!] : []),
+      ]
+      const res = await deps.run('python3', commandArgs, {})
+      const full = `python3 ${commandArgs.join(' ')}`
+      if (!res.ok) {
+        return toolError('ros2_image_snapshot', full, 'COMMAND_FAILED', res.error ?? `exit code ${res.exitCode ?? 'unknown'}`)
+      }
+      const value: ToolResult = {
+        ok: true,
+        tool: 'ros2_image_snapshot',
+        command: full,
+        data: parseJsonOrRaw(res.stdout) as JsonValue,
+        ...(deps.includeStderr && res.stderr.trim() ? { warnings: tail(res.stderr) } : {}),
+      }
+      return value
+    },
   })
 }
 

@@ -1,8 +1,7 @@
 import { spawn } from 'node:child_process'
-import { mkdir } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { runCommand, type RosResult } from 'dsh-ros2-common'
+import { assessCaptureOutput, ensurePrivateRuntimeDir, runCommand, type RosResult } from 'dsh-ros2-common'
 
 /** One tracked GUI session started by the plugin. */
 export interface GuiSession {
@@ -276,26 +275,46 @@ export class GuiManager {
     return { kind: 'confined', window }
   }
 
-  async capture(opts: { windowTitle?: string; output?: string }): Promise<{ ok: true; path: string } | { ok: false; error: string }> {
-    const dir = this.options.screenshotDir && this.options.screenshotDir.length > 0
-      ? this.options.screenshotDir
+  /**
+   * Directory screenshots are written to: the configured `screenshotDir`, or
+   * `$TMPDIR/dsh-ros2`.
+   *
+   * Exposed so the tool layer can assess an `output` path against the SAME
+   * directory the write will use, instead of re-deriving it (two derivations
+   * of one coordinate is how "inside the screenshot dir" stops meaning
+   * anything).
+   */
+  get captureDir(): string {
+    return this.options.screenshotDir && this.options.screenshotDir.length > 0
+      ? path.resolve(this.options.screenshotDir)
       : path.join(os.tmpdir(), 'dsh-ros2')
-    try {
-      await mkdir(dir, { recursive: true })
-    } catch (error) {
-      return { ok: false, error: `无法创建截图目录 ${dir}: ${error instanceof Error ? error.message : String(error)}` }
-    }
+  }
+
+  async capture(opts: { windowTitle?: string; output?: string }): Promise<{ ok: true; path: string } | { ok: false; error: string }> {
+    const dir = this.captureDir
+    // A fixed name under the temp root may have been created by someone else
+    // (1777 sticky directory): require it to be ours and private before the
+    // first write. For a configured directory this only checks type/owner.
+    const ensured = await ensurePrivateRuntimeDir(dir, { label: '截图目录' })
+    if (!ensured.ok) return { ok: false, error: ensured.reason }
     const output = opts.output && path.isAbsolute(opts.output)
       ? opts.output
       : path.join(dir, opts.output ?? `screen_${Date.now()}.png`)
+    // Defence in depth: the tool layer already assessed this path and asked for
+    // approval when it went outside `dir`. Re-assessing here keeps a DIRECT
+    // caller of `capture()` from writing through a symlink or out of the
+    // capture directory; it cannot make an outside path approved, it only
+    // refuses the destinations that no approval could make safe.
+    const assessed = await assessCaptureOutput(output, { captureDir: dir, extensions: ['.png'] })
+    if (!assessed.ok) return { ok: false, error: assessed.reason }
     const screenshot = this.options.screenshot ?? defaultScreenshot
-    const result = await screenshot(output, {
+    const result = await screenshot(assessed.path, {
       windowTitle: opts.windowTitle,
       display: this.options.display,
       command: this.options.screenshotCommand,
     })
     if (!result.ok) return { ok: false, error: result.error ?? '截图失败' }
-    return { ok: true, path: output }
+    return { ok: true, path: assessed.path }
   }
 
   /** Focus a window by title substring and return its geometry. */
