@@ -168,7 +168,8 @@ dsh-phoenix 已在 web profile 安装并生效：
 | `docs/feedback-env-recovery.md:97` | 为历史反馈记录（截图数字 166 / core 89→94），非用户入口 | 保留为历史快照 |
 | sidecar / state | sidecar 为“纯模板框架”（reducer 未实现），state 是控制面客户端，且**故意不在聚合包依赖里**（issue #68 的决定） | 符合设计，无动作 |
 | **GUI 白名单只是便利性控制，不是边界**（第二十一轮新增） | `ros2_gui_interact` 现在按**解析后的**窗口标题比对白名单，但任何进程都能改自己的窗口标题 ⇒ 标题匹配**不能证明**窗口身份。真正的边界是审批门（fail-closed）。 | 无动作（已如实写进代码注释 + README + `docs/safety.md`）；若将来要硬边界，需按 xdotool 的 `_NET_WM_PID` 校验属主进程，属新设计 |
-| **未加审批的相邻写面**（第二十一轮如实登记，未修） | `ros2_gui_close`（对自己启动的会话发 SIGTERM/SIGKILL）、`ros2_screenshot` / `ros2_image_snapshot` / `ros2_gui_observe`（`output` 接受任意绝对路径，写入内容固定为 PNG/JPEG） | 前者只作用于**自己跟踪的**会话；后者影响是**完整性**（可用图片字节覆盖任意文件），不是 RCE。若判定需要，单独一轮做"输出路径限定 + 审批" |
+| **写入目标已加门，但门只在本进程的工具层**（第二十五轮修掉上一行后的边界） | `ros2_screenshot`/`ros2_gui_observe`/`ros2_image_snapshot` 的 `output` 现在有完整判据 + 目录外审批；**但** `packages/vision/scripts/image_snapshot.py` 与 `packages/core/scripts/pty_session.py` 被**直接**在命令行跑（不经过工具层）时仍会自己 `os.makedirs` 目标目录。 | 这是**有意**的：脚本是独立可用的 CLI，判据放在唯一的工具入口；要覆盖 CLI 场景得给 python 侧再加一份实现（两侧判据不一致本身就是事故源，见 §29.6.2）。 |
+| **`ensurePrivateRuntimeDir` 是拒绝/收紧，不是沙箱**（第二十五轮） | 它对一个本来就能写该路径的用户无效；预置目录那一类残留竞态由属主校验兜住；多级路径（`$TMPDIR/dsh-ros2/pty`）逐层校验，但 `/tmp` 本身（root、1777）按定义信任。 | 无动作（已写进代码注释、`docs/safety.md` 与 CHANGELOG） |
 | **`ros2_workspace` 的覆盖是进程级，不是会话级**（第二十二轮如实登记，未修） | `sessionRosSetup` 是 `runner.ts` 里**一个模块级变量**，`use` 改一次就作用于**本进程内所有会话**后续的每一条命令（第二十二轮已给它加审批门 + 把措辞改成 `process-wide`，但**隔离本身没做**）。多会话/多 agent 共用一个 DSH 进程时，A 的切换会影响 B。 | 要真隔离得把会话键从 `exec` 一路传到 ~60 个 `deps.run` 调用点（或引入 per-session 作用域），属**新设计**，单开一轮 |
 | **CodeQL 对 VLM 外发路径的可见性在本轮消失**（第二十四轮新增，**不是**缺陷修复） | 第二十四轮把 `readFile` 改成有界 `createReadStream` + `Buffer.concat` 之后，那 2 条 `js/file-access-to-http` 被分析标记为 `fixed`——但**外发本身没变**（仍是按设计把图片 POST 到第三方网关）。也就是说 `3 → 1` 里那 2 条是**扫描器不再看得见**，不是这条路径变安全了。真正的边界是内容判定 + 20 MiB 预算 + 无审批（如实写在 `docs/safety.md`）。 | **后续轮次不要把这 2 条当作「已修」引用**；若要恢复可见性，需让 CodeQL 重新跟踪该数据流，或明确接受「这条路径由人工复核、不靠扫描器」并写进 §6 |
 | **`/tmp/ros-log-*` 空目录会随测试攒下来**（第二十四轮实测量化） | 第二十三轮把兜底目录改成 `mkdtemp`（`0700`、不可预测）并加 `process.once(exit)` 清理。**exit 钩子只管正常退出**，vitest 强杀 worker 时它不执行 ⇒ 实测本机已累积 **24 个**空目录（4 次全量测试 ≈ 每次 6 个），全部 `0700`、属主为自己、内容为空 | 无害（不再可猜、不再跨用户），故不修；若将来觉得碍眼，在启动时按 mtime 修剪自己拥有的空 `ros-log-*` 目录即可，属小改动 |
@@ -179,23 +180,28 @@ dsh-phoenix 已在 web profile 安装并生效：
 ## 6. 下次维护建议动作
 
 1. 若需重载运行时变更：走 §4 的 dsh-phoenix 优雅重启循环，而非手动 `systemctl restart`。
-   （**第二十四轮登记 gen-31**，原因是 `packages/vision/lib/vision.js` 变了：图片大小预算 +
-   非常规文件拒绝。这是**真正的运行时行为变更**，只有重载后才会在跑着的 dsh 里生效。）
+   （第二十四轮的 **gen-31 已于 2026-10-28 04:16:04 落地**，本轮开工逐字确认，见 §30.3；
+   **gen-29 / gen-30 / gen-31 均已落地**，无在途重启。）
+   （第二十五轮登记 **gen-32**，原因是 `packages/{common,core,vision,moveit}/lib/` 都变了：
+   私有运行目录 + 截图/取帧路径门 + 轨迹输入门。这是**真正的运行时行为变更**，只有重载后才会在
+   跑着的 dsh 里生效。）
    （第二十三轮的 gen-30 已于 2026-10-27 22:45:26 落地，本轮开工逐字确认，见 §29.3；
    第二十三轮登记 **gen-30**，原因是 `packages/common/lib/runner.js` 变了：ROS 日志兜底目录从
    `/tmp/ros-log-<uid>` 改为 `mkdtemp` 的 `0700` 私有目录 + 退出清理。重载后应能从
    `ROS_LOG_DIR` 观察到 `/tmp/ros-log-<随机后缀>`。）
    （第二十二轮登记 gen-29 的原因同样是**真正的运行时变更**：`packages/core/lib/*.js` 与
    `packages/vision/lib/*.js` 都变了——新审批门与图片内容校只有在重载后才会在跑着的 dsh 里生效。）
-2. 全量用例基数：**379 例（378 过 + 1 pty-skip）**。在 pty 可用机器（如 CI）跑 `pnpm run test` 可看到 376/376。
+2. 全量用例基数：**415 例（414 过 + 1 pty-skip）**。pty 可用机器（如 CI）上 415/415。
 3. 远端分支卫生：第二十轮把 16 → 1；第二十一/二十二轮**合入即删**保持 `origin` 只有 `main`。
 4. 保持“提交前 typecheck+test+build 全绿 + 行为变更补测试 + push 后 CI 绿”的验收线。
 5. **凡文档里出现"已知限制 / 静默 / 无输出"这类词，都当作"待复现的假设"**（第十九轮教训的正面用法）。
 6. **每轮固定做一次"执行面 × 审批面"对照**（§27.4.1 的 A/B 两张表）：把"能执行 / 能写 / 能把数据送出去"的
-   接口列出来，逐个问**"它凭什么不需要审批"**。这条已经**连续四轮**是唯一产出真实缺陷的动作
+   接口列出来，逐个问**"它凭什么不需要审批"**。这条已经**连续五轮**是唯一产出真实缺陷的动作
    （第二十一轮 = GUI 输入注入；第二十二轮 = `ros2_workspace use` + VLM 上传面；
    第二十三轮 = ROS 日志兜底目录；第二十四轮 = VLM 上传面的**体积**）——
-   而三层扫描器在这四轮里要么全绿、要么一条相关提示都没有。**不要把它当成"没有告警时的备选动作"。**
+   而三层扫描器在这五轮里要么全绿、要么一条相关提示都没有。**不要把它当成"没有告警时的备选动作"。**
+   （第二十五轮的新问题就来自这张表里已登记三轮的"未加审批的相邻写面"——**登记过的遗留项就是下一轮的
+   入口**；同轮还把它**兄弟形状**（固定 `$TMPDIR` 运行目录）一起量了。）
 7. **"by design"必须把被问的问题一起抄下来**（§27.6 第 2 条）：`js/file-access-to-http` 的既存理由
    "读图就是功能"对**读**成立、对**路径是否该无限**不成立，于是三个轮次都没人再问。
 8. **CodeQL 报"新告警"先分三类**再下结论——真新问题 / 被新代码触发的误报 / 行号漂移（§27.4.4）。
@@ -6006,3 +6012,314 @@ $ grep -rn "requestApproval" packages/*/src/ | wc -l
   4. **扫描器计数变化先分类再汇报**（§29.10 第 3 条，已升为 §6 第 10 条）。
   5. 读 §5 当待办清单；`pnpm audit` 一律走脚本；`gh` 失败先重试；**合入即删分支**。
   6. `stale: false` 不可当「代码最新」的证据（§29.9 第 5 条）：看 `lib/` mtime vs 进程启动时间。
+
+
+---
+
+## 30. 维护记录（2026-10-29 04:00 CST / UTC 2026-10-28 20:00 · 第二十五轮：0 open issue / 0 open PR → step 5；先逐字闭环 gen-31 并用一个 > 20 MiB 图片在**活进程**里验收第二十四轮；「执行面 × 审批面」第五次连做，产出 3 个真缺陷 = 固定 `$TMPDIR` 运行目录（**计划轨迹目录实测 0775**，落到运动完整性）+ 截图/取帧的**免审批任意路径写入** + 轨迹输入无类型/大小门）
+
+### 30.1 起点快照
+
+| 项 | 值 |
+| --- | --- |
+| 当前分支 / HEAD | `main` = `origin/main` = **`9e13226`**（PR #87 合入后），工作树干净 |
+| open issue / open PR | **0 / 0**（10 个 issue 全 closed；#87 是本轮前最后一个 PR） |
+| 远端分支 | `origin/main`（**只有 1 条**） |
+| 全量用例 | **379（378 过 + 1 pty-skip）** |
+| 工具 / 技能面 | `totalTools: 81` / `totalSkills: 9`（六 bundle，`drifted` 全 `false`、`stale: false`） |
+| CodeQL open / Dependabot open | **1 / 0** |
+| 审计三档 / 密钥 / 发布面 | 干净 / 0 / **9/9 CLEAN**（本轮重跑） |
+| Node / pnpm | `v24.16.0` / `11.22.0` |
+| 维护日志 | 停在 §29（第二十四轮，2026-10-28） |
+| 线上进程 | PID **533957**，`2026-10-28 04:16:01` 启动（= gen-31 落地后那个进程） |
+
+### 30.2 step 1 → step 5 的判定（本轮仍然没有 step 2）
+
+- `gh issue list --state open` → **空**；`gh pr list --state open` → **空**。
+- ⇒ **跳过 step 2/3**（无外部建议可评），直接进 **step 5**（安全扫描 + 「执行面 × 审批面」对照）。
+- step 4（dsh-phoenix 循环）照做：本轮改动是**真正的运行时行为变更**（四个包的 `lib/` 都变了），
+  必须重载才生效（§30.8）。
+
+### 30.3 闭环上一轮唯一的未闭环观测（gen-31）——逐字命中，且验收点实测
+
+```text
+Oct 28 04:15:19  [dsh-phoenix] restart requested (gen 31): plugin-change
+Oct 28 04:15:49  [dsh-phoenix] agent idle; executing deferred restart (gen 31)
+Oct 28 04:15:49  [dsh-phoenix] scheduling restart (plugin-change, gen 31): /usr/bin/systemd-run …
+Oct 28 04:16:04  [dsh-phoenix] loaded (graceful restart + client reconnect + lifecycle)
+```
+
+`/home/stvli/tmp/dsh-phoenix-state.json`：`{"generation": 31, "lifecycleState": "running",
+"deferDeadline": 0, "pendingResume": false}`；新进程 PID **533957**（`04:16:01`）。
+从 `requested` 到 `executing deferred` **30 秒**（idle-aware），从 `scheduling` 到 `loaded` **15 秒**。
+
+**上一轮留下的唯一「活进程可直接看到的验收点」本轮实测通过**——第二十四轮的大小预算只写在
+`packages/vision/lib/vision.js` 里，只有重载后才生效。用一个 21 MiB、前 8 字节为合法 PNG 签名的
+稀疏文件直接调**活进程**里的工具：
+
+```console
+$ ros2_vision_describe imagePath=/tmp/dsh-test-big-image.png
+{"ok":false,...,"error":{"code":"VISION_FAILED",
+ "message":"图片过大：21.0 MiB 超过上限 20.0 MiB，拒绝读取并发送（/tmp/dsh-test-big-image.png）"}}
+```
+
+⇒ 20 MiB 预算在跑着的 dsh 里**确实生效**，且拒绝发生在读取之前（同一轮里 300 MB 的用例已验证
+读入前拒绝、RSS 不增长）。
+
+### 30.4 安全扫描（step 5）与既有基线对账
+
+| 面 | 本轮结果 | 与上一轮 |
+| --- | --- | --- |
+| `pnpm run audit`（prod, high） | `No known vulnerabilities found` | 不变 |
+| `pnpm run audit:dev-high` | `No known vulnerabilities found` | 不变 |
+| `pnpm run audit:all` | `No known vulnerabilities found` | 不变 |
+| 密钥（tracked 文件 + 近 60 提交新增行） | **0 条**（只有测试里**故意**写的 `-----BEGIN OPENSSH PRIVATE KEY-----` 字面量，且它来自第二十二轮的"非图片必须被拒"用例） | 不变 |
+| 发布面（9 个包 `pnpm pack` + `tar -tzf`） | **9/9 CLEAN**（入口 `lib/index.js` 全在、patch 层 7 个在、common 的 `robot_profile.py` 在、**0 个 `.pyc`**） | 不变 |
+| Dependabot open | **0** | 0 → 0 |
+| CodeQL open | **1 → 1**（合入后实测，且是原来那 1 条；新代码**没有引入**新告警） | 不变 |
+| `ros2_env_check` | `totalTools: 81` / `totalSkills: 9` / `drifted` 全 `false` / `stale: false` / `missing: []` / `undeclared: []`；`skillCatalogue.complete: true`、`visibleCount: 13` | 不变 |
+| 线上环境 | `visiblePackages: 450` / `visibleNodes: 0`；`setup.prefix` 仍是 `lite_delivery_aio` 链 | 不变 |
+
+**CodeQL 计数说明（沿用 §29.7 的分类规矩）**：唯一那 1 条 `js/insecure-temporary-file`
+（`scripts/verification/measure.mjs:104`）属「运行期才成立的属性」，第二轮起就如实登记为
+**不打算靠改形状关掉**；本轮新增的两道门**没有**让计数上升，也没有借"新代码没告警"宣称安全。
+
+### 30.5 「执行面 × 审批面」对照（§6 第 6 条要求的固定动作，第五次连做）
+
+本轮把上一轮那张 B 表（无门但有副作用的工具）**逐行重问一遍**，重点问三处"写入 / 读取"面向：
+**写到哪 / 从哪读 / 那个"哪"是不是自己的**。
+
+| 工具 | 面 | 本轮结论 |
+| --- | --- | --- |
+| `ros2_screenshot` / `ros2_gui_observe` | 写 PNG 到 `output` | **发现 2：免审批任意路径写入（§30.6.2）→ 本轮修** |
+| `ros2_image_snapshot` | 写 JPEG 到 `output`（helper 还 `os.makedirs` 目录） | **同 §30.6.2 → 本轮修** |
+| `moveit_move` `planFileDir()` | 写**计划轨迹**到固定 `$TMPDIR/dsh-ros2-moveit`，随后**校验 → 审批 → 执行** | **发现 1：目录实测 0775，同一组用户可替换（§30.6.1）→ 本轮修** |
+| `ros2_install`（`start`） | 把安装脚本下载到固定 `$TMPDIR/dsh-ros2/fishros-install`，随后 **`bash` 执行** | **同 §30.6.1 的兄弟形状 → 一并修** |
+| PTY 会话（`ros2_install` send/status/stop） | `$TMPDIR/dsh-ros2/pty/<sid>.in` 是**被驱动进程的 stdin**（命令通道） | **同 §30.6.1 → 一并修** |
+| `moveit_move {mode:'trajectory'}` / `motion_validate` | 读调用方给的轨迹 JSON | **发现 3：`/dev/zero` / 符号链接 / 任意大文件都没有门（§30.6.3）→ 本轮修** |
+| `ros2_vision_describe` / `ros2_vlm_analyze` | 读图并外发 | 上一轮已限类型 + 20 MiB；**本轮复核在位**（§30.3 活进程实测） |
+| `ros2_gui_interact` | 注入 X11 输入 | 白名单 + 白名单外审批，复核在位 |
+| `ros2_workspace use` | `source`（=执行） | 审批门在位；**进程级覆盖仍是未修设计项**（§5） |
+| `robot_safety_arbitrate` / `motion_validate --planOnly` | 只读 / 只校验 | 维持 |
+| `ros2_gui_close` | 对自己跟踪的会话发信号 | 维持（自建会话） |
+
+> 这张表**连续五轮、五轮都是唯一产出真缺陷的动作**。而本轮的入口正是**上一轮自己登记在 §5 里的
+> 遗留项**（"未加审批的相邻写面"，躺了三轮）——**登记不等于处理，但登记过的条目就是下一轮的入口**。
+
+### 30.6 本轮发现与修复
+
+#### 30.6.1 发现 1【已修·真实·扫描器 0 提示·本轮最有价值】固定 `$TMPDIR` 运行目录从来不是「自己的目录」，而其中一个是**计划轨迹目录**
+
+- **代码事实**：三处固定路径都是"直接 `mkdir -p` 后开写"：
+  `moveit/src/tools.ts:planFileDir()`（`$TMPDIR/dsh-ros2-moveit`）、
+  `core/src/tools.ts:ptyDir()`（`$TMPDIR/dsh-ros2/pty`）、
+  截图/取帧目录（`core/src/gui.ts` 与 `vision/scripts/image_snapshot.py` 的 `$TMPDIR/dsh-ros2`），
+  外加 `ros2_install` 下载安装脚本的 `bootDir`（同上 `$TMPDIR/dsh-ros2`）。
+- **实测（修复前，本机真实产物）**：
+
+  ```console
+  $ ls -ld /tmp/dsh-ros2 /tmp/dsh-ros2/pty /tmp/dsh-ros2-moveit
+  drwx------ 3 stvli stvli   40 /tmp/dsh-ros2          ← 只是被 pty_session.py 的 chmod 顺手救过
+  drwx------ 2 stvli stvli 4096 /tmp/dsh-ros2/pty
+  drwxrwxr-x 2 stvli stvli    6 /tmp/dsh-ros2-moveit   ← 0775（umask 002 + mkdir）
+  ```
+
+  即：**同一个 `$TMPDIR/dsh-ros2` 下的 pty 子目录被 python 侧收紧过，而 moveit 的计划目录没有**。
+  `$TMPDIR` 是 **1777 sticky**：另一个本地用户可以先建这个目录（或建成符号链接），此后
+  `moveit_move` 往"别人的目录"里写计划、校验、审批、复验、执行。
+- **为什么这条落在运动路径上（不是普通文件权限问题）**：`moveit_move` 的六个 phase 里，
+  phase 1 写 `planFile`、phase 2 校验、phase 3 **人工审批（摘要只展示校验结论，不展示轨迹内容）**、
+  phase 4 **重新校验同一个路径**（指纹 + TTL）、phase 5 执行、phase 6 验证。目录可写意味着
+  ① 计划可被**读**走；② 计划可在 phase 4 与 phase 5 之间被**换成另一条仍然限位合法**的轨迹。
+  指纹复验把窗口压窄了，但**没有去掉**（攻击者只需在复验之后、python 打开文件之前替换）。
+- **修法**：新增 `packages/common/src/runtime-dir.ts` 的 `ensurePrivateRuntimeDir`，四处写之前统一调用。
+  判据与 `scripts/verification/`（第二十四轮）**同一套、同一顺序**：
+  符号链接**直接拒绝**（不看目标——链接可在检查与写入之间被换掉）→ 不是目录拒绝 →
+  **属主不是自己拒绝** → 宽于 `0700` 且是自己的则**收紧** → 不存在则以 `0700` **逐层**创建，
+  每层 `lstat` 复核（递归 `mkdir` 不会穿过别人的目录）。
+  与验证装置的唯一差别：这些目录是插件自己建的，所以"自己的宽权限目录"是**收紧**而不是拒绝
+  （否则每个已安装机器第一次升级都会被拒绝）。
+- **实测（修复后）**：
+
+  ```console
+  $ ls -ld /tmp/dsh-ros2-moveit
+  drwx------ 2 stvli stvli 6 /tmp/dsh-ros2-moveit      ← 0775 → 0700
+  ```
+
+- **可证伪测试**（+8 例，`packages/common/tests/runtime-dir.spec.ts`）：任意 umask 下逐层 `0700`、
+  自己的 `0775` 被收紧、符号链接（**叶子**与**中间层**两种）、普通文件、属主不是自己（用 `uid`
+  注入这个测试缝，否则要第二个账户）、`$TMPDIR` 之外配置目录不改 mode。
+  **撤门实测**：把 `planFileDir()` 换回 `mkdir` ⇒ moveit 的"计划目录私有"用例**变红**，且目录实测
+  回到 `775`（**这就是修复前的状态**）。
+
+#### 30.6.2 发现 2【已修·真实】**截图 / 取帧的 `output` 是免审批的任意路径写入**
+
+- **代码事实**（三个工具同一形状）：
+
+  ```ts
+  const output = opts.output && path.isAbsolute(opts.output)
+    ? opts.output
+    : path.join(dir, opts.output ?? default)
+  ```
+
+  文档说的是 "absolute path, or **filename under the screenshot dir**"，代码实现的是"原样接受"。
+  `ros2_image_snapshot` 更宽：helper 会 `os.makedirs(os.path.dirname(output))` 再写。
+- **实测（修复前，用**已构建的 `lib/`** 直接调 `GuiManager.capture`）**：
+
+  ```console
+  shot.png                                      -> /tmp/dsh-ros2/shot.png
+  ../../etc/evil.png                            -> /etc/evil.png            ← 相对名静默逃出
+  /home/stvli/Desktop/embody_agent_ws/index.html -> 原样接受（.html 也照写）
+  /root/x.png                                   -> 原样接受
+  ```
+
+  ⇒ 一个**免审批**工具可以用图片字节覆盖**任意可写文件**。判定与第二十一/二十二轮同一族：
+  不是 RCE，而是**没有门的写面**。
+- **修法**：新增 `packages/common/src/capture-output.ts` 的 `assessCaptureOutput`，三个工具在
+  **写之前 / 启动窗口之前**先判定（`ros2_gui_observe` 特意在 `gui.start` **之前**，避免为一个必然
+  被拒的目标拉起窗口）：
+  - 截图目录内 → **免审批**（默认用法一行没变）；
+  - 目录外 → **审批**（fail-closed，无审批服务即 `APPROVAL_DENIED`）；
+  - 拒绝类（审批也救不了，因为链接/inode 可在检查后被换掉）：相对名 `..` 逃逸、非图片扩展名
+    （`.png` / `.jpg|.jpeg`）、符号链接、非常规文件、**多硬链接**、父目录不存在。
+  `GuiManager.capture()` 自己**也**再判一次（defence in depth，但对"目录外"不做批准，只拒绝不可救的目标），
+  这样直接调 `capture()` 的调用方不会绕过。
+- **实测（修复后，同一脚本，built lib）**：
+
+  ```console
+  screenshot output=../../etc/evil.png                 REFUSED OUTPUT_TRAVERSAL
+  screenshot output=/home/.../index.html               REFUSED OUTPUT_NOT_IMAGE
+  screenshot output=/tmp/elsewhere.png                 REFUSED APPROVAL_DENIED
+  screenshot output=/tmp/elsewhere.png (+approval)     ok  path=/tmp/elsewhere.png
+  image_snapshot output=../../tmp/evil.jpg             REFUSED OUTPUT_TRAVERSAL
+  image_snapshot（默认）                                --output /tmp/dsh-ros2/snapshot_<ts>.jpg   ← 绝对路径
+  ```
+
+- **顺带修掉的一处不一致**：`ros2_image_snapshot` 此前**不传** `--output` 时，相对名会落在**当前
+  工作目录**（python 的默认才在 `$TMPDIR/dsh-ros2`），与文档不符。现在工具层自己算出**绝对**默认路径
+  交给 helper，走同一套判据。
+- **可证伪测试**（+12 例：common 11 + core 6 + vision 6，其中 core/vision 各 6 例是工具层）：
+  逃逸 / 扩展名 / 符号链接 / 目录 / 目录外需审批（含"有审批则通过且路径逐字相符"）/
+  `gui_observe` 在启动窗口前就拒绝（断言 `manager.list()` 为空）。**撤门实测**：
+  core **9 例**变红、vision **5 例**变红。
+- **边界（如实）**：审批只加在"目录外"。目录内仍免审批——但目标仍受类型/链接/扩展名约束，
+  且目录本身已被 §30.6.1 收紧为 `0700`（别人的东西进不来）。
+
+#### 30.6.3 发现 3【已修·真实】轨迹输入没有类型与大小门
+
+- **代码事实**：`moveit_move {mode:'trajectory'}` 与 `motion_validate` 的 `trajectory` 是调用方给的
+  路径，直接进 `readFile(file,'utf8')` 与 helper 的 `open(args.trajectory)`。
+- **形状**（与第二十四轮同族，且同一条注释早就写下过）：`/dev/zero` 是**永不 EOF 的字符设备**，
+  会被整段读入；符号链接会被跟随；任意大 JSON 会被整体解析。
+- **修法**：`checkTrajectoryFile()`：`lstat` 先行 → 符号链接拒绝、非常规文件拒绝、
+  **> 64 MiB 拒绝**（一条规划轨迹通常 ~1 MB），全部**不读**。两个入口都过这道门。
+- **实测（修复后，built lib）**：
+
+  ```console
+  motion_validate trajectory=/dev/zero        REFUSED TRAJECTORY_NOT_REGULAR_FILE
+  motion_validate trajectory=/not/here.json   REFUSED TRAJECTORY_NOT_FOUND
+  ```
+
+- **可证伪测试**（+5 例，`packages/moveit/tests/tools.spec.ts`）：不存在 / `/dev/zero` /
+  符号链接 / 稀疏文件 `truncate` 到 `64 MiB + 1` / 计划目录私有。
+  **两例既有测试因此变化**（原来用假路径 `/x.json`，现在被门正确拒绝）——本轮把它们改成**真实
+  临时文件**，而不是放宽门。
+
+#### 30.6.4 本轮改了什么、没改什么
+
+| 项 | 结论 |
+| --- | --- |
+| **改了运行时行为** | 是。`packages/{common,core,vision,moveit}/lib/` 都变了 ⇒ **需要重载**（§30.8） |
+| **新增审批点** | **1 类**：截图/取帧写到"截图目录之外"时需审批（fail-closed）。默认路径**一行没变**、仍免审批 |
+| **没改 L1 只读面** | 所有 `ros2_*_list|info|echo|show|type|find` 仍只读、仍免审批 |
+| **没改 L2 运动安全时序** | `moveit_move` 的 phase 1–6 顺序、`motion_validator`、`safety_monitor`、审批时序**一行未动**；只加了"计划目录必须私有"和"轨迹输入必须是常规文件且 ≤ 64 MiB" |
+| **依赖面** | **一行未动**（lockfile 未变） |
+| **工具 / 技能面** | 仍是 **81 / 9**（只加门、不改工具集合）；`ros2_image_snapshot` 从 `ros2Tool` 适配器改为显式 `defineTool`（需要 `exec` 才能审批） |
+| **破坏性变更（有意，已写进 CHANGELOG）** | ① `ros2_image_snapshot` 的 `output` 必须是 `.jpg/.jpeg`；② 相对名字不允许 `..` 逃出截图目录；③ 已存在的 `0775` 计划目录会被**收紧**（不是拒绝），本机已实测 `775 → 700` |
+| **没做（有意）** | ① python helper 被**直接**当 CLI 跑时的同类判据（§5 新条目，两侧实现不一致本身是事故源）；② `sessionRosSetup` 按会话隔离（新设计）；③ 审计 JSONL（§18 晚批）；④ `js/insecure-temporary-file` 那条告警本身；⑤ `ros2_screenshot` 的 `output` 是否还该允许绝对路径（当前选择"允许 + 审批"而不是"禁止"） |
+
+### 30.7 CodeQL / 计数（合入后实测）
+
+- CodeQL open **1 → 1**：仍是 `js/insecure-temporary-file` @ `scripts/verification/measure.mjs:104`，
+  按 §5/§29.7 的既有分类属"运行期属性"，**本轮不宣称关掉它**，也不拿"没新增告警"当安全证明。
+- Dependabot open **0 → 0**。
+- 用例 **379 → 415（+36）**：common 88 → **107**（+19）、core 156 → **162**（+6）、
+  vision 58 → **64**（+6）、moveit 16 → **21**（+5）。
+
+### 30.8 dsh-phoenix 循环（step 4）
+
+- **接线核对**：7 个 `link:` symlink 仍在（`~/.dsh/profiles/web/node_modules/dsh-ros2*` → `packages/*`），
+  本轮未动线。
+- **闭环**：gen-31 逐字命中 + 第二十四轮的活进程验收点实测通过（§30.3）。
+- **本轮需不需要重启？——需要**：`packages/{common,core,vision,moveit}/lib/` 的 mtime 都晚于进程
+  启动时间 `2026-10-28 04:16:01` ⇒ 跑着的 dsh 里还是**旧**代码（三条新门都还没生效）。
+- **登记 gen-32**（沿用既有最小失败面：空实现的动态 plugin + `cordis_run`，作为**本轮最后一个动作**）。
+  落地观察留给下一轮开工（§6 第 1 条已改写）。
+
+### 30.9 本轮发现（汇总）
+
+1. **【已修·真实·扫描器 0 提示·最有价值】** 固定 `$TMPDIR` 运行目录不是"自己的目录"，而其中
+   **计划轨迹目录实测 0775**：`moveit_move` 写 → 校验 → 审批 → 复验 → 执行的就是那个目录里的文件，
+   同组用户可读可换 ⇒ **校验过的轨迹与执行的轨迹可以不是同一条**（§30.6.1）。
+   **根因**：第二十四轮已经为"验证装置的固定 `/tmp` 目录"写下过判据，**但只应用在那一个路径上**；
+   同一张表上的另外四处（计划 / pty / 截图 / 安装脚本）没被问到——"修一处"再一次让"还有几处"停止被问。
+2. **【已修·真实】** 截图/取帧的 `output` 是**免审批的任意路径写入**：实测
+   `'../../etc/evil.png'` → `/etc/evil.png`、`.html` 也照写（§30.6.2）。这条**在 §5 里登记了三轮**
+   （第二十一轮起），本轮的入口就是它自己。
+3. **【已修·真实】** 轨迹输入没有类型/大小门：`/dev/zero`（永不 EOF）会被整段读入（§30.6.3）。
+   与第二十四轮同族——**"类型/大小/链接"这三个维度要成组地问**。
+4. **【已闭环·跨轮】** gen-31 逐字命中；且第二十四轮留下的**唯一活进程验收点**
+   （> 20 MiB 图片必须被拒）在活进程里实测通过：`图片过大：21.0 MiB 超过上限 20.0 MiB`（§30.3）。
+5. **【未变·如实】** 审计三档干净、密钥 0、发布面 9/9、CodeQL 1、Dependabot 0、工具面 81 / 技能 9。
+6. **【卫生】** 远端分支保持 **1 条**（`main`），PR #88 **合入即删**；本地仍留 7 条从未推送的历史分支
+   （单仓拆分前的形状，本轮不动，与上一轮同）。
+
+### 30.10 本轮最有价值的三个「读法」
+
+1. **"上一轮修过的那一处"和"同一张表上的另外几处"是两件事。** 第二十四轮为验证装置写下了
+   "固定 `/tmp` 路径必须证明是自己的"这条判据，并且写得很好——然后就只修了那一个路径。
+   同一个仓库里还有**四处**同样形状的固定路径，其中一处（计划轨迹）直接落在运动路径上。
+   ⇒ 一条新判据落地时，应当**把"同样形状的其它实例"列成清单**，而不是只修触发它的那一处。
+2. **登记 ≠ 处理，但登记就是入口。** `ros2_screenshot`/`ros2_image_snapshot` 的"免审批任意路径写入"
+   在 §5 里躺了**三轮**，每轮都写"若判定需要，单独一轮做"。本轮真正量了一下它的形状
+   （`'/etc/evil.png'`、`.html` 照写），才发现它不是"理论上的完整性风险"，而是**一行代码就能触发的**。
+   ⇒ 一条登记必须带上"代价多大"的实测，否则它会一直看起来不值得做。
+3. **"目录是别人的"这种缺陷在单用户机器上永远不显形。** 本轮最有价值的那条，在本机**唯一**能看到的
+   证据是 `ls -ld` 的 `drwxrwxr-x`——功能测试全绿、扫描器全绿、所有断言都过。
+   ⇒ 位置类（属主/权限/链接）缺陷要用**位置事实**去测（`lstat` 的 uid/mode/nlink），
+   而不是用"行为是否正常"去测。
+
+### 30.11 结论与下一步建议
+
+- **交付**：**1 个 PR（#88）**，3 个提交：`feat(common)`（两个新帮手 + 17 例单测）/
+  `fix(security)`（四处接线 + 工具层门 + 24 例测试）/ `docs`（CHANGELOG、`docs/safety.md`、
+  三个包 README、README/README_CN 用例数 361→415）。CI/CodeQL **5/5 绿**后 **squash 合入**并删除分支；
+  `main 9e13226 → 8740898`。**仍然不写本轮终点 SHA**（记录自身所在的 docs 提交会继续前推 `main`）。
+- **数字**（合入后实测）：用例 **379 → 415**；CodeQL **1 → 1**；Dependabot **0 → 0**；审计三档干净；
+  密钥 0；发布面 **9/9 CLEAN**；open issue / open PR **0 / 0**；远端分支 **1 条**；
+  工具/技能面 **81 / 9** 不变。
+- **线上价值**：① 一个**会驱动真实机械臂**的路径（计划轨迹目录）从"同组可写"变成"只有属主可进"，
+  并顺带收紧 pty 命令通道目录、截图目录与下载后要执行的安装脚本目录；② 三个免审批的图片写入面从
+  "任意路径"变成"目录内自由 / 目录外审批 / 不可救的目标拒绝"；③ 两个轨迹入口从"直接读"变成
+  "先证明它是常规文件、不是链接、不超过 64 MiB"。
+- **待运维**：
+  1. **确认 gen-32 落地**（下一轮开工看 journal 的 `restart requested (gen 32)` →
+     `executing deferred restart (gen 32)` → `loaded`）。
+  2. **重载后的活进程验收点**：`ros2_screenshot {output:'../../etc/x.png'}` 应返回 `OUTPUT_TRAVERSAL`；
+     `ros2_image_snapshot {}` 的 `command` 里应出现 `--output /tmp/dsh-ros2/snapshot_<ts>.jpg`（绝对路径）。
+     （注意：**别拿真路径试覆盖**——目录外的用例会先要审批。）
+  3. VLM 网关 `https://` / 回环迁移（第十四轮 #38，仍未动，属运维决定）。
+- **下次维护建议**：
+  1. **继续「执行面 × 审批面」对照**（连续五轮唯一真产出）。下一轮的新问题建议从这三条开始：
+     ① `packages/core/scripts/pty_session.py` 的 `--dir`（**直接 CLI 调用**时可指向任意目录，工具层已挡，
+     但脚本本身没判据）；② `ros2_vision_set_key` 写 `~/.dsh-ros2/secrets.json` 的**父目录**属主/权限
+     （与 §30.6.1 同族，还没量过）；③ `ros2_screenshot` 的 `screenshotCommand`（**配置**里的
+     `{output}` 模板，运营方可控但也是"模板拼路径"）。
+  2. **把"位置类判据"变成例行检查**（§30.10 第 3 条）：每轮 `ls -ld` 一遍所有由插件创建/写入的目录，
+     看 mode 与属主，而不是只看行为。
+  3. **新判据落地时列清单**（§30.10 第 1 条）：写下判据的同时列出"同样形状的其它实例"，
+     修触发它的那一处 + 至少量一遍其余的。
+  4. 读 §5 当待办清单；`pnpm audit` 一律走脚本；`gh` 失败先重试；**合入即删分支**。
+  5. `stale: false` 不可当"代码最新"的证据：看 `lib/` mtime vs 进程启动时间。
+  6. 撤门实测（把门删掉看几例变红）要在**本轮内**做并写进记录——本轮 core 9 例 / vision 5 例 /
+     moveit 1 例，且 moveit 那例把目录**还原成 0775**，正好复现了修复前的状态。
