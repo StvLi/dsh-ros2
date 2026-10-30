@@ -521,7 +521,7 @@ pnpm via `pnpm/action-setup@v6`). Node `^22.19 || >=24` is required.
 ```bash
 pnpm install
 pnpm run typecheck   # tsc --noEmit
-pnpm run test        # vitest (415 cases; plus 11 sidecar + 6 zero-pose + 29 robot-profile Python checks)
+pnpm run test        # vitest (425 cases; plus 11 sidecar + 15 zero-pose + 38 robot-profile + 16 private-path Python checks)
 pnpm run build       # tsc -> lib/ + lib/types/
 pnpm run audit       # supply-chain gate: runtime graph, high+ (the exact command CI runs)
 pnpm run audit:all   # ... plus the dev-only tooling that CI's gate deliberately excludes

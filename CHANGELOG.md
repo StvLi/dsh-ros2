@@ -78,6 +78,21 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 
 ### Changed
 
+- **`ros2_zero_pose_semantics {action:'analyze'}` 的输出多一个 `scratch_dir`**（第二十六轮）：
+  脚本与渲染帧不再落在固定 `/tmp` 坐标，而是落在本次运行独占的 `mkdtemp` 目录（`0700`）。
+  `image` 字段因此指向该目录内的 `zero_pose_scene.jpg`；该目录**故意保留**（与"以前会在
+  `/tmp` 留下帧"同样的可诊断性），路径直接回报给调用方。判据见 `### Fixed` 第三条。
+- **`robot_profile.py load` 会在 `warnings` 里报告档案/目录权限过宽**（第二十六轮）：只报告、
+  不改写。重新 `register` 或 `safety set` 会把档案收紧到 `0600`、目录收紧到 `0700`。
+- **`pty_session.py` 对被改过的会话目录以退出码 3 拒绝，且**在 `fork()` 之前**判定**（第二十六轮）：
+  `PRIVATE_DIR_SYMLINK` / `PRIVATE_DIR_NOT_DIR` / `PRIVATE_DIR_NOT_OWNED` 写进 stderr，
+  与 `PTY_UNAVAILABLE` 一样是"明确拒绝"而非 traceback。判据原来放在 `run_start` 里，而它只在
+  **被 daemon 化的子进程**中执行——那里的 stdout/stderr 是 `/dev/null`，于是在**能分配 pty 的机器**
+  （CI 与多数真机）上拒绝被吞掉，父进程照样打印 `started session … (pid N)` 并**退出 0**，留下一个
+  指向"不是自己的目录"的幻影会话（第十九轮为 pty 探测修过的同一形状）。现在判据前移到父进程，
+  `run_start` 里的调用保留为纵深。
+- **`dsh-ros2-common` 现在发布 `scripts/private_paths.py`**（第二十六轮）：`profile` / `core`
+  的 helper 从兄弟包加载它，加载不到就**报错退出**而不是静默跳过判据。
 - **`ros2_image_snapshot` 的 `output` 语义**（第二十五轮）：工具层自己算出默认的**绝对**路径
   `$TMPDIR/dsh-ros2/snapshot_<ts>.jpg` 并交给 helper（此前不给 `--output`，相对名会落在**当前工作
   目录**，与文档说的"默认在 `$TMPDIR/dsh-ros2`"不一致）；`output` 必须是 `.jpg`/`.jpeg`；
@@ -145,6 +160,41 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 
 ### Fixed
 
+- **机器人档案（含 `safety` 段）被写成了"其他用户可改"**（第二十六轮）：`robot_profile.py` 的四处
+  写入（`register` / `safety set` / `topology snapshot` / `topology learn`）都是
+  `os.makedirs(dir)` + `open(path, "w")`，权限完全由 umask 决定。**在一个全新 `$HOME` 里实测**
+  （宿主 umask 002）：`~/.dsh-ros2` **0775**、`robots/` **0775**、`robots/<name>.yaml` **0664**。
+  那个文件里正是 `safety` 段——`motion_validate` 校验轨迹用的限位、`safety_monitor` 判定的
+  阈值，以及 `require_limits` / `validation_ttl_ms` / `workspace` / `estop` 全在其中，于是同一台
+  机器上的另一个本地用户可以改写**安全包络**。`~/.dsh-ros2` 在多数机器上是 `0700` 只是因为
+  `secrets.ts` 顺手 chmod 了它自己写入的那一个目录——**没配 VLM Key 的机器上，第一次
+  `robot_register` 就会建出一条 0775 链**。现在新增
+  `packages/common/scripts/private_paths.py`（TS 侧 `runtime-dir.ts` 的 Python 对应实现），
+  四处写入统一走 `ensure_profile_dir()` + `write_private_file()`：逐层 `0700`、符号链接 /
+  非目录 / 属主不符直接拒绝、自己的宽权限目录收紧、文件 `0600`，且**先写临时文件再
+  `os.replace`**——替换的是目录项，所以种在档案路径上的符号链接会被**换掉而不是被跟随**。
+  `load()` 只在读取时**报告**旧权限（不改写），让升级前装好的机器可见。
+- **`ros2_zero_pose_semantics` 把脚本写到固定 `/tmp` 路径、然后执行那个路径**（第二十六轮）：
+  `publish_zero_joints()` 写 `/tmp/zero_pose_joints.py`（`open(…, "w")`）再
+  `Popen(["python3", "/tmp/zero_pose_joints.py"])`。**实测**：在该路径预置一个指向受害文件的
+  符号链接后调用**真函数**，受害文件被生成脚本覆写（`ORIGINAL` → 脚本内容），子进程接着执行
+  该路径——写入与执行解析的是同一个可预测坐标，攻击者只要在 close 与 exec 之间换掉链接，
+  就能决定受害者执行的代码。现在每次运行 `mkdtemp` 一个私有目录（`0700`），脚本 `0600` 写入
+  并执行该目录内的**真实路径**；渲染帧也落在同一目录（不再用
+  `/tmp/zero_pose_scene_<ts>.jpg`）；`confirm` 写 `~/.dsh-ros2/zero-pose.yaml` 同样收紧为 `0600`。
+- **`pty_session.py` 的"这是不是自己的目录"判据与 TS 侧不一致**（第二十六轮；第二十五轮 §5
+  登记项）：工具层已用 `ensurePrivateRuntimeDir` 门住 `$TMPDIR/dsh-ros2/pty`，但 helper 被**直接
+  当 CLI 跑**时只强制了模式——`os.makedirs(exist_ok=True)` 会**穿过**符号链接、会安静地写进别人的
+  目录，`_chmod_quietly` 还把 chmod 失败吞掉，而 `<sid>.in` 是被驱动进程的 stdin（命令通道）。
+  现在两侧共用同一套判据（Python 侧 `private_paths.ensure_private_dir`，拒绝时退出码 3），
+  并新增 `packages/common/tests/private-paths-parity.spec.ts`：**把同一组磁盘形状同时喂给 TS 与
+  Python，要求两者给出完全相同的裁决与拒绝码**（缺链自建 / 自己的 0775 收紧 / 叶子与中间层
+  符号链接 / 普通文件 / 属主不符（uid 注入）/ 锚点之外不改模式）。"同一判据两份实现"由此从
+  "事故源"变成"被测试钉住的纵深"。
+- **用例 415 → 425 例**（第二十六轮 +10：common +7 一致性、core +3 helper 拒绝），Python 自检
+  另 **+34** 项（`robot_profile` 29 → 38、`zero_pose_semantics` 6 → 15、新增 `private_paths` 16）。
+  撤门实测：档案写入改回 `open(path, "w")` → **4 例变红且文件实测 `0o666`**；
+  `publish_zero_joints` 改回固定 `/tmp` → **3 例变红**；helper 判据改回"只 chmod" → **3 例变红**。
 - **固定 `$TMPDIR` 运行目录从来不是"自己的目录"**（第二十五轮）：`$TMPDIR` 是 1777 sticky
   目录，所以**任何固定名字都可能被别人先建**——建成他拥有的目录，或建成符号链接。而这三处固定
   路径此前都是直接 `mkdir -p` 后开写：`$TMPDIR/dsh-ros2-moveit`（**计划轨迹**）、

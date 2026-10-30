@@ -22,6 +22,7 @@ Output: JSON
 """
 import argparse
 import glob
+import io
 import json
 import os
 import re
@@ -30,8 +31,52 @@ import sys
 import time
 import xml.etree.ElementTree as ET
 
+try:
+    import private_paths
+except ImportError:  # pragma: no cover - an odd loader (runpy / -m) drops __file__'s dir
+    import importlib.util as _ilu
+    _HERE = os.path.dirname(os.path.abspath(__file__))
+    _SPEC = _ilu.spec_from_file_location("private_paths", os.path.join(_HERE, "private_paths.py"))
+    if _SPEC is None or _SPEC.loader is None:  # fail loud: the criterion must never vanish
+        raise
+    private_paths = _ilu.module_from_spec(_SPEC)
+    _SPEC.loader.exec_module(private_paths)
+
 DEFAULT_DIR = os.path.expanduser("~/.dsh-ros2/robots")
 ZERO_POSE = os.path.expanduser("~/.dsh-ros2/zero-pose.yaml")
+
+
+def ensure_profile_dir(anchor=None) -> dict:
+    """Create/verify `~/.dsh-ros2` and the profiles dir as owner-private (0700).
+
+    Both levels are checked, not just the leaf: `~/.dsh-ros2` is created here on
+    a host that never configured a VLM key (`secrets.ts` is the only other
+    writer, and it only chmods the directory it writes itself). Measured on a
+    fresh HOME before this fix: `~/.dsh-ros2` 0775, `robots/` 0775,
+    `robots/t1.yaml` 0664 — and that file holds the safety limits.
+    """
+    return private_paths.ensure_private_dir(DEFAULT_DIR, label="机器人档案目录", anchor=anchor)
+
+
+def profile_text(data) -> str:
+    """Serialise a profile exactly as every writer used to, one place only."""
+    import yaml as pyyaml
+    buffer = io.StringIO()
+    buffer.write("# robot body profile (written by dsh-ros2 robot_profile)\n")
+    pyyaml.safe_dump(data, buffer, allow_unicode=True, sort_keys=False)
+    return buffer.getvalue()
+
+
+def write_profile(data, path) -> str:
+    """Write a profile 0600, atomically, after proving its directory is ours.
+
+    Replaces the four hand-rolled `open(path, "w")` blocks (register /
+    safety_set / topo_snapshot / topo_learn). Those inherited the umask (0664)
+    and followed a symlink planted at the profile path.
+    """
+    ensure_profile_dir()
+    return private_paths.write_private_file(path, profile_text(data))
+
 
 # A profile name becomes the YAML file name, so it must be one safe path
 # component: no separator, no `.`/`..`, no control characters. Mirrors
@@ -286,9 +331,7 @@ def safety_set(name: str, key: str, value_json: str) -> dict:
     problems = validate_safety(safety)
     if problems:
         return {"ok": False, "error": "safety 校验失败: " + "; ".join(problems)}
-    with open(path, "w") as f:
-        f.write(f"# robot body profile (written by dsh-ros2 robot_profile)\n")
-        pyyaml.safe_dump(data, f, allow_unicode=True, sort_keys=False)
+    write_profile(data, path)
     return {"ok": True, "robot": name, "key": key, "value": value,
             "problems": validate_safety(safety), "profile_path": path}
 
@@ -484,10 +527,7 @@ def topo_snapshot(name: str) -> dict:
     robot.setdefault("topology", {})["snapshot"] = snapshot
     # 保留已学习节点
     robot["topology"].setdefault("nodes", {})
-    with open(path, "w") as f:
-        f.write(f"# robot body profile (written by dsh-ros2 robot_profile)\n")
-        import yaml as pyyaml
-        pyyaml.safe_dump(data, f, allow_unicode=True, sort_keys=False)
+    write_profile(data, path)
     return {"ok": True, "snapshot": snapshot, "learned_nodes": len(robot["topology"]["nodes"])}
 
 
@@ -511,10 +551,7 @@ def topo_learn(name: str, node: str, role: str, description: str,
         "learned_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
     }
     nodes[node] = entry
-    with open(path, "w") as f:
-        f.write(f"# robot body profile (written by dsh-ros2 robot_profile)\n")
-        import yaml as pyyaml
-        pyyaml.safe_dump(data, f, allow_unicode=True, sort_keys=False)
+    write_profile(data, path)
     return {"ok": True, "node": entry, "learned_nodes": len(nodes)}
 
 
@@ -721,8 +758,10 @@ def topo_search(name: str, query: str = "", field: str = "all", topic: str = "")
 def register(name: str, urdf: str, srdf: str, description: str) -> dict:
     if not safe_name(name):
         return unsafe_name_error(name)
-    profile_dir = os.path.dirname(os.path.join(DEFAULT_DIR, name + ".yaml"))
-    os.makedirs(profile_dir, exist_ok=True)
+    # Owner-private, every level, before anything is written (round 26): this
+    # used to be a bare `os.makedirs`, which inherited the umask and produced a
+    # 0775 chain on a default account.
+    ensure_profile_dir()
 
     urdf_xml = ""
     if urdf:
@@ -763,10 +802,7 @@ def register(name: str, urdf: str, srdf: str, description: str) -> dict:
         }
     }
     path = os.path.join(DEFAULT_DIR, f"{name}.yaml")
-    with open(path, "w") as f:
-        import yaml as pyyaml
-        f.write(f"# robot body profile (written by dsh-ros2 robot_profile)\n")
-        pyyaml.safe_dump(profile, f, allow_unicode=True, sort_keys=False)
+    write_profile(profile, path)
     # Fail loud instead of silently shipping an unusable tf_root: downstream
     # (offscreen Fixed Frame, TF baselines) reads it from the written profile.
     warnings = []
@@ -805,6 +841,14 @@ def load(name: str):
                 "档案 tf_root 为空（来源：" + str(robot.get("tf_root_source") or "未记录") +
                 "）：离屏渲染无法设置 Fixed Frame，TF 基线校验不可用；"
                 "请确认广播者在线后重新 register。")
+        # Read-time privacy surface (never mutates): an install created before
+        # round 26 left the profile 0664 in a 0775 directory, and this file
+        # carries the `safety` section — the very limits a trajectory is
+        # validated against and the thresholds safety_monitor latches on.
+        for suspect, label in ((path, "机器人档案"), (os.path.dirname(path), "档案目录")):
+            note = private_paths.privacy_warning(suspect, label)
+            if note:
+                warnings.append(note)
         return {"ok": True, "robot": robot, "profile_path": path, "warnings": warnings}
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "error": f"解析档案失败: {e}"}
@@ -821,10 +865,30 @@ def selftest() -> int:
     (no ROS2, no PyYAML, no network). Exits 0 when every check passes."""
     ok = True
 
-    def check(label, cond):
+    def check(label, cond, detail=""):
         nonlocal ok
-        print(("PASS  " if cond else "FAIL  ") + label)
+        print(("PASS  " if cond else "FAIL  ") + label + ("" if cond else "  " + str(detail)))
         ok = ok and bool(cond)
+
+    # "An install from before the fix" is reproduced through the UMASK, not
+    # `chmod(<wide literal>)`: the old code's 0775/0664 were umask-derived, so this
+    # is truer to the bug — and a chmod with group/other bits is precisely what a
+    # code scanner should report.
+    def make_dir_with_umask(path_, umask_value):
+        import tempfile as _tf  # noqa: F401 - keeps the helper self-contained
+        saved = os.umask(umask_value)
+        try:
+            os.makedirs(path_, exist_ok=True)
+        finally:
+            os.umask(saved)
+
+    def make_file_with_umask(path_, text, umask_value=0o002):
+        saved = os.umask(umask_value)
+        try:
+            with open(path_, "w") as handle:
+                handle.write(text)
+        finally:
+            os.umask(saved)
 
     check("safe_name accepts a plain name", safe_name("lite"))
     check("safe_name accepts . _ - inside", safe_name("lite-v2.1_a"))
@@ -897,8 +961,91 @@ def selftest() -> int:
           urdf_root_link("<robot") == "")
     check("urdf_root_link tolerates an empty URDF",
           urdf_root_link("") == "")
+
+    # --- round 26: the profile is safety data, so it must be owner-private ---
+    # Before this, `register` used a bare `os.makedirs` + `open(path, "w")`: on a
+    # fresh HOME with the default umask that produced 0775 / 0775 / 0664 (measured),
+    # and the file carries the `safety` limits a trajectory is validated against.
+    saved_dir = globals()["DEFAULT_DIR"]
+    saved_umask = os.umask(0)  # hostile: the modes must not depend on the umask
+    try:
+        import tempfile
+        with tempfile.TemporaryDirectory() as home:
+            globals()["DEFAULT_DIR"] = os.path.join(home, ".dsh-ros2", "robots")
+            ensure_profile_dir(anchor=home)
+            chain = [os.path.join(home, ".dsh-ros2"), DEFAULT_DIR]
+            modes = [os.stat(p).st_mode & 0o777 for p in chain]
+            check("ensure_profile_dir creates both levels 0700 under umask 000",
+                  modes == [0o700, 0o700], [oct(m) for m in modes])
+
+            # A directory written by the pre-round-26 code is tightened, not refused.
+            import shutil as _shutil
+            _shutil.rmtree(os.path.join(home, ".dsh-ros2"))
+            make_dir_with_umask(os.path.join(home, ".dsh-ros2"), 0o002)  # 0775
+            make_dir_with_umask(DEFAULT_DIR, 0o002)                      # 0775
+            ensure_profile_dir(anchor=home)
+            check("ensure_profile_dir tightens a pre-existing 0775 chain",
+                  stat_mode(os.path.join(home, ".dsh-ros2")) == 0o700
+                  and stat_mode(DEFAULT_DIR) == 0o700)
+
+            # A symlinked profile directory is refused outright (uid=seam via lstat).
+            real = os.path.join(home, "elsewhere")
+            os.makedirs(real)
+            os.rmdir(DEFAULT_DIR)
+            os.symlink(real, DEFAULT_DIR)
+            check("ensure_profile_dir refuses a symlinked profile dir",
+                  _raises(lambda: ensure_profile_dir(anchor=home)))
+
+            # write_profile: 0600, and it REPLACES a planted symlink at the
+            # profile path instead of writing through it.
+            try:
+                import yaml  # noqa: F401 - only the real writer needs PyYAML
+                have_yaml = True
+            except ImportError:
+                have_yaml = False
+            if have_yaml:
+                os.unlink(DEFAULT_DIR)
+                os.makedirs(DEFAULT_DIR, 0o700)
+                victim = os.path.join(home, "victim.txt")
+                with open(victim, "w") as handle:
+                    handle.write("ORIGINAL")
+                planted = os.path.join(DEFAULT_DIR, "lite.yaml")
+                os.symlink(victim, planted)
+                write_profile({"robot": {"name": "lite"}}, planted)
+                check("write_profile does not write through a planted symlink",
+                      open(victim).read() == "ORIGINAL", open(victim).read())
+                check("write_profile lands 0600 on the profile",
+                      stat_mode(planted) == 0o600, oct(stat_mode(planted)))
+
+                # ... and a wide file left by the old code is tightened on write.
+                os.unlink(planted)
+                make_file_with_umask(planted, "# robot body profile\nrobot: {}\n")
+                write_profile({"robot": {"name": "lite"}}, planted)
+                check("write_profile tightens an existing 0664 profile",
+                      stat_mode(planted) == 0o600)
+
+                # load() surfaces an install that is still wide, without mutating it.
+                check("load() is quiet about a private profile",
+                      not any(planted in w for w in load("lite")["warnings"]),
+                      load("lite")["warnings"])
+                os.unlink(planted)
+                make_file_with_umask(planted, "robot: {name: lite, tf_root: base_link}\n")
+                wide = [w for w in load("lite")["warnings"] if planted in w]
+                check("load() warns about a 0664 profile", len(wide) == 1, wide)
+                check("load() does not tighten on read (no side effect)",
+                      stat_mode(planted) == 0o664)
+            else:
+                print("  SKIP  write_profile/load privacy checks (PyYAML not installed)")
+    finally:
+        os.umask(saved_umask)
+        globals()["DEFAULT_DIR"] = saved_dir
+
     print("SELFTEST " + ("OK" if ok else "FAILED") + " (robot_profile)")
     return 0 if ok else 1
+
+
+def stat_mode(path) -> int:
+    return os.stat(path).st_mode & 0o777
 
 
 def _raises(fn) -> bool:
