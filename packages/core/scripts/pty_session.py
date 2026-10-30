@@ -45,7 +45,27 @@ import re
 import select
 import signal
 import sys
+import tempfile
 import time
+
+try:
+    import private_paths
+except ImportError:  # pragma: no cover - run from an odd loader
+    import importlib.util as _ilu
+    _HERE = os.path.dirname(os.path.abspath(__file__))
+    _PKGS = os.path.dirname(os.path.dirname(_HERE))  # <…>/packages or node_modules
+    _found = None
+    for _cand in (os.path.join(_PKGS, "common", "scripts"),
+                  os.path.join(_PKGS, "dsh-ros2-common", "scripts")):
+        _target = os.path.join(_cand, "private_paths.py")
+        if os.path.isfile(_target):
+            _found = _target
+            break
+    if _found is None:  # fail loud: the criterion must never silently vanish
+        raise
+    _SPEC = _ilu.spec_from_file_location("private_paths", _found)
+    private_paths = _ilu.module_from_spec(_SPEC)
+    _SPEC.loader.exec_module(private_paths)
 
 PID = str(os.getpid())
 DIR = os.path.join(os.environ.get("TMPDIR", "/tmp"), "dsh-ros2", "pty")
@@ -90,25 +110,29 @@ FILE_MODE = 0o600
 
 
 def ensure_private_dir(path_):
-    """Create `path_` as 0700, whatever the umask says.
+    """Create `path_` as 0700 and PROVE it is a directory this user owns.
 
-    `os.makedirs(mode=…)` applies the mode to the LEAF directory only, and
-    neither `mkdir` nor `makedirs` changes a directory that already exists — so
-    the mode has to be forced explicitly to survive an inherited umask.
+    Round 25 forced the mode and stopped there; the criteria it did not apply
+    were the ones that matter for a coordinate someone else may have created
+    first: `os.makedirs(..., exist_ok=True)` walks THROUGH a symlink, writes
+    happily into a directory owned by another local user, and the old
+    `_chmod_quietly` hid a failure. `DIR/*.in` is the stdin channel of the
+    process being driven, so "whose directory is this" is the whole question.
+
+    The criteria now come from `packages/common/scripts/private_paths.py`, the
+    Python counterpart of `packages/common/src/runtime-dir.ts` (the two are
+    pinned to identical verdicts by `tests/private-paths-parity.spec.ts`). Only
+    the anchor differs: an explicit `--dir` outside the temp root is the
+    caller's own directory, so its mode is left alone — the documented rule.
     """
-    parent = os.path.dirname(path_)
-    if parent and not os.path.isdir(parent):
-        os.makedirs(parent, mode=DIR_MODE, exist_ok=True)
-        _chmod_quietly(parent, DIR_MODE)
-    os.makedirs(path_, mode=DIR_MODE, exist_ok=True)
-    _chmod_quietly(path_, DIR_MODE)
-
-
-def _chmod_quietly(path_, mode):
     try:
-        os.chmod(path_, mode)
-    except OSError:
-        pass
+        private_paths.ensure_private_dir(path_, label="PTY 会话目录",
+                                         anchor=tempfile.gettempdir())
+    except private_paths.PrivatePathError as error:
+        # Exit 3 = "refused on purpose", distinct from exit 2 (bad arguments) and
+        # from a traceback. The tool layer reads stderr verbatim.
+        sys.stderr.write("%s: %s\n" % (error.code, error.message))
+        sys.exit(3)
 
 
 def open_private(path_, mode="w"):
@@ -396,15 +420,19 @@ def main():
         if not rest:
             print("start requires a command", file=sys.stderr)
             sys.exit(2)
-        # Fail fast and loudly for the same reason as `safe_sid` above: the
-        # daemon's stdio is /dev/null, so "out of pty devices" vanished there
-        # while this process printed `started session …` and exited 0. The
-        # session files are still created (with state=failed) so the failure is
-        # observable from `status` and their modes stay testable.
+        # The directory criterion must run HERE, in the parent, BEFORE the fork —
+        # for exactly the reason the pty probe does. The daemon's stdio is
+        # /dev/null, so a refusal that happened after `os.fork()` died silently
+        # there while this process printed `started session … (pid N)` and exited
+        # 0: a phantom session in a directory that was never ours. Measured on a
+        # pty-capable host (CI): a symlinked `--dir` produced exit 0, while on a
+        # host that cannot allocate a pty the same call exited 3 — the local suite
+        # was green for the wrong reason. `run_start` keeps its own check for the
+        # daemon path (defence in depth).
+        ensure_private_dir(DIR)
         try:
             pty_probe()
         except OSError as e:
-            ensure_private_dir(DIR)
             out_path, in_path, _ = paths(args.sid)
             for p in (out_path, in_path):
                 with open_private(p, "w") as _f:
