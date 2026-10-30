@@ -1,7 +1,7 @@
 # dsh-ros2 日常维护文档（Maintenance Log）
 
 > 仓库：`StvLi/dsh-ros2` · 本地代码：`/home/stvli/Desktop/embody_agent_ws/dsh-ros2`（git remote `git@github.com:StvLi/dsh-ros2.git`）
-> 维护日期：2026-10-28（最近一轮） · 维护者：DSH scheduled-run agent（StvLi 仓）
+> 维护日期：2026-10-30（最近一轮） · 维护者：DSH scheduled-run agent（StvLi 仓）
 > 维护轮次：第一轮 2026-09-03（§0–§7）；第二轮 2026-09-04（§8）；第三轮 2026-09-05（§9，安全修复）；第四轮 2026-09-05（§10，无 open issue → 安全检查 → 两项维护卫生修复）；第五轮 2026-09-06（§11，无 open issue → 安全检查 → 落地 `ros2_install` 注入修复）；第六轮 2026-09-11（§12，无 open issue → 安全检查 → 落地 `safety_monitor` / `zero_pose_semantics` 注入修复 + vitest 4 升级 + CI 最小权限）；第七轮 2026-09-13（§13，open issue #19 → journey skills + 组合不变量）；第八轮 2026-09-14（§14，3 个 open issue → #21 修复并真机复核、#22 落地但保留 open、#19 完成验收测量）；第九轮 2026-09-21（§15）：open issue #22 → 补齐"会话技能目录对账"（其唯一未实现项）+ 修复 `ros2_env_check` 的"报告 ≠ 执行"缺陷（第八轮存疑项的真因）+ 安全复测；**第十轮 2026-09-22（§16，本轮）：补齐第九轮"在途无 PR"的缺口（PR #27，CI 首跑即抓出"本地绿、CI 红"）→ 在运行中进程里验收并关闭 issue #22 → 定位并修复线上故障真因（`rosSetup` 只校验第一段）→ 3 个 PR 全部合入 main**；第十二轮 2026-09-24（§17，收尾超时遗留的在途 PR #32 → 实测第十轮的重启请求已按硬期限落地 → 修复"配置没送到 doctor"的接线缺口 + API Key 来源语义）；第十三轮 2026-09-25（§18，0 open issue / 0 open PR → 安全扫描发现并落地 3 处真实缺陷 = PTY 会话 id 路径穿越 · 发布物携带 `__pycache__` 字节码 · 安装器选项注入，并开启 Dependabot 告警）；**第十四轮 2026-09-26（§19）：0/0 → 先闭环第十三轮唯一的未闭环观测（gen-21 重启逐字命中），再落地 3 个 PR = 明文传输的 VLM API Key 可见化 · 插件自建 IPC 对象权限收紧（PTY 会话文件 / sidecar UDS / 安装器脚本）· Dependabot 版本更新；并把跨五轮未处理的部署配置项升级为 issue #40；**第十五轮 2026-09-29（§20）：open issue #40 → step 2 评估（合理、必要，但配置在仓库外且需运维决定）→ **承接上一轮时间窗被截断留下的在途分支** `fix/workspace-path-hygiene` 并落地 `fix(common)`：自愈探针用**原始文本**比对存在性，把**存活但写成 `~/…`** 的工作区判为缺失、剔除该段、并在只剩它时**静默切换到 `/opt/ros/<distro>`** —— 恰是本轮文档新推荐的路径形式；闭环第十四轮的 gen-22 观测（逐字命中）；实测线上 **6 处**死链（issue #40 少算 1 处）；本轮**无 GitHub API token**，改用一次性 `ci/probe-*` 分支取得 CI（Node 22/24 双绿）后删除**；**第十六轮 2026-09-30（§21，本轮）：open issue #40 → step 2 复核（逐字确认**仍然准确**、更正为**实测 6 处**死链、结论仍交运维）→ **上一轮唯一的运维缺口已消失：`gh` 有了 token**，于是第一个动作就是把第十五轮卡住的在途分支**开成 PR #48、CI 双绿后合入 main**（第一次拿到**真实** PR CI，不再需要 `ci/probe-*` 代跑）；随后落地 3 个 PR = `fix(packaging)` 发布面 `__pycache__` 守卫（**此前只有"碰巧出现过"的那 3 个包有守卫**，实测 moveit 可复现泄漏 `.pyc`）+ `ci(security)` **CodeQL 代码扫描基线**（第十四/十五轮连续两次建议、本轮首次落地）+ `fix(security)` 首个基线 **29 条告警**中的**2 处真实缺陷**（`ros2_interface_create` 的 TOCTOU 可被符号链接穿出 · 自愈探针的自动探测路径未加引号）；Dependabot 积压 6 → 4（#47 合入并替掉失败的 #44）**；**第十七轮 2026-10-01（§22，本轮）：open issue #40 → step 2 第三次复核（事实逐字不变、结论仍交运维、故不再重复评论）→ 把第十六轮**有意不修**的 3 条 ReDoS 告警**先测量再修**：走真实入口实测后只有 **1 条真实可达**（`parseTopicList`，n=4000 阻塞 **14.8 s**，k=2.11；并发现**第二种**形状 `[`×n+` ]x]` 在 n=20000 阻塞 **697 ms**）、1 条被调用方的 `trim()`/`split('\n')` **消掉而不可达**、1 条**不可复现**（贪婪 `.*` 一步到 `$`，不回溯）→ 三条全部改为**可证明线性**的扫描 + `chars.ts` 逐码点字符类 + **差分等价测试**（穷举 + 10 万条随机/解析器，**0 分歧**），PR #55 CI/CodeQL **5/5 绿**后合入；**闭环第十六轮唯一的遗留观测**（gen-24：`lifecycleState: running`、无残留 `deferDeadline`、`pendingResume: false`）；Dependabot 积压 4 → 3（#43 vitest 4→5 dev-only 合入；#42/#45/#46 抬的是 **type-only peer 下界**，而 CI 装的是**该 PR 自己抬上去的 devDependency** ⇒ **结构上无法评估下界**，升级为 **issue #56**）；CodeQL open **13 → 10**；发布面用**预先种入 `.pyc` + 摘守卫正向对照**复测 9/9 CLEAN；并更正第十六轮快照表里与 §21.8 矛盾的"main 344"（实测 **347**）**。；**第十九轮 2026-10-11（§24，本轮）：open issue #40 → step 2 第五次复核（事实逐字不变、结论仍交运维）→ **把 §5「已知限制」里从第一轮躺到现在的 PTY 幻影会话修掉**：实测旧行为比原文更严重（无 pty 时 `start` 退出 0 并打印 `started session … (pid N)`，`status` **永远**报 `STATE running`，**连不存在的会话 id 也报 running**）⇒ 在父进程 fork 前探测 pty、失败写 `state=failed` 并退出 3、工具返回明确的 `PTY_UNAVAILABLE`；顺带查出**同一个 REMAINDER 解析缺陷**把 `--dir` 当参数投喂给下载来的 sudo 安装脚本（安装器 argv 实测 `["--dir", <dir>]`，修后为 `[]`），且 `--all` 名义存在却不可达 ⇒ 改为"flag 必须在 action 之前"并对 `status`/`stop` 的多余参数**报错而非静默忽略**；**安全扫描发现本地审计门禁在这台机器上根本跑不起来**（`~/.npmrc` 指向的镜像没有 advisory 端点⇒ 前几轮"本地复算供应链"实际无法复现）⇒ 把权威 registry 钉进 `pnpm run audit` / `audit:all` 并让 CI 调用同一条命令；文档计数全面漂移的修正**其中一次被仓库自己的组合不变量测试当场打回**（README 的 83 是"全家族六包"、聚合包只挂 81 ⇒ 改回 83，并在安装步骤把两个数分别说清）→ 并把它升格为 **issue #68**；2 个 PR（#66/#67）CI/CodeQL **5/5 绿**后合入，`main 66a139a → 7dc553f`**。**第二十轮 2026-10-12（§25，本轮）：2 open issue（#40 + #68）→ **issue #68 落地**（`fix(metadata)`：聚合包按"它实际挂的东西"宣称 81、家族 83 仍是家族的数）→ 顺带扫出**同一类缺陷的更大缺口**：三个**已发布**的 per-package `README.md` 从未被任何不变量读过（core 33 对 61、vision 5 对 7、聚合 51+4 对 81+9），已修并把"每个包 README 的第一个工具计数必须等于实测"写进组合不变量（**可证伪**：换回修复前文件即报 `expected 33 to be 61`）→ **issue #40 第六次复核后经运维确认、本轮真正落地**（备份 + 删 5 条死段尾 + 删第 63 行整条 `rosSetup`，YAML 校验通过，行为与自愈后的实际链逐字等价，等 gen-27 重启生效）→ 安全扫描审计/密钥/发布面/CodeQL 全不变（10 条 open 同规则同数量）、**远程已合并分支 16 → 1**（15 条全部是 main 的祖先）→ 1 个 PR（#70）CI/CodeQL **5/5 绿**后合入，`main 7dc553f → 316c142`，**open issue 归零**。**
 >
 > **第二十一轮 2026-10-13（§26，本轮）：0 open issue / 0 open PR → 走 step 5；先闭环上一轮唯一的未闭环观测（gen-27 逐字落地于 10-12 12:40:48，且 `ros2_env_check` 不再报 `missingSources` = issue #40 的最终判据达成）→ 安全扫描沿用同口径全绿（audit prod/含 dev 干净、CodeQL 10 不变、密钥 0、发布面 9/9 CLEAN、Python/TS 执行面与既有防线逐条回归）→ **但真正的高价值发现不是扫描器给的**：把"每个能执行/输入的接口"与"审批面"对照后，发现 `ros2_gui_interact` 可以在**无审批、无目标限制**下把任意按键/文本送进**任意窗口**（选中终端即宿主机命令执行），而更窄的 `ros2_run`/`ros2_service_call` 反而都要审批；且这本是仓库**自己**在 `docs/safety-todo.md` §17 / 验收 #11 决定过、却一直未落地的事（README 还反过来写着"no approval, same as other L3 tools"）→ 落地 `fix(security)`：默认应用白名单（rviz2/rqt/rqt_graph，可配 `guiAllowedApplications`）+ 按**解析后**窗口标题判定 + 白名单外（含不传 `windowTitle`）**先审批**且 fail-closed；用例 **362 → 371**（+9，且删掉 gate 块会让 3 条断言当场变红）；PR #73 CI/CodeQL **5/5 绿**后合入，`main 845f04f → 4ab647c`，并登记 gen-28 让这**真实的运行时变更**（`lib/` 变了）在跑着的 dsh 里生效。**
@@ -12,6 +12,23 @@
 > **第二十三轮 2026-10-27（§28）：0 open issue / **2 open PR** → 接手前一日被中断会话的在途实现并逐条复算 → 落地"依赖图的 peer 盲区"（`vite` floor + 每周定时复核 workflow）→ 两条 Dependabot PR 一合一度（#81 合入 / #82 close 并加 ignore）→ 安全扫描挖出**扫描器一条都不报**的 `/tmp/ros-log-<uid>`（可预测、被全进程复用）与**静默失效**的运维指示（把 `auditConfig` 写进 pnpm 11 不再读的 `package.json` 字段）→ 用例 375 → 376，CodeQL 8 → 3、Dependabot 5 → 0（均为合入后实测）；`main` 起点 `5a82f61`，登记 gen-30。**
 
 > **第二十四轮 2026-10-28（§29，本轮）：0 open issue / 0 open PR → 走 step 5；先逐字闭环 gen-30（22:30:14 `restart requested` → 22:45:14 `scheduling` → 22:45:26 新 PID `loaded`，state `running`/`deferDeadline: 0`），并实测 `/tmp/ros-log-<uid>` 已被 `mkdtemp` 取代（`/tmp/ros-log-1000` 不存在，兜底目录全是 `0700` 随机名）→ 安全扫描（审计三档/密钥 0/发布面 9/9/Dependabot 0）与上一轮同口径全绿 → **"执行面 × 审批面"第四次连做，第四次仍是唯一真产出**：`ros2_vision_describe` 的 VLM 上传面在第二十二轮被改成"按内容判定是不是图片"，却**从没人问过"有多大"**——头部嗅探通过后 `readFile` 整个读入、base64（4/3）后一次性 POST（实测 300 MB → RSS **59 → 759 MB**，400 ms），再大就把宿主 agent 进程连同所有会话 OOM 掉；顺带收掉 §5 登记两轮的"验证装置固定 `/tmp` 运行目录可被他人预置"（两侧同一套拒绝：符号链接/非目录/属主/权限，退出码 3）→ 用例 376 → 379，**CodeQL 3 → 1，但那 2 条的关闭是可见性下降而不是安全提升（§29.7 逐字说明）**，`main` 起点 `40172e4`，修复合入于 `8176bde`（PR #86）。**
+
+> **第二十六轮 2026-10-30（§31，本轮）：0 open issue / 0 open PR → 走 step 5；宿主 13:27 刚重启、
+> gen-32 顺带落地（`updatedAt 13:27:38`，`deferDeadline: 0`），并逐条闭环第二十五轮留下的**两个**
+> 活进程验收点（`OUTPUT_TRAVERSAL` 在启动前拒绝 · `--output` 已是绝对路径）→ 安全扫描同口径全绿 →
+> 「执行面 × 审批面」第六次连做，问题换成更直接的一句**"这个路径凭什么是我的？"**，产出 3 个真缺陷：
+> **机器人档案（含 `safety` 段）在全新 `$HOME` 上是 0775/0775/0664**（`motion_validate` 的限位 +
+> `safety_monitor` 的阈值都从它读，同机可改；根因是 `secrets.ts` 只 chmod 了它自己写入的那一个目录，
+> **兄弟目录 `robots/` 从此没人再看**）· **zero-pose 写固定 `/tmp` 脚本并执行该路径**（实测符号链接
+> 可把写入重定向到受害文件）· **`pty_session.py` 的目录判据只 chmod、不查属主/链接**（第二十五轮 §5
+> 登记项）→ 新增 `private_paths.py` 作为 TS 判据的 Python 对应实现，并用
+> `private-paths-parity.spec.ts` **把两侧钉成同一组裁决**；**CI 首跑红两次，两次都是我自己引入的**：
+> ① 判据放在 `fork()` 之后 ⇒ 在能分配 pty 的机器上产生**幻影会话**（退出 0 + `started session`），
+> 而本地因无 pty 走了**另一条路径**、绿得毫无意义；② 我自己的 8 条 CodeQL high（测试 fixture 的宽
+> `chmod`），改 fixture 而非压制；另有一次**我自己的测试清理 `rmtree("/tmp")`** 删掉了 X11 套接字等
+> 用户级条目（§31.7.3 如实记录 + 已加守卫）。用例 **415 → 425**，Python 自检 **35 → 69**，
+> CodeQL **1 → 1**、Dependabot 0、发布面 **9/9**；`main` 起点 `05e766d`，合入于 `fa507e4`（PR #90），
+> **本轮无需重启**（`lib/` 一字未变 + 活进程实测 `robot_load` 已出新告警）。
 
 本文件记录 dsh-ros2 插件的一次完整日常维护循环：**查 issue → 评估建议 → 分支开发 → 验证 → 推送 → 交付维护文档**。每次维护在下方追加一节。
 
@@ -168,7 +185,10 @@ dsh-phoenix 已在 web profile 安装并生效：
 | `docs/feedback-env-recovery.md:97` | 为历史反馈记录（截图数字 166 / core 89→94），非用户入口 | 保留为历史快照 |
 | sidecar / state | sidecar 为“纯模板框架”（reducer 未实现），state 是控制面客户端，且**故意不在聚合包依赖里**（issue #68 的决定） | 符合设计，无动作 |
 | **GUI 白名单只是便利性控制，不是边界**（第二十一轮新增） | `ros2_gui_interact` 现在按**解析后的**窗口标题比对白名单，但任何进程都能改自己的窗口标题 ⇒ 标题匹配**不能证明**窗口身份。真正的边界是审批门（fail-closed）。 | 无动作（已如实写进代码注释 + README + `docs/safety.md`）；若将来要硬边界，需按 xdotool 的 `_NET_WM_PID` 校验属主进程，属新设计 |
-| **写入目标已加门，但门只在本进程的工具层**（第二十五轮修掉上一行后的边界） | `ros2_screenshot`/`ros2_gui_observe`/`ros2_image_snapshot` 的 `output` 现在有完整判据 + 目录外审批；**但** `packages/vision/scripts/image_snapshot.py` 与 `packages/core/scripts/pty_session.py` 被**直接**在命令行跑（不经过工具层）时仍会自己 `os.makedirs` 目标目录。 | 这是**有意**的：脚本是独立可用的 CLI，判据放在唯一的工具入口；要覆盖 CLI 场景得给 python 侧再加一份实现（两侧判据不一致本身就是事故源，见 §29.6.2）。 |
+| **写入目标已加门，但门只在本进程的工具层**（第二十五轮登记；**第二十六轮各拆一半**） | `ros2_screenshot`/`ros2_gui_observe`/`ros2_image_snapshot` 的 `output` 有完整判据 + 目录外审批。**`pty_session.py` 已修**（直接 CLI 也走 `private_paths.ensure_private_dir`，退出码 3）；**`packages/vision/scripts/image_snapshot.py` 仍只靠工具层**——直接 CLI 时仍会自己 `os.makedirs` 目标目录。 | 后者**仍是有意**的（脚本是独立可用的 CLI）；但**理由已经弱了**：第二十六轮之后 python 侧**已经有**共用判据（`private_paths.py`），"两侧实现不一致"这条反对意见不再成立，差的只是决定「CLI 场景要不要也判」。下一轮可单独决定。 |
+| **旧安装的宽权限不会被自动改写**（第二十六轮） | 第二十六轮把档案/零位语义改成 `0700`/`0600`，但**已存在**的文件只在**下一次写入**时收紧；`load()` / `robot_load` 只**报告**（`warnings`），不改写。本机实测仍有一条 `0664` 档案 + `0775` 目录。 | 有意（读时改写会让人无法判断「是谁改的」）。收紧方式：重跑 `robot_register` 或 `robot_profile.py safety set`。**注意**：本机 `~/.dsh-ros2` 是 `0700`，那条路径**实际不可达**，告警按**模式**判定属保守而非误报。 |
+| **`~/.dsh-ros2/safety-events` 未量过**（第二十六轮新增） | 档案里 `forensics.dump_dir` 指向它，但它由**仓库外**的 `dsh_ros2_safety` 节点在 CRITICAL 时创建——本仓库既不管创建也不管模式。本机当前**不存在**该目录，无法实测。 | 下一轮的「位置类清单」必须把它算进去；若要收口，需要下游 `dsh_ros2_safety` 用同一套判据（跨仓库）。 |
+| **`capture_scene()` 的回退读侧没有判据**（第二十六轮新增） | `zero_pose_semantics.py` 的写侧已私有（`mkdtemp`），但它失败时仍会 **glob 读** `/tmp/dsh-ros2/snapshot_*.jpg` 并把它送进 VLM。 | 影响有限（读到的图只是被描述，不会被执行）；但形状上「写侧有门、读侧没有」与本轮修掉的三处同族，登记待办。 |
 | **`ensurePrivateRuntimeDir` 是拒绝/收紧，不是沙箱**（第二十五轮） | 它对一个本来就能写该路径的用户无效；预置目录那一类残留竞态由属主校验兜住；多级路径（`$TMPDIR/dsh-ros2/pty`）逐层校验，但 `/tmp` 本身（root、1777）按定义信任。 | 无动作（已写进代码注释、`docs/safety.md` 与 CHANGELOG） |
 | **`ros2_workspace` 的覆盖是进程级，不是会话级**（第二十二轮如实登记，未修） | `sessionRosSetup` 是 `runner.ts` 里**一个模块级变量**，`use` 改一次就作用于**本进程内所有会话**后续的每一条命令（第二十二轮已给它加审批门 + 把措辞改成 `process-wide`，但**隔离本身没做**）。多会话/多 agent 共用一个 DSH 进程时，A 的切换会影响 B。 | 要真隔离得把会话键从 `exec` 一路传到 ~60 个 `deps.run` 调用点（或引入 per-session 作用域），属**新设计**，单开一轮 |
 | **CodeQL 对 VLM 外发路径的可见性在本轮消失**（第二十四轮新增，**不是**缺陷修复） | 第二十四轮把 `readFile` 改成有界 `createReadStream` + `Buffer.concat` 之后，那 2 条 `js/file-access-to-http` 被分析标记为 `fixed`——但**外发本身没变**（仍是按设计把图片 POST 到第三方网关）。也就是说 `3 → 1` 里那 2 条是**扫描器不再看得见**，不是这条路径变安全了。真正的边界是内容判定 + 20 MiB 预算 + 无审批（如实写在 `docs/safety.md`）。 | **后续轮次不要把这 2 条当作「已修」引用**；若要恢复可见性，需让 CodeQL 重新跟踪该数据流，或明确接受「这条路径由人工复核、不靠扫描器」并写进 §6 |
@@ -191,7 +211,8 @@ dsh-phoenix 已在 web profile 安装并生效：
    `ROS_LOG_DIR` 观察到 `/tmp/ros-log-<随机后缀>`。）
    （第二十二轮登记 gen-29 的原因同样是**真正的运行时变更**：`packages/core/lib/*.js` 与
    `packages/vision/lib/*.js` 都变了——新审批门与图片内容校只有在重载后才会在跑着的 dsh 里生效。）
-2. 全量用例基数：**415 例（414 过 + 1 pty-skip）**。pty 可用机器（如 CI）上 415/415。
+2. 全量用例基数：**425 例（424 过 + 1 pty-skip）**。pty 可用机器（如 CI）上 425/425。
+   Python 自检另 **69 项**（`robot_profile` 38 / `zero_pose` 15 / `private_paths` 16）。
 3. 远端分支卫生：第二十轮把 16 → 1；第二十一/二十二轮**合入即删**保持 `origin` 只有 `main`。
 4. 保持“提交前 typecheck+test+build 全绿 + 行为变更补测试 + push 后 CI 绿”的验收线。
 5. **凡文档里出现"已知限制 / 静默 / 无输出"这类词，都当作"待复现的假设"**（第十九轮教训的正面用法）。
@@ -202,6 +223,11 @@ dsh-phoenix 已在 web profile 安装并生效：
    而三层扫描器在这五轮里要么全绿、要么一条相关提示都没有。**不要把它当成"没有告警时的备选动作"。**
    （第二十五轮的新问题就来自这张表里已登记三轮的"未加审批的相邻写面"——**登记过的遗留项就是下一轮的
    入口**；同轮还把它**兄弟形状**（固定 `$TMPDIR` 运行目录）一起量了。）
+   （第二十六轮第六次连做：把问题换成**「这个路径凭什么是我的？」**——一次问出**档案权限**
+   （运动校验与安全监视共同信任的参照）、**zero-pose 的固定 `/tmp` 写后即执行**、
+   **PTY 目录判据与 TS 不一致**三处；而同一轮里上一轮给的三个候选**两条命中、一条是负结果**。
+   **问「这个目录是不是我的」时，必须把同一父目录下的兄弟一起看**——`~/.dsh-ros2` 是 0700
+   只因为 `secrets.ts` chmod 了它，`robots/` 从来没人看过。）
 7. **"by design"必须把被问的问题一起抄下来**（§27.6 第 2 条）：`js/file-access-to-http` 的既存理由
    "读图就是功能"对**读**成立、对**路径是否该无限**不成立，于是三个轮次都没人再问。
 8. **CodeQL 报"新告警"先分三类**再下结论——真新问题 / 被新代码触发的误报 / 行号漂移（§27.4.4）。
@@ -216,6 +242,25 @@ dsh-phoenix 已在 web profile 安装并生效：
     ——扫描器只是不再跟踪这条数据流。所以 **CodeQL 计数下降要先问"是哪一类下降"**：
     ① 真的不成立了；② 代码形状变了、查询不再建模；③ 行号漂移。本轮那 2 条属于 ②，
     已在 §5 登记，**后续不得当作"已修"引用**。
+
+11. **「拒绝」只有发生在**父进程**里才算拒绝**（第二十六轮代价：CI 红）：被 daemon 化的子进程把
+    stdout/stderr 交给 `/dev/null`，于是同一份代码在「能分配 pty 的机器」上变成**退出 0 的幻影会话**，
+    在「不能分配 pty 的机器」上变成诚实的退出 3。**本地全绿的测试完全可能是在验证另一条路径**——
+    `pty_probe`（第十九轮）已经教过这一课，第二十六轮是同一个教训换了主体。凡「fork/daemon 之前
+    必须成立的前提」，判据一律放父进程，并**断言 stdout 里不出现成功措辞**。
+
+12. **位置类判据按「同一个父目录下的所有兄弟」列清单**（第二十六轮）：不要按「我记得的那几个路径」
+    列。反例就是本轮——`robots/` 修了，`zero-pose.yaml` 是顺手一起修的，`safety-events` 是**写完
+    记录才想起来**的。
+
+13. **清理逻辑里出现 `dirname(被测路径)` 就是一次「相信被测对象」**（第二十六轮的事故）：
+    撤门实测时被测代码返回 `/tmp/zero_pose_joints.py`，而我的清理 `rmtree` 了它的父目录 = `/tmp`，
+    删掉了 X11 套接字等用户级条目。**测试清理只能从「自己造出来的东西」出发**（`mkdtemp` 的返回值
+    或可验证前缀）。
+
+14. **`lib/` mtime 陷阱**（第二十六轮）：判断「进程是否旧」要**先看本轮有没有 `src/` 变更**，再看
+    mtime。构建会把 `lib/` 的 mtime 推到「比进程新」，那只说明你构建过；本轮三个修复全在 Python
+    helper 里（按路径读盘、不需重载），活进程用 `robot_load` 的新告警直接验证了「已生效」。
 
 ---
 
@@ -6323,3 +6368,370 @@ $ ros2_vision_describe imagePath=/tmp/dsh-test-big-image.png
   5. `stale: false` 不可当"代码最新"的证据：看 `lib/` mtime vs 进程启动时间。
   6. 撤门实测（把门删掉看几例变红）要在**本轮内**做并写进记录——本轮 core 9 例 / vision 5 例 /
      moveit 1 例，且 moveit 那例把目录**还原成 0775**，正好复现了修复前的状态。
+
+---
+
+## 31. 维护记录（2026-10-30 13:28 CST / UTC 2026-10-30 05:28 · 第二十六轮：0 open issue / 0 open PR → step 5；宿主 13:27 刚重启、gen-32 顺带落地；「执行面 × 审批面」第六次连做仍产出 3 个真缺陷 = **机器人档案（`safety` 段）0775/0664** · **zero-pose 固定 `/tmp` 脚本"写完就执行"** · **PTY 目录判据与 TS 侧不一致**；CI 首跑红两次，两次都是我自己引入的：判据放在 `fork()` 之后（**幻影会话**）+ 我自己的 8 条 CodeQL 告警；另有一次我自己的测试清理**删掉了 `/tmp` 的用户级条目**）
+
+### 31.1 起点快照
+
+| 项 | 值 |
+| --- | --- |
+| 当前分支 / HEAD | `main` = `origin/main` = **`05e766d`**（PR #89 合入后），工作树干净 |
+| open issue / open PR | **0 / 0**（10 个 issue 全 closed；#89 是上一轮最后一个 PR） |
+| 远端分支 | `origin/main`（**只有 1 条**） |
+| 全量用例 | **415（414 过 + 1 pty-skip）** |
+| 工具 / 技能面 | `totalTools: 81` / `totalSkills: 9`（六 bundle，`drifted` 全 `false`、`stale: false`） |
+| CodeQL open / Dependabot open | **1 / 0** |
+| 审计三档 / 密钥 / 发布面 | 干净 / 0 / **9/9 CLEAN**（本轮重跑） |
+| Node / pnpm | `v24.16.0` / `11.22.0` |
+| 维护日志 | 停在 §30（第二十五轮，2026-10-29） |
+| **宿主机** | **`up 2 min`**：`system boot 2026-10-30 13:27`；线上进程 PID **2015**，`13:27:27` 启动 |
+| `/tmp/dsh-ros2*` | **不存在**（开机清空 tmpfs，**不是**第二十五轮的修复删掉的——下一轮别误读） |
+
+### 31.2 step 1 → step 5 的判定（本轮仍然没有 step 2）
+
+- `gh issue list --state open` → **空**；`gh pr list --state open` → **空**。
+- ⇒ 跳过 step 2/3（无外部建议可评），直接进 **step 5**（安全扫描 + 「执行面 × 审批面」对照）。
+- step 4（dsh-phoenix）照做，但结论**与最近四轮不同**：本轮**不需要重启**（§31.9 逐条给证据）。
+
+### 31.3 闭环 gen-32 与上一轮留下的两个活进程验收点
+
+`/home/stvli/tmp/dsh-phoenix-state.json`：
+
+```json
+{"generation": 32, "lifecycleState": "running", "deferDeadline": 0,
+ "pendingResume": false, "resumeAttempt": 0, "updatedAt": 1793338058049}
+```
+
+`updatedAt` = **2026-10-30 13:27:38**，即**开机后**那一次启动；journal 里对应
+`13:27:30 dsh[2015]: [dsh-phoenix] loaded (graceful restart + client reconnect + lifecycle)`。
+⇒ 第二十五轮登记的 gen-32 **已落地**（路径是"宿主重启"，不是 defer 队列），且
+`deferDeadline: 0` / `pendingResume: false`（无在途重启）。
+
+上一轮在 §30.11「待运维」里留了**两个活进程验收点**，本轮逐个实测：
+
+```console
+$ ros2_screenshot output='../../etc/x.png'
+{"ok":false,"error":{"code":"OUTPUT_TRAVERSAL",
+ "message":"相对文件名不得离开截图目录 /tmp/dsh-ros2（解析为 /etc/x.png）；写到别处请给绝对路径（需要审批）"}}
+```
+
+```console
+$ ros2_image_snapshot topic=/rviz/scene
+command = python3 …/image_snapshot.py --topic /rviz/scene --output /tmp/dsh-ros2/snapshot_1793339902115.jpg …
+```
+
+⇒ ① 相对名逃逸在**启动任何东西之前**被拒（连审批都没走到，属"拒绝类"）；② 默认输出是
+**绝对**路径，第二十五轮 §30.6.2 描述的那处不一致确实修掉了。第二条的**取帧本身失败了**
+（`COMMAND_FAILED`：重启后 ROS 图是冷的、`/rviz/scene` 无发布者、`AMENT_PREFIX_PATH` 为空），
+与路径门无关——这里如实区分"门生效"与"抓图成功"。
+
+### 31.4 安全扫描（step 5）与既有基线对账
+
+| 面 | 本轮结果 | 与上一轮 |
+| --- | --- | --- |
+| `pnpm run audit`（prod, high） | `No known vulnerabilities found` | 不变 |
+| `pnpm run audit:dev-high` | `No known vulnerabilities found` | 不变 |
+| `pnpm run audit:all` | `No known vulnerabilities found` | 不变 |
+| 密钥（tracked 文件） | **0 条真密钥**；唯一命中是**本维护文档自己**引用的 `-----BEGIN OPENSSH PRIVATE KEY-----` 字面量（第二十二轮测试用例的引用） | 不变 |
+| 发布面（9 个包 `pnpm pack` + `tar -tzf`） | **9/9 CLEAN**（`lib/index.js` 全在、**0 个 `.pyc`**）；`dsh-ros2-common` 新增的 `scripts/private_paths.py` **在包内**（`files: ["scripts"]` 已覆盖） | 不变 |
+| Dependabot open | **0** | 0 → 0 |
+| CodeQL open | **1 → 1**（仍是 `js/insecure-temporary-file` @ `scripts/verification/measure.mjs:104`） | 不变 |
+| `ros2_env_check` | `totalTools: 81` / `totalSkills: 9` / `drifted` 全 `false` / `stale: false` / `missing: []` / `undeclared: []` / `skillCatalogue.complete: true` | 不变 |
+| 线上环境 | `visiblePackages: 450`；`setup.prefix` 仍是 `lite_delivery_aio` 链 | 不变 |
+
+**CodeQL 计数说明**：本轮**首跑**时 CodeQL 报了 **8 条新的 high**——全部是我自己新写的
+**测试 fixture**（`chmod(dir, 0o775)` / `chmod(file, 0o664)` 这类"复现修复前状态"的语句，
+规则 `py/overly-permissive-file-permissions`）。**告警形式上成立，错在 fixture**。改法不是压制：
+把 fixture 改成**用 umask 造出那个宽权限**（`os.umask(0o002)` 建目录/文件 = 0775/0664）——
+这既是旧代码产生该模式的**真实方式**，又把 `chmod(<宽字面量>)` 这个 sink 整个去掉了。
+合入后 CodeQL **1 → 1**，`analyze (python)` 与 `analyze (javascript-typescript)` 均绿。
+
+### 31.5 「执行面 × 审批面」对照（§6 第 6 条要求的固定动作，第六次连做）
+
+本轮把问题换成更直接的一句：**"这个路径凭什么是我的？"**——不是"有没有审批"，
+而是"写/读/执行的那个坐标，能不能被同一台机器上的另一个用户先占住"。
+
+| 面 | 坐标 | 谁能先占住它 | 本轮结论 |
+| --- | --- | --- | --- |
+| `robot_register` / `safety set` / `topology snapshot` / `topology learn` | `~/.dsh-ros2/robots/<name>.yaml` | **任何人**（目录 0775 + 文件 0664，**实测**） | **发现 1 → 本轮修** |
+| `ros2_zero_pose_semantics analyze` | 固定 `/tmp/zero_pose_joints.py`，**随后 `python3` 执行它** | **任何本地用户**（1777 + 固定名） | **发现 2 → 本轮修** |
+| `ros2_zero_pose_semantics confirm` | `~/.dsh-ros2/zero-pose.yaml` | 同上（0664） | 随发现 1 一并修 |
+| `pty_session.py`（直接 CLI） | `<dir>/<sid>.in`（被驱动进程的 **stdin**） | 工具层已挡；**脚本自己**只 chmod，不查属主/链接 | **发现 3 → 本轮修** |
+| `ros2_vision_set_key`（§30.11 候选 ②） | `~/.dsh-ros2/secrets.json` | **不能**：父目录 0700 + 文件 0600（`secrets.ts` 已做） | 复核在位；**真正的洞在一个目录之外**（`robots/`） |
+| `ros2_screenshot` 的 `screenshotCommand`（§30.11 候选 ③） | 配置模板里的 `{output}` | 模板可被运营方写成任意命令（**设计如此**），但 `{output}` 经 `shq()` **单引号转义**后再拼 | **量过，不是缺陷**（`shq` 转义 `'` 为 `'\''`；见 §31.10 的负结果） |
+| `moveit_move` / `motion_validate` | 读档案里的**限位**、写计划轨迹 | 档案路径就是发现 1；计划目录第二十五轮已私有 | 档案修好后收口 |
+| `ros2_gui_interact` / `ros2_workspace use` | — | — | 第二十一/二十二轮的门仍在位 |
+
+> 这是**第六次连做、第六次产出真缺陷**。而本轮的入口依旧是**上一轮自己写下的候选清单**
+> （§30.11 第 1 条的三条候选：① pty `--dir`、② `secrets.json` 父目录、③ `screenshotCommand`）——
+> 三条全部量了，**两条命中、一条是负结果**，而最大的一条（档案）**不在候选清单上**，
+> 是被 ② 的邻居关系牵出来的：**问"这个目录是不是我的"时，必须把同级的兄弟目录一起看**。
+
+### 31.6 本轮发现与修复
+
+#### 31.6.1 发现 1【已修·真实·扫描器 0 提示·本轮最有价值】运动校验与安全监视共同信任的那份参照，是**别人可改**的
+
+- **代码事实**：`packages/common/scripts/robot_profile.py` 的四处写入（`register` /
+  `safety_set` / `topo_snapshot` / `topo_learn`）都是 `os.makedirs(dir)` + `open(path, "w")`，
+  模式完全由 umask 决定，且**从不 lstat**。
+- **实测（修复前，全新 `$HOME`，宿主 umask 002）**：
+
+  ```console
+  $ HOME=$(mktemp -d) python3 .../robot_profile.py register --name t1 --urdf /tmp/min.urdf
+  {"ok": true, "written": "/tmp/…/.dsh-ros2/robots/t1.yaml", …}
+  $ ls -ld $HOME/.dsh-ros2 $HOME/.dsh-ros2/robots
+  drwxrwxr-x  …/.dsh-ros2
+  drwxrwxr-x  …/.dsh-ros2/robots
+  $ ls -l $HOME/.dsh-ros2/robots/t1.yaml
+  -rw-rw-r--  t1.yaml
+  ```
+
+  那个文件里是 `safety` 段：`motion.max_velocity` / `torque.abs_limit`（**`motion_validate`
+  校验轨迹用的限位**）、`require_limits`、`validation_ttl_ms`、`workspace`、`estop`。
+- **为什么这是"落在安全路径上"**：`moveit_move` 的 phase 2/4 用档案里的限位做确定性校验，
+  `safety_monitor` 用同一份 `safety` 段决定何时锁存。也就是说，**同一台机器上的另一个本地用户
+  可以改写"校验器与监视器共同信任的那份参照"**——把 `max_velocity` 调大、把 `require_limits`
+  关掉、把 `validation_ttl_ms` 放大，全都不需要碰本进程。
+- **为什么以前没被发现**：本机 `~/.dsh-ros2` 是 `0700`，看起来"已经是私有的"——那只是
+  `secrets.ts` 顺手 chmod 了**它自己写入的那一个目录**。**没配 VLM Key 的机器**（很常见的机器人
+  部署）第一次 `robot_register` 就会建出上表那条 0775 链。第二十五轮 §30.11 的候选 ② 说的正是
+  "`secrets.json` 的**父目录**属主/权限，还没量过"——量了，父目录没问题，**问题在兄弟目录**。
+- **修法**：新增 `packages/common/scripts/private_paths.py`（TS 侧 `runtime-dir.ts` 的 Python 对应
+  实现，拒绝码逐字相同），四处写入统一走 `ensure_profile_dir()` + `write_private_file()`：
+  逐层 `0700`；符号链接**直接拒绝**（不看目标）、非目录拒绝、属主不符拒绝、自己的宽权限目录**收紧**；
+  文件 `0600`，且**先写临时文件再 `os.replace`**——替换的是**目录项**，所以种在档案路径上的符号链接
+  会被**换掉而不是被跟随**。
+- **实测（修复后，同一命令、同一 umask）**：
+
+  ```console
+  drwx------  …/.dsh-ros2
+  drwx------  …/.dsh-ros2/robots
+  -rw-------  t1.yaml
+  ```
+
+- **旧安装可见但不静默改写**：`load()` 增加 `warnings`（只报告，不改写）：
+  本机 `robot_load name=lite` 现在就返回
+  「`机器人档案 …/lite.yaml 权限为 664，宽于 600`」+「`档案目录 …/robots 权限为 775，宽于 700`」。
+  **这条同时是本轮的活进程验收点**（§31.9）：跑着的 dsh 里立刻能看到，不需要重启。
+
+#### 31.6.2 发现 2【已修·真实】zero-pose 把脚本写到**固定 `/tmp` 路径**，然后执行那个路径
+
+- **代码事实**：`packages/profile/scripts/zero_pose_semantics.py`
+
+  ```python
+  path = "/tmp/zero_pose_joints.py"
+  with open(path, "w") as f:            # 跟随符号链接
+      f.write(build_zero_pose_joints_script(duration))
+  proc = subprocess.Popen(["python3", path, …])   # 执行可预测坐标
+  ```
+
+- **实测（修复前，调用**真函数**）**：预置 `/tmp/zero_pose_joints.py -> …/victim-secret.txt`，
+  再调 `publish_zero_joints(0.2, [])`：
+
+  ```console
+  --- before ---
+  ORIGINAL VICTIM CONTENT (must survive)
+  --- run the real publish_zero_joints ---
+  child pid run: 12019
+  --- victim file after ---
+  import rclpy, threading, json, sys
+  from rclpy.node import Node
+  ```
+
+  ⇒ 受害文件被生成脚本**覆写**，子进程接着**执行该路径**。写入与执行解析的是**同一个可预测坐标**：
+  攻击者只要在 `close()` 与 `exec()` 之间把链接换掉（链接是他建的，`/tmp` 的 sticky 位不阻止他
+  删自己的链接），就能决定受害者执行的代码。这在形状上与仓库**唯一剩余的那条 CodeQL 告警**
+  （`js/insecure-temporary-file`）同类，只是它在 Python 侧、扫描器不报。
+- **修法**：每次运行 `tempfile.mkdtemp()` 一个私有目录（`0700`、随机名、原子创建），脚本
+  `0600` 写入该目录并执行**该目录内的真实路径**；渲染帧也落这里（`/tmp/zero_pose_scene_<ts>.jpg`
+  同样是可预测坐标）；`confirm` 写 `~/.dsh-ros2/zero-pose.yaml` 走 `0600` + `os.replace`。
+  目录**故意保留**并在输出里回报 `scratch_dir`（与"以前会在 /tmp 留下帧"同样的可诊断性）。
+- **可证伪测试**（+9 例）：`Popen` 打桩后**断言真正要执行的 argv**——不是旧固定路径、位于 `0700`
+  目录、`0600` 常规文件、`realpath` 已解析。**撤门实测：把 wiring 改回固定 `/tmp` ⇒ 3 例变红。**
+
+#### 31.6.3 发现 3【已修·真实】`pty_session.py` 的"是不是我的目录"判据与 TS 侧不一致
+
+- **代码事实**：第二十五轮给工具层加了 `ensurePrivateRuntimeDir`，但 helper 自己的
+  `ensure_private_dir()` 只做 `os.makedirs(mode=0700)` + `_chmod_quietly`：
+  **无 lstat、无符号链接拒绝、无属主校验**，且 `_chmod_quietly` 把失败吞掉。
+- **为什么它是命令通道**：`<sid>.in` 是**被驱动进程的 stdin**（`ros2_install` 用它驱动
+  `bash <installer>`），写进去就是往那个进程里**打字**。
+- **修法**：两侧共用 `private_paths.ensure_private_dir`（拒绝时 `stderr` 打码 + **退出码 3**，
+  与 `PTY_UNAVAILABLE` 一样是"明确拒绝"而非 traceback）；锚点用 `tempfile.gettempdir()`
+  ——**只收紧临时根之下的目录**，运营方显式 `--dir` 到别处时保留他给的模式（`runtime-dir.ts`
+  写下的同一条规则）。
+- **实测**：
+
+  ```console
+  $ python3 pty_session.py --dir /tmp/pty-link start s1 bash -c 'echo hi'
+  PRIVATE_DIR_SYMLINK: refusing to use the PTY 会话目录 /tmp/pty-link: is a symlink (use the real path)
+  exit=3
+  $ python3 pty_session.py --dir /tmp/pty-file start s1 bash -c 'echo hi'
+  PRIVATE_DIR_NOT_DIR: … not a directory          exit=3
+  $ python3 pty_session.py --dir /tmp/pty-new  start s1 bash -c 'echo hi'
+  drwx------ 2 stvli stvli 48 /tmp/pty-new        ← 建出来就是 0700
+  PTY_UNAVAILABLE: cannot allocate a pty …        ← 本机无 pty（第一轮就登记过）
+  ```
+
+- **可证伪测试**（+3 例，core）：符号链接 `--dir` / 常规文件 / **悬空符号链接**（旧代码会
+  `makedirs` 到链接目标里）三种都必须拒绝，**并断言 stdout 不含 `started session`**。
+  **撤门实测：把判据改回"只 chmod" ⇒ 3 例变红。**
+- **"同一判据两份实现"的处理**：新增 `packages/common/tests/private-paths-parity.spec.ts`，
+  把**同一组磁盘形状**（缺链自建 / 自己的 0775 / 叶子与中间层符号链接 / 常规文件 /
+  属主不符（uid 注入）/ 锚点之外不改模式）同时喂给 TS 与 Python，要求**裁决与拒绝码逐字相同**。
+  §29.6.2 把"两侧不一致"称作事故源——本轮把它变成**被测试钉住的纵深**。
+
+### 31.7 CI 首跑红两次：两次都是我自己引入的，且**本地绿是"绿的错的理由"**
+
+#### 31.7.1 判据放在 `fork()` 之后 ⇒ 幻影会话（CI 抓到，本地不可能抓到）
+
+首推三例红：`expected +0 to be 3`。根因：`ensure_private_dir` 当时只在 `run_start` 里调用，而
+`run_start` **只在被 daemon 化的子进程里执行**——那里的 stdout/stderr 是 `/dev/null`。于是：
+
+- **能分配 pty 的机器**（CI 与多数真机）：父进程 `pty_probe()` 成功 → `fork()` → 子进程里拒绝
+  被吞掉 → 父进程照样打印 `started session … (pid N)` 并**退出 0** ⇒ **幻影会话**，
+  而目录根本不是自己的。这正是第十九轮为 `pty_probe` 修过的同一形状（"daemon 的 stdio 是
+  /dev/null，失败在那里消失"）。
+- **本机**：`/dev/pts` 是 `ptmxmode=000`，`pty_probe()` 失败 → 走 `except` 分支 →
+  那里又调了 `ensure_private_dir` → 退出 3。**同一份代码、不同的退出码**——
+  本地的"绿"是**另一条路径给的**，与我要验证的行为无关。
+
+**修法**：判据前移到**父进程、`pty_probe()` 之前**；`run_start` 保留自己的调用作为纵深。
+测试同时断言 stdout **不含** `started session`，这样无论宿主有没有 pty，顺序错了都会红。
+
+#### 31.7.2 我自己的测试 fixture 触发了 8 条 CodeQL high
+
+`chmod(target, 0o775)` / `chmod(wide, 0o664)` 这类"复现修复前状态"的语句被
+`py/overly-permissive-file-permissions` 全部报出（8/8 都在我新写的 selftest 里）。
+告警**形式成立**，错在 fixture：改成用 `os.umask(0o002)` 造出同样的 0775/0664
+（= 旧代码产生该模式的方式），`chmod(<宽字面量>)` 这个 sink 就没了。合入后 **1 → 1**。
+
+#### 31.7.3 我自己造成的一次破坏：测试清理删掉了 `/tmp` 的用户级条目
+
+做 §31.6.2 的**撤门实测**时，wiring 被改回固定 `/tmp/zero_pose_joints.py` 之后，我那句
+"清理 scratch 目录"变成了 `shutil.rmtree(os.path.dirname(executed))` = `rmtree("/tmp")`。
+后果（如实记录）：
+
+- `/tmp` 本身（root、1777）与 root 拥有的 systemd-private-* 目录**存活**；
+- **`stvli` 拥有的条目被删**：`/tmp/.X11-unix/*`（**X11 套接字没了** → 新的 GUI 客户端连不上
+  现有 X server，本轮的 GUI 相关验证因此无法做）、`.ICE-unix`/`.XIM-unix` 内容、
+  `dsh-spill-*` 等；
+- 换来的**唯一**好处是它当场暴露了这个 bug：清理现在**只在 `basename` 带 `dsh-ros2-zero-pose-`
+  前缀时**才删（"只删自己 `mkdtemp` 出来的目录"，不信任被测路径）。
+
+教训写进 §31.11 第 3 条：**清理逻辑里出现 `dirname(被测路径)` 就是一次"相信被测对象"**。
+
+### 31.8 计数（合入后实测）
+
+| 项 | 起点 | 终点 |
+| --- | --- | --- |
+| vitest | **415**（414+1 skip） | **425**（424+1 skip）＝ common 107→**114**（+7 一致性）、core 162→**165**（+3 helper 拒绝） |
+| Python 自检 | **35**（robot_profile 29 + zero_pose 6） | **69**（robot_profile **38**、zero_pose **15**、`private_paths` **16** 新增） |
+| CodeQL open | 1 | **1**（首推曾 8 条新 high，改 fixture 后归零） |
+| Dependabot open | 0 | **0** |
+| 发布面 | 9/9 | **9/9**（`private_paths.py` 随 common 包发布，已用 `tar -tzf` 复核） |
+| open issue / PR | 0 / 0 | **0 / 0** |
+| 远端分支 | 1 | **1**（PR #90 合入即删） |
+| 工具 / 技能面 | 81 / 9 | **81 / 9**（只加门，不动工具集合） |
+
+**撤门实测（本轮内完成）**：档案写入改回 `open(path, "w")` ⇒ **4 例变红**且文件实测 `0o666`；
+`publish_zero_joints` 改回固定 `/tmp` ⇒ **3 例变红**；helper 判据改回"只 chmod" ⇒ **3 例变红**。
+
+**CI**：PR #90 **5/5 绿**（`check (22)`、`check (24)`、`analyze (python)`、
+`analyze (javascript-typescript)`、`CodeQL`），squash 合入 `main 05e766d → fa507e4` 并删分支。
+
+### 31.9 dsh-phoenix 循环（step 4）——**本轮不需要重启**，且这次有证据而不是口径
+
+前四轮每一轮都登记了新 gen，因为 `packages/*/lib/` 都变了。本轮不同：
+
+1. **`lib/` 一个字节都没变**：`git diff --name-only 05e766d..fa507e4 | grep -E "/src/|/lib/"` → **空**
+   （只有 `scripts/`、`tests/`、文档）。本轮的三个修复全在 **Python helper** 里。
+2. **Python helper 是"每次调用时按路径读盘"的**：`scriptPath()` / `commonScriptPath()` 解析到
+   `packages/*/scripts/…`（线上的 `~/.dsh/profiles/web/node_modules/dsh-ros2*` 是 `link:` 符号链接
+   → 指向工作树），**不经过 `lib/` 也不需要重载**。
+3. **活进程实测（这才算证据）**：在本会话里直接调 `robot_load name=lite`，返回的
+   `warnings` **已经包含**本轮新增的权限告警（`lite.yaml 权限为 664` / `robots 权限为 775`）。
+   这条告警只有**新代码**才会产生 ⇒ 跑着的 dsh 里新判据**已经生效**。
+4. **注意 `lib/` 的 mtime 陷阱**：本轮反复 `pnpm run build`，`lib/` mtime 现在是 13:54:17，
+   **晚于**进程启动的 13:27:27。按 §6 第 5 条"看 lib/ mtime vs 进程启动时间"会误判成"进程是旧的"。
+   正确读法是：**先看本轮有没有 `src/` 变更**（没有），再看 `lib/` 内容是否可能因此不同（不可能）。
+   ⇒ **不登记 gen-33**（重启一个与真实机器人相连的进程，代价不为零，收益为零）。
+
+### 31.10 本轮发现（汇总）
+
+1. **【已修·真实·扫描器 0 提示·最有价值】** 机器人档案（含 `safety` 段）在全新 `$HOME` 上是
+   **0775/0775/0664**：`motion_validate` 的限位与 `safety_monitor` 的阈值都从这份文件读，
+   同机另一个本地用户可改（§31.6.1）。**根因**：`secrets.ts` 只 chmod 了**它自己写入的那个目录**，
+   于是 `~/.dsh-ros2` 看起来"已经是私有的"，**兄弟目录 `robots/` 从此没人再看**。
+2. **【已修·真实】** `ros2_zero_pose_semantics` 写固定 `/tmp` 脚本并**执行该路径**：实测符号链接
+   可把写入重定向到受害文件（§31.6.2）。形状同仓库唯一剩余的那条 CodeQL 告警，但它在 Python 侧。
+3. **【已修·真实】** `pty_session.py` 的目录判据只 chmod、不查属主/链接（§31.6.3，
+   第二十五轮 §5 登记项），而 `<sid>.in` 是命令通道。**同一判据两份实现 ⇒ 现在被一致性测试钉住。**
+4. **【已修·真实·CI 抓到】** 判据放在 `fork()` 之后 ⇒ 在**能分配 pty 的机器**上产生**幻影会话**
+   （退出 0 + `started session`，而目录不是自己的）；本地因无 pty 走了另一条路径，
+   **绿得毫无意义**（§31.7.1）。
+5. **【已修·真实·CI 抓到】** 我自己的 8 条 CodeQL high（测试 fixture 的宽 `chmod`），
+   **改 fixture 而不是压制**（§31.7.2）。
+6. **【负结果·如实】** §30.11 候选 ②（`secrets.json` 父目录）与候选 ③
+   （`screenshotCommand` 的 `{output}`）**量了、都不是缺陷**：前者父目录 0700/文件 0600；
+   后者 `{output}` 经 `shq()` **单引号转义**（`'` → `'\''`）后才拼进 `bash -lc`，
+   模板本身是运营方配置（可执行任意命令是**设计**）。
+7. **【运维事故·如实】** 我自己的测试清理 `rmtree("/tmp")` 删掉了 `/tmp` 下 `stvli` 拥有的条目
+   （含 X11 套接字），见 §31.7.3；已加"只删自己 `mkdtemp` 目录"的守卫。
+8. **【未变】** 审计三档干净、密钥 0、发布面 9/9、CodeQL 1、Dependabot 0、工具面 81/技能 9、
+   远端分支 1 条。
+
+### 31.11 本轮最有价值的三个「读法」
+
+1. **"这个目录是私有的"这种结论，必须按**兄弟**逐个量，而不能按"我记得它是私有的"。**
+   `~/.dsh-ros2` 确实是 0700——因为 `secrets.ts` chmod 了它。但**同一个父目录下的 `robots/`
+   从来没人问过**，而它装的正是运动校验的限位。上一轮的候选清单甚至指向了这里
+   （"`secrets.json` 的父目录属主/权限"），量父目录却全绿——**要量的是"同一层里还有谁"**。
+2. **一个"拒绝"只有发生在**父进程**里才算拒绝。** 被 daemon 化的子进程把 stdout/stderr 交给
+   `/dev/null`，于是同一份代码在"有 pty 的机器"上变成一个退出 0 的幻影会话、在"没 pty 的机器"上
+   变成一个诚实的退出 3。**本地全绿的测试完全可能是在验证另一条路径**——`pty_probe` 已经教过
+   这一课（第十九轮），本轮是同一个教训换了主体（目录判据而不是 pty 探测）。
+3. **清理逻辑里出现 `dirname(被测路径)`，就是一次"相信被测对象"。**
+   撤门实测时被测代码返回了 `/tmp/zero_pose_joints.py`，而我的清理去 `rmtree` 了它的父目录。
+   **测试清理必须只从"自己造出来的东西"出发**（`mkdtemp` 的返回值/可验证前缀），
+   绝不要从"被测代码报告的路径"反推。
+
+### 31.12 结论与下一步建议
+
+- **交付**：**1 个 PR（#90）**，3 个提交：`feat(common)`（`private_paths.py` + 一致性测试）/
+  `fix(security)`（三处接线 + 判据前移 + 10 例测试）/ `docs`（CHANGELOG、`docs/safety.md` §3.1、
+  README/README_CN 用例数 415→425）。CI/CodeQL **5/5 绿**后 **squash 合入**并删除分支；
+  `main 05e766d → fa507e4`。**仍然不写本轮终点 SHA 之外的推算**（记录自身所在的 docs 提交会继续
+  前推 `main`）。
+- **线上价值**：① 决定**轨迹能不能执行**的那份限位参照，以及 `safety_monitor` 的阈值，
+  从"同机可写"变成"只有属主可进"，并把**已存在**的旧权限变成 `robot_load` 里一条可见告警；
+  ② 一个"写脚本然后执行它"的路径不再停在可预测坐标上；③ PTY 命令通道的目录判据与 TS 侧对齐，
+  并由一致性测试防止再次漂移。
+- **待运维**：
+  1. **本机仍有一条 0664 档案 / 0775 目录**（`~/.dsh-ros2/robots`）：`ros2_env_check` 与
+     `robot_load` 都会报；`robot_register` 或 `robot_profile.py safety set` 会把它收紧。
+     **注意**：本机 `~/.dsh-ros2` 是 0700，所以那条路径**实际不可达**——告警按**模式**判定，
+     这是保守的，不是误报。
+  2. `~/.dsh-ros2/safety-events`（档案里 `forensics.dump_dir`）由**仓库外**的
+     `dsh_ros2_safety` 节点在 CRITICAL 时创建，本仓库没量过它的属主/模式——**下一轮的位置类清单
+     要把它算进去**（本机当前不存在该目录，无法实测）。
+  3. VLM 网关 `https://` / 回环迁移（第十四轮 #38，仍未动，属运维决定）。
+- **下次维护建议**：
+  1. 继续「执行面 × 审批面」对照（连续六轮唯一真产出）。下一轮的入口建议从这三条开始：
+     ① **`~/.dsh-ros2` 下还有谁**：`safety-events`（上面第 2 条）、以及未来任何新增子目录；
+     ② `packages/vision/scripts/image_snapshot.py` 直接 CLI 时的 `--output`（第二十五轮 §5 明确
+     登记为"有意不加"，但**它现在与 `private_paths.py` 的存在冲突了**：判据已经有了，
+     差的只是决定"CLI 场景要不要也判"）；
+     ③ `zero_pose_semantics.py` 的 `capture_scene()` 仍会 **glob 读取** `/tmp/dsh-ros2/snapshot_*.jpg`
+     （回退路径）——写侧已私有，**读侧没有判据**。
+  2. **位置类判据例行化**（§30.10 第 3 条的延续）：每轮 `ls -ld` 一遍所有由插件创建/写入的目录，
+     并且**按"同一个父目录下的所有兄弟"来列**，而不是按"我记得的那几个路径"。
+  3. **新判据落地时列清单**（§30.10 第 1 条）：本轮的反面例子是——我修了 `robots/`，
+     `zero-pose.yaml` 是**顺手**一起修的，而 `safety-events` 是**写完这份记录才想起来**的。
+  4. 读 §5 当待办清单；`pnpm audit` 一律走脚本；`gh` 失败先重试；**合入即删分支**。
+  5. **`lib/` mtime 陷阱**（§31.9 第 4 条）：判断"进程是否旧"要**先看本轮有没有 `src/` 变更**，
+     再看 mtime。构建会把 mtime 推到"比进程新"，那只说明你构建过。
+  6. **撤门实测 + 清理守卫**：撤门实测要在**本轮内**做（本轮 4/3/3 例），
+     但**清理逻辑不得用被测代码给的路径反推目录**（§31.7.3 的代价）。
