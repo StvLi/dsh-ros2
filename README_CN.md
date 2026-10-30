@@ -497,7 +497,7 @@ Node 需 `^22.19 || >=24`。
 ```bash
 pnpm install
 pnpm run typecheck   # tsc --noEmit
-pnpm run test        # vitest（415 例；另有 11 个 sidecar Python 场景 + 6 个 zero-pose 自检 + 29 项档案名/路径/TF 解析自检）
+pnpm run test        # vitest（425 例；另有 11 个 sidecar Python 场景 + 15 个 zero-pose 自检 + 38 项档案名/路径/TF/权限自检 + 16 项私有目录判据自检）
 pnpm run build       # tsc -> lib/ + lib/types/
 pnpm run audit       # 供应链门禁：运行时依赖图 high+（与 CI 完全同一条命令）
 pnpm run audit:all   # 再加上 CI 门禁有意排除的 dev-only 工具链

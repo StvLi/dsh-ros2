@@ -64,6 +64,26 @@ REQUEST → NORMALIZE → PLAN → VALIDATE → APPROVAL → FINGERPRINT CHECK �
 `require_limits` 默认 false）；注册后（URDF 限位入档）即全量 fail-closed。文档与
 `robot_register` 流程均引导先注册再运动。
 
+### 3.1 档案本身是可写的判据来源，所以它必须是私有的
+
+上表每一行都假定"档案里的限位与阈值是操作者写的"。**第二十六轮实测推翻了这个假定**：
+全新 `$HOME` 下 `robot_profile.py` 建出的是 `~/.dsh-ros2` **0775**、`robots/` **0775**、
+`robots/<name>.yaml` **0664**（umask 002），而那个文件里正是 `safety` 段——校验用的
+`max_velocity` / `max_effort`、`require_limits`、`validation_ttl_ms`、`workspace`、`estop`。
+即：同一台机器上的另一个本地用户能改写**校验器和监视器共同信任的那份参照**。
+
+从第二十六轮起：
+
+| 对象 | 判据 |
+| --- | --- |
+| `~/.dsh-ros2`、`~/.dsh-ros2/robots` | 逐层 `0700`；符号链接 / 非目录 / 属主不符 **直接拒绝**；自己的宽权限目录**收紧** |
+| `robots/<name>.yaml`、`zero-pose.yaml` | `0600`；**先写临时文件再 `os.replace`**（替换目录项，不跟随链接） |
+| 已有安装（旧权限） | `load()` **报告**而不改写；写入时收紧 |
+| 同一条判据的 TS 与 Python 实现 | 由 `packages/common/tests/private-paths-parity.spec.ts` 钉住同一组裁决 |
+
+这**不**扩大安全保证的范围（第 2 节的声明仍然成立）：它只保证"参照数据没被同机的其他
+用户改过"，不保证机器人本体安全。
+
 ---
 
 ## 4. 审计与取证
