@@ -78,6 +78,14 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 
 ### Changed
 
+- **验证装置（`scripts/verification/measure.mjs`）的 URDF 夹具落进本次运行独占的私有目录**
+  （第二十七轮）：以前写在 `$RUN_DIR/labbot.urdf`（固定名字），现在写在 `$RUN_DIR` 之下
+  `mkdtemp` 出来的 `fixtures-*`（`0700`）里，文件 `0600`。两个理由，第二个才是主因：
+  ① 同一台机器上并发跑两个装置时会互相覆盖同一个 `labbot.urdf`；
+  ② CodeQL 的 `js/insecure-temporary-file`（alert 13，自第二十轮开着）要的就是"在**原子私有**
+  的目录里建文件"，按原因修掉而不是压制。**实测**：`VERIF_RUN_DIR` 指向私有临时目录后
+  `system.sh start`（10/10 节点）→ `measure.mjs` **6/6 journey 全过**（identity 读的正是这个夹具），
+  `fixtures-*` 实测 `0700`、`labbot.urdf` 实测 `0600`，`stop` 干净退出。
 - **`image_snapshot.py` 的字节写入改成"0600 + 临时文件 + `os.replace`"**（第二十七轮）：帧不再
   以 umask 派生的权限（宿主 umask 002 ⇒ `0664`，同组可读）直接落在目标路径上，也不会顺着种在
   目标路径上的符号链接写出去。工具层（`ros2_image_snapshot`）与 CLI 两条入口行为一致。

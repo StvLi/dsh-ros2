@@ -17,8 +17,9 @@
  *
  * Uses the workspace's *built* lib/ output, so run `pnpm run build` first.
  */
-import { existsSync, lstatSync, mkdirSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, statSync, writeFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
+import path from 'node:path'
 
 const RUN_DIR = process.env.VERIF_RUN_DIR ?? '/tmp/dsh-ros2-verification'
 const ROS_SETUP = process.env.ROS_SETUP ?? '/opt/ros/jazzy/setup.bash'
@@ -95,16 +96,31 @@ const tools = new Map(
 )
 const exec = { agent: { id: 'verification' } }
 
-/** Register a throwaway profile so the "what robot is this?" journey has data. */
+/** Register a throwaway profile so the "what robot is this?" journey has data.
+ *
+ * The URDF fixture is written into a directory created by `mkdtemp` INSIDE the
+ * (already validated) run directory, not next to it. Two reasons, one of which
+ * is not about scanners:
+
+ *  1. two rigs running on one host share `RUN_DIR`; a fixed `labbot.urdf` name
+ *     means the second run overwrites the first run's fixture while the first
+ *     one is still registering it;
+ *  2. the file is created in a directory made atomically-private for this run
+ *     (`0700`, unpredictable name) instead of by name in the temp root — which
+ *     is what `js/insecure-temporary-file` (alert 13, open since round 20)
+ *     asked for. Fixing the reason is what closes it; the count drop follows.
+ */
 function prepareProfile() {
   const dir = PROFILES_DIR
   if (existsSync(`${dir}/${ROBOT}.yaml`)) return
-  mkdirSync(dir, { recursive: true })
-  const urdf = `${RUN_DIR}/${ROBOT}.urdf`
+  mkdirSync(dir, { recursive: true, mode: 0o700 })
+  const fixtures = mkdtempSync(path.join(RUN_DIR, 'fixtures-'))
+  const urdf = path.join(fixtures, `${ROBOT}.urdf`)
   writeFileSync(urdf,
     '<robot name="labbot">\n  <link name="base_link"/>\n  <link name="imu_link"/>\n' +
     '  <joint name="imu_joint" type="fixed">\n    <parent link="base_link"/>\n' +
-    '    <child link="imu_link"/>\n  </joint>\n</robot>\n')
+    '    <child link="imu_link"/>\n  </joint>\n</robot>\n',
+    { mode: 0o600 })
   const helper = new URL('../../packages/common/scripts/robot_profile.py', import.meta.url).pathname
   const res = spawnSync('python3', [helper, 'register', '--name', ROBOT, '--urdf', urdf, '--dir', dir], {
     encoding: 'utf8',
