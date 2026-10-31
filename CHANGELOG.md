@@ -246,6 +246,12 @@ All notable changes to **dsh-ros2** are documented here. Format follows
   Python，要求两者给出完全相同的裁决与拒绝码**（缺链自建 / 自己的 0775 收紧 / 叶子与中间层
   符号链接 / 普通文件 / 属主不符（uid 注入）/ 锚点之外不改模式）。"同一判据两份实现"由此从
   "事故源"变成"被测试钉住的纵深"。
+- **用例 425 → 450 例**（第二十七轮 **+25**：common +14 对端判据矩阵、state +11 客户端拒绝 / TCP /
+  两端默认路径对账），Python 自检另 **69 → 82 项**（`zero_pose` 15 → 21 读侧、新增 `image_snapshot`
+  7 项并接进 vision 的 `test` 脚本），sidecar 自检 **11 → 19 场景**（bind 目录判据 / 残留 inode /
+  默认路径）。撤门实测：客户端删掉对端判据 → **5 例红**（含"假数据平面一次连接都没收到"）；
+  `image_snapshot` 换回裸 `os.makedirs` → **4 项红**（目录实测 `0o777`）；`capture_scene` 换回
+  `glob` → **1 项红**。
 - **用例 415 → 425 例**（第二十六轮 +10：common +7 一致性、core +3 helper 拒绝），Python 自检
   另 **+34** 项（`robot_profile` 29 → 38、`zero_pose_semantics` 6 → 15、新增 `private_paths` 16）。
   撤门实测：档案写入改回 `open(path, "w")` → **4 例变红且文件实测 `0o666`**；
