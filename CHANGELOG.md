@@ -78,6 +78,18 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 
 ### Changed
 
+- **sidecar 的默认 socket 从"共享目录里的可预测名字"改成私有坐标**（第二十七轮）：
+  `state.socketPath` 的默认值不再是 `/tmp/dsh-ros2-sidecar.sock`，而是
+  `$XDG_RUNTIME_DIR/dsh-ros2/sidecar.sock`（会话管理器提供时），否则
+  `~/.dsh-ros2/run/sidecar.sock`（`0700`）。两端各自计算同一路径——TS 侧
+  `defaultStateSocketPath()`（`packages/common/src/local-socket.ts`）、Python 侧
+  `default_socket_path()`（`packages/sidecar/sidecar/node.py`），并由
+  `packages/dsh-ros2-state/tests/peer-identity.spec.ts` **启动 python 对账**，两者不允许漂移。
+  旧的 `/tmp` 路径**仍然可用**——它现在必须通过同一套对端判据（属主是我们、`0600`、父目录粘滞）。
+- **sidecar 服务端在自己的 `umask 0o077` 下 `bind`**（第二十七轮）：旧代码先 `bind` 再
+  `chmod 0600`，中间那一小段窗口里 inode 是 umask 派生的（宿主 umask 002 ⇒ `0775`，同组用户
+  可以 `connect()` 读语义缓存）。另外**残留 inode 只删自己的**：以前无条件 `os.unlink`，
+  于是别人先占的 socket 会被静默替换（看起来"起起来了"，客户端却可能还在跟先占者说话）。
 - **`ros2_zero_pose_semantics {action:'analyze'}` 的输出多一个 `scratch_dir`**（第二十六轮）：
   脚本与渲染帧不再落在固定 `/tmp` 坐标，而是落在本次运行独占的 `mkdtemp` 目录（`0700`）。
   `image` 字段因此指向该目录内的 `zero_pose_scene.jpg`；该目录**故意保留**（与"以前会在
@@ -160,6 +172,20 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 
 ### Fixed
 
+- **state 客户端不验证 socket 的对端是谁，于是在可预测路径上"谁先 bind 谁就是数据平面"**
+  （第二十七轮）：`UdsStateClient` 直接 `createConnection(socketPath)`，没有任何校验，而默认路径
+  在 `1777` 的 `/tmp` 里。**实测**（跑构建后的 `lib/`，PoC 见维护文档 §32）：别人在该路径上
+  `bind()` 一个假 sidecar，客户端连上去并把它答复的 `obstacle_front = false` 当作机器人状态交给
+  模型；该路径上的**符号链接被跟随**（可指向磁盘任意 socket）。协议本身没有鉴权，Node 也不暴露
+  `SO_PEERCRED`，所以唯一可判的是**坐标归属**：新增
+  `packages/common/src/local-socket.ts` 的 `checkLocalSocketPeer()`，在 `connect` **之前**拒绝
+  符号链接 / 非 socket / 属主不符 / 组或其他可写 / 父目录可写且非粘滞（`PEER_*` 结构化错误码）。
+  服务端同步补上 bind 目录判据（`$HOME` 下走 `private_paths`，其他位置要求"属主私有或粘滞"）。
+- **`state.tcp` 文档写的 `"host:port"` 形式从来不可用**（第二十七轮）：旧代码是
+  `createConnection({ host: '127.0.0.1', port: Number(socketPath) })`，把 `"127.0.0.1:9000"`
+  喂给 `Number()` 得到 `NaN` ⇒ `ERR_SOCKET_BAD_PORT`（实测）。现在由 `parseTcpTarget()` 解析
+  `"9000"` / `"127.0.0.1:9000"` / `"[::1]:9000"`，并且**只接受回环**——无鉴权的 socket 协议无法
+  验证远端对端，非回环主机直接拒绝（`PEER_REMOTE_HOST`）。
 - **机器人档案（含 `safety` 段）被写成了"其他用户可改"**（第二十六轮）：`robot_profile.py` 的四处
   写入（`register` / `safety set` / `topology snapshot` / `topology learn`）都是
   `os.makedirs(dir)` + `open(path, "w")`，权限完全由 umask 决定。**在一个全新 `$HOME` 里实测**

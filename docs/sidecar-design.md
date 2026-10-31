@@ -133,7 +133,19 @@ export interface StateClient {
 ### 3.6 边界与安全
 
 - Sidecar 是 ROS2 进程（需要 `/opt/ros` + colcon workspace env）；插件在 harness 内。
-  UDS 只监听本机（`/tmp/dsh-ros2-sidecar.sock`）。
+  UDS 只监听本机，默认落在**私有坐标**上：`$XDG_RUNTIME_DIR/dsh-ros2/sidecar.sock`，
+  没有 `XDG_RUNTIME_DIR` 时用 `~/.dsh-ros2/run/sidecar.sock`（两端同一算法，测试钉住）。
+- **对端身份**（第二十七轮）：这个协议没有鉴权，所以"谁是这个 socket 的主人"就是全部的
+  身份检查。两端都判：
+  - 客户端（`packages/common/src/local-socket.ts`，`state-client.ts` 在 `connect` 前调用）
+    拒绝符号链接 / 非 socket / 属主不符 / 组或其他可写 / 父目录可写且非粘滞；
+  - 服务端（`packages/sidecar/sidecar/server.py`）先判 bind 目录（`$HOME` 下按
+    `private_paths` 建 0700 并收紧；其他位置要求存在、非链接、要么属主私有要么粘滞），
+    再判已存在的残留 inode（**只删自己的**），最后在 `umask 0o077` 下 `bind` 并 `chmod 0600`。
+  - 旧默认值 `/tmp/dsh-ros2-sidecar.sock` **仍可用**（自己在粘滞目录里、0600 时通过判据），
+    但它不再是本项目的默认值：共享目录里的可预测名字是"先到先得"的身份。
+- TCP 模式（`state.tcp: true`）只接受**回环** `port` / `host:port`；非回环主机拒绝——
+  无鉴权的 socket 协议无法验证远端对端。
 - 心跳丢失 / 安全相关缓存过期 → fail-closed（沿用 `safetyStrict` 语义）。
 - 数据平面只读（只订阅，不发布控制指令）；控制指令走既有 approval 门。
 

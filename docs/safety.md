@@ -84,6 +84,37 @@ REQUEST → NORMALIZE → PLAN → VALIDATE → APPROVAL → FINGERPRINT CHECK �
 这**不**扩大安全保证的范围（第 2 节的声明仍然成立）：它只保证"参照数据没被同机的其他
 用户改过"，不保证机器人本体安全。
 
+### 3.2 数据平面的对端身份：本地 IPC 也没有天然身份
+
+上面每一行还有第二个隐含假定："读到的那份状态确实是 sidecar 给的"。**第二十七轮实测
+推翻了这个假定**：`UdsStateClient` 直接 `createConnection(socketPath)`，没有任何对端校验，
+而默认路径是 `/tmp/dsh-ros2-sidecar.sock`。实测（PoC，跑的是构建后的 `lib/`）：
+
+- 别人在那个可预测路径上先 `bind()`，客户端连上去并把它的答复当成机器人状态
+  （`obstacle_front = false` 就这样进了模型上下文）；
+- 该路径上的**符号链接**被跟随（可以指向磁盘上任意 socket）；
+- `tcp: true` 文档写的 `"host:port"` 从来不可用（`Number("127.0.0.1:9000")` 是 `NaN`）。
+
+从第二十七轮起，两端都判，且判据只有一条：**"这个坐标是不是我的"**
+（无鉴权的 socket 协议，`SO_PEERCRED` 在 Node 不可用）：
+
+| 检查 | 拒绝码 |
+| --- | --- |
+| 路径不存在 | `PEER_ABSENT` |
+| 符号链接（判链接本身，不判目标） | `PEER_SYMLINK` |
+| 不是 unix socket | `PEER_NOT_SOCKET` |
+| 属主不是当前 uid | `PEER_NOT_OWNED` |
+| 组/其他**可写**（`connect()` 只需写权限） | `PEER_WORLD_WRITABLE` |
+| 父目录可写**且非粘滞**（inode 可被替换） | `PEER_SHARED_PARENT` |
+| TCP 目标非回环 | `PEER_REMOTE_HOST` |
+
+默认值因此从"共享目录里的可预测名字"改成私有坐标
+（`$XDG_RUNTIME_DIR/dsh-ros2/sidecar.sock`，否则 `~/.dsh-ros2/run/sidecar.sock`）；
+服务端在 `umask 0o077` 下 `bind`（而不是 bind 之后再 chmod），并且**只删除自己的**残留 inode。
+
+同样**不**扩大保证范围：它只保证"我连的是自己的 sidecar"，不保证 sidecar 报的状态是真的，
+也不保证机器人本体安全——第一层（审批）与第二层（确定性校验）不变。
+
 ---
 
 ## 4. 审计与取证

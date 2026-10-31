@@ -33,7 +33,15 @@ beforeEach(async () => {
       }
     })
   })
-  await new Promise<void>((res) => server.listen(sock, res))
+  // A real sidecar socket is 0600 (server.py binds under umask 0o077). The
+  // client now REFUSES a group/other-writable socket (round 27), so the
+  // fixture must look like the real thing rather than like the ambient umask.
+  const saved = process.umask(0o077)
+  try {
+    await new Promise<void>((res) => server.listen(sock, res))
+  } finally {
+    process.umask(saved)
+  }
 })
 afterEach(async () => {
   await new Promise<void>((res) => server.close(() => res()))
