@@ -8,7 +8,10 @@ Realtime **vision** — 7 tools + the `vlm/` and `offscreen/` ROS2 packages + `r
   `$TMPDIR/dsh-ros2/snapshot_<ts>.jpg`; a path outside the capture directory requires approval;
   a symlink / directory / device destination, a non-`.jpg` name, or a missing parent is refused.
   The capture directory must be **ours and private (0700)** — a fixed name under `$TMPDIR` can be
-  pre-created by another local user.
+  pre-created by another local user. The same criterion now also guards the **standalone CLI**
+  (`scripts/image_snapshot.py`): its default directory is created/tightened to 0700 and a symlink or
+  a foreign owner is a refusal (exit code 3), and the JPEG bytes are written 0600 through a temp file +
+  `os.replace` so a symlink planted at the destination is replaced, not followed.
 - **Publishes the `dshRos2.vision` service** (gemini / openai / mock provider) consumed optionally by `dsh-ros2-core` (`ros2_gui_observe`) and `dsh-ros2-profile` (`ros2_zero_pose_semantics`)
 - **npm `files` includes `vlm/` + `offscreen/`** (fixes the monolith publish defect): build them into a colcon workspace (`ln -s <pkg>/vlm <ws>/src/dsh_ros2_vlm`, same for offscreen), then source the workspace.
 

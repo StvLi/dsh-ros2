@@ -25,7 +25,7 @@
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "vitest run && python3 scripts/image_snapshot.py --selftest",
     "build": "tsc -p tsconfig.build.json"
   },
   "engines": {

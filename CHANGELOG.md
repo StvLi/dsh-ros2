@@ -78,6 +78,11 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 
 ### Changed
 
+- **`image_snapshot.py` 的字节写入改成"0600 + 临时文件 + `os.replace`"**（第二十七轮）：帧不再
+  以 umask 派生的权限（宿主 umask 002 ⇒ `0664`，同组可读）直接落在目标路径上，也不会顺着种在
+  目标路径上的符号链接写出去。工具层（`ros2_image_snapshot`）与 CLI 两条入口行为一致。
+- **`packages/vision` 的 `test` 脚本现在也跑 `image_snapshot.py --selftest`**（第二十七轮，
+  7 项，无需 ROS2/相机）：此前这个 helper 的写侧判据完全没有测试入口。
 - **sidecar 的默认 socket 从"共享目录里的可预测名字"改成私有坐标**（第二十七轮）：
   `state.socketPath` 的默认值不再是 `/tmp/dsh-ros2-sidecar.sock`，而是
   `$XDG_RUNTIME_DIR/dsh-ros2/sidecar.sock`（会话管理器提供时），否则
@@ -172,6 +177,22 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 
 ### Fixed
 
+- **`image_snapshot.py` 作为独立 CLI 时，自己的默认目录既没判据也没权限**（第二十七轮；
+  第二十六轮 §5 登记项）：`os.makedirs(dirname(output), exist_ok=True)` + 直写，而默认坐标是
+  `$TMPDIR/dsh-ros2/snapshot_<ms>.jpg`（`1777` 的 `$TMPDIR` 下的可预测名字）。**实测**（宿主
+  umask 002）：目录被建成 **0775**；把该目录位置预置成符号链接后，`makedirs` **静默穿过**并
+  返回符号链接下的路径。工具层（第二十五轮）有完整判据，但**直接跑 CLI** 时完全没有——而第
+  二十六轮已经把 Python 侧判据（`private_paths.py`）做出来了，"两侧实现不一致"这条反对理由
+  不再成立，所以本轮**决定**让 CLI 也判：目录按 `runtime-dir.ts` 的同一条规则处理（判据总是
+  生效；`$TMPDIR` 之下才收紧），拒绝时退出码 3 并给出结构化 `code`。
+  （撤门实测：把判据换回裸 `os.makedirs` → **4 项自检变红**，目录实测 `0o777`。）
+- **`zero_pose_semantics.capture_scene()` 的读取回退会返回"别人放在那里的文件"**（第二十七轮；
+  第二十六轮 §5 登记项）：抓帧子进程没产出文件时，它 `glob("/tmp/dsh-ros2/snapshot_*.jpg")`
+  并取最后一个匹配——那是**本次运行从未写过的路径**。**实测**（`ros2` 在 PATH 上、抓帧包未安装
+  的真实情形）：在该目录放一个文件后，`capture_scene()` 返回的就是它，而它的返回值正是要送进
+  VLM 上传路径的 `image`。现在只接受"本次运行写、位于本次 `mkdtemp` 私有目录内、是我们自己的
+  常规文件（非符号链接）"，否则返回空串——**写侧有门、读侧没门**的同一族缺口到此闭环。
+  （撤门实测：换回 glob → "capture_scene no longer globs the shared temp root" 变红。）
 - **state 客户端不验证 socket 的对端是谁，于是在可预测路径上"谁先 bind 谁就是数据平面"**
   （第二十七轮）：`UdsStateClient` 直接 `createConnection(socketPath)`，没有任何校验，而默认路径
   在 `1777` 的 `/tmp` 里。**实测**（跑构建后的 `lib/`，PoC 见维护文档 §32）：别人在该路径上
