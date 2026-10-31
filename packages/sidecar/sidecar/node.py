@@ -4,7 +4,7 @@
 `Reducer.update` 写缓存；同时后台线程跑 UDS server（控制面板长连接）。
 
 用法（构建进 colcon workspace 后）：
-    ros2 run dsh_ros2_sidecar sidecar_node --sock /tmp/dsh-ros2-sidecar.sock
+    ros2 run dsh_ros2_sidecar sidecar_node --sock ~/.dsh-ros2/run/sidecar.sock
 
 框架：
     from dsh_ros2_sidecar.core import Cache
@@ -15,12 +15,34 @@
 from __future__ import annotations
 
 import argparse
+import os
 import threading
 
 from .core import Cache
 from .server import UdsServer
 
-DEFAULT_SOCK = "/tmp/dsh-ros2-sidecar.sock"
+
+def default_socket_path() -> str:
+    """The default sidecar socket: a PRIVATE coordinate this user owns.
+
+    Round 27 measured the old default (`/tmp/dsh-ros2-sidecar.sock`): a
+    predictable name in a 1777 directory is first-come-first-served, so whoever
+    binds it first IS the data plane — and the TS client had no check at all, so
+    the agent read attacker-authored robot state. A path under
+    `$XDG_RUNTIME_DIR` (0700 by definition) or `~/.dsh-ros2/run` (created 0700)
+    is one no other account can occupy first.
+
+    `packages/dsh-ros2-state/src/config.ts` computes the same path, and
+    `packages/dsh-ros2-state/tests/peer-identity.spec.ts` spawns this function to
+    compare, so the two ends cannot drift apart.
+    """
+    runtime_dir = os.environ.get("XDG_RUNTIME_DIR", "")
+    if runtime_dir:
+        return os.path.join(runtime_dir, "dsh-ros2", "sidecar.sock")
+    return os.path.join(os.path.expanduser("~"), ".dsh-ros2", "run", "sidecar.sock")
+
+
+DEFAULT_SOCK = default_socket_path()
 
 
 def build_default_cache() -> Cache:

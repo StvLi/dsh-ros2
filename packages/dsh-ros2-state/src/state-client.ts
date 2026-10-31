@@ -13,6 +13,7 @@
  *         { "type":"heartbeat" } | { "type":"event", "name", ... }
  */
 import { createConnection, type Socket } from 'node:net'
+import { checkLocalSocketPeer, parseTcpTarget } from 'dsh-ros2-common'
 
 export interface CacheEntry {
   name: string
@@ -49,13 +50,35 @@ export class UdsStateClient implements StateClient {
   private pending = new Map<string, Pending>()
   private subs = new Map<string, (entry: CacheEntry) => void>()
 
-  constructor(private socketPath: string, private defaultTimeoutMs = 1000, private tcp?: boolean) {}
+  constructor(
+    private socketPath: string,
+    private defaultTimeoutMs = 1000,
+    private tcp?: boolean,
+    /** Uid seam for tests: stands in for "a socket another account owns". */
+    private uid?: number,
+  ) {}
 
+  /**
+   * Connect — after proving the coordinate belongs to this user.
+   *
+   * The check runs immediately before `createConnection` and never creates or
+   * repairs anything: a socket we cannot prove is ours is a refusal, because
+   * this channel's data is handed to the model as fact ("no obstacle in front",
+   * "robot not locked"). See `checkLocalSocketPeer` for the criterion and for
+   * the measured consequence it removes (round 27).
+   */
   private ensure(): Socket {
     if (this.sock) return this.sock
-    const sock = this.tcp
-      ? createConnection({ host: '127.0.0.1', port: Number(this.socketPath) })
-      : createConnection(this.socketPath)
+    let sock: Socket
+    if (this.tcp) {
+      const target = parseTcpTarget(this.socketPath)
+      if (!target.ok) throw new StateClientError(target.code, target.reason)
+      sock = createConnection({ host: target.host, port: target.port })
+    } else {
+      const verdict = checkLocalSocketPeer(this.socketPath, { uid: this.uid })
+      if (!verdict.ok) throw new StateClientError(verdict.code, verdict.reason)
+      sock = createConnection(this.socketPath)
+    }
     this.sock = sock
     sock.setEncoding('utf8')
     sock.on('data', (chunk) => this.onData(String(chunk)))
