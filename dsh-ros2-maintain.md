@@ -46,7 +46,8 @@
 > 也判」）· **`capture_scene()` 的读侧回退**（`glob` 取共享目录里最新的文件，实测返回本次运行从未
 > 写过的文件，而它就是送进 VLM 的 `image`）· **`state.tcp` 的 `"host:port"` 从第一版起就没能用过**
 > （`Number("127.0.0.1:9000")` = `NaN`）。3 个 PR（**#92** F1+F4 · **#93** F2+F3 · **#94** CodeQL
-> 夹具）全部 CI/CodeQL **5/5 绿**后合入，`main` `652b859 → 37049ba`；用例 **425 → 450**
+> 夹具）全部 CI/CodeQL **5/5 绿**后合入，`main` `652b859 → 37049ba`（本轮文档 PR **#95** 合入后
+> `0c13bd0`）；用例 **425 → 450**
 > （449 过 + 1 pty-skip），Python 自检 **69 → 82** ＋ sidecar **11 → 19 场景**；**本轮无需重启**
 > （判据在活进程里没有可达路径，证据见 §32.9）。
 
@@ -7054,7 +7055,8 @@ file this run wrote : …/zero_pose_scene.jpg exists = False
 | **#93** | `fix/vision-snapshot-read-write` | F2 + F3：CLI 判据 + `0600` 原子写 + `capture_scene` 只认本次运行的文件 | 5/5 绿，合入 `9326a7c` |
 | **#94** | `fix/verification-fixture-dir` | CodeQL alert 13：夹具进 `mkdtemp`（并修并发覆盖） | 5/5 绿，合入 `37049ba` |
 
-`main`：`652b859` → `37049ba`。分支**合入即删**，`origin` 仍只有 `main` 一条。
+`main`：`652b859` → `37049ba`（三个修复 PR）；本文档自身是第 4 个 PR（**#95**），合入后
+`0c13bd0`。分支**合入即删**，`origin` 仍只有 `main` 一条。
 每个 PR 的说明都带"修前实测输出"，不是"我相信它有问题"。
 
 ### 32.7 本轮自己的错（如实记录）
