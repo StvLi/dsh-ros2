@@ -184,23 +184,48 @@ def publish_zero_joints(duration: float, joint_names: list[str], scratch_dir: st
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return proc
 
+def verified_frame(path_: str, workdir: str) -> str:
+    """The frame this run produced, or "" — never "the newest file over there".
+
+    A read-side criterion to match the write-side one. Round 27 measured the
+    old fallback: when the capture subprocess produced nothing, `capture_scene`
+    globbed `/tmp/dsh-ros2/snapshot_*.jpg` and returned the newest match, i.e. a
+    path in a predictable shared directory that this run never wrote (measured:
+    a planted file was returned and handed to the VLM uploader). "Newest file in
+    a directory anyone can write" is not evidence that a frame was captured.
+
+    Accepted only if it is a regular file, owned by us, not a symlink, and
+    inside this run's private scratch directory.
+    """
+    try:
+        info = os.lstat(path_)
+    except OSError:
+        return ""
+    import stat as _st
+    if not _st.S_ISREG(info.st_mode):
+        return ""
+    if hasattr(os, "getuid") and info.st_uid != os.getuid():
+        return ""
+    if os.path.dirname(os.path.abspath(path_)) != os.path.abspath(workdir):
+        return ""
+    parent_warn = private_paths.privacy_warning(os.path.abspath(workdir), label="渲染帧目录")
+    if parent_warn:
+        # private by construction (mkdtemp); a wide one means somebody moved it.
+        return ""
+    return path_
+
+
 def capture_scene(scratch_dir: str = "") -> str:
-    """Grab the latest /rviz/scene frame to a JPEG via image_snapshot."""
+    """Grab the /rviz/scene frame into this run's private scratch directory."""
     workdir = scratch_dir or private_scratch_dir()
     out_path = os.path.join(workdir, "zero_pose_scene.jpg")
     try:
-        p = subprocess.run(
+        subprocess.run(
             ["ros2", "run", "dsh_ros2_vlm", "image_snapshot", "--ros-args",
              "-p", "topic:=/rviz/scene", "-p", "compressed:=false", "-p", f"output:={out_path}"],
             capture_output=True, text=True, timeout=20,
         )
-        # image_snapshot may print a JSON with the path; fall back to the plugin's
-        # own (0700, round-26) capture directory
-        if os.path.exists(out_path):
-            return out_path
-        import glob
-        cands = sorted(glob.glob("/tmp/dsh-ros2/snapshot_*.jpg"))
-        return cands[-1] if cands else ""
+        return verified_frame(out_path, workdir)
     except Exception:  # noqa: BLE001
         return ""
 
@@ -385,6 +410,52 @@ def selftest() -> int:
         if os.path.basename(parent).startswith("dsh-ros2-zero-pose-"):
             import shutil as _shutil
             _shutil.rmtree(parent, ignore_errors=True)
+
+    # 6) round 27: the READ side. The capture fallback used to glob
+    #    `/tmp/dsh-ros2/snapshot_*.jpg` and return the newest match, i.e. a file
+    #    this run never wrote (measured: a planted file was handed to the VLM
+    #    uploader). The only acceptable frame is the one this run produced.
+    read_scratch = private_scratch_dir()
+    try:
+        produced = os.path.join(read_scratch, "zero_pose_scene.jpg")
+        with open(produced, "wb") as handle:
+            handle.write(b"\xff\xd8FAKEJPEG")
+        os.chmod(produced, 0o600)
+        check("a frame this run produced is accepted",
+              verified_frame(produced, read_scratch) == produced)
+
+        victim = os.path.join(read_scratch, "victim.jpg")
+        with open(victim, "wb") as handle:
+            handle.write(b"ORIGINAL")
+        linked = os.path.join(read_scratch, "linked.jpg")
+        os.symlink(victim, linked)
+        check("a symlinked frame is refused",
+              verified_frame(linked, read_scratch) == "")
+
+        outsider = os.path.join(tempfile.mkdtemp(), "elsewhere.jpg")
+        with open(outsider, "wb") as handle:
+            handle.write(b"\xff\xd8ELSEWHERE")
+        check("a frame outside this run's directory is refused",
+              verified_frame(outsider, read_scratch) == "")
+        os.unlink(outsider)
+
+        check("a missing frame is refused",
+              verified_frame(os.path.join(read_scratch, "absent.jpg"), read_scratch) == "")
+
+        # The fallback itself must be GONE, not merely unused: capture_scene is
+        # what the analyze action calls, so its source is the contract.
+        import inspect
+        source = inspect.getsource(capture_scene)
+        check("capture_scene no longer globs the shared temp root",
+              "glob(" not in source and "/tmp/dsh-ros2/snapshot_" not in source, source)
+        # And with no ROS2 process producing a frame it must return "" rather
+        # than whatever happens to sit in /tmp/dsh-ros2.
+        check("capture_scene returns empty when nothing was captured",
+              capture_scene(read_scratch) == "")
+    finally:
+        import shutil as _shutil2
+        if os.path.basename(read_scratch).startswith("dsh-ros2-zero-pose-"):
+            _shutil2.rmtree(read_scratch, ignore_errors=True)
 
     if failures:
         print(f"SELFTEST FAILED: {len(failures)} check(s): {', '.join(failures)}")
