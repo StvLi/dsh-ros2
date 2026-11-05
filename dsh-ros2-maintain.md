@@ -237,7 +237,7 @@ dsh-phoenix 已在 web profile 安装并生效：
 | **`dsh.phoenix.requestRestart()` 不返回受理凭据**（第二十八轮新增） | 服务契约写"幂等、复用同一合并路径"，实测返回 `undefined`（`ok/lifecycle/generation` 全无），因此"请求有没有被接受"只能从 `journalctl --user -u dsh-web` 的 `[dsh-phoenix] restart requested (gen N)` 行读。另：phoenix 的 `generation` 与本文档的 `gen-NN`（进程重启计数）**不是同一个计数器**，本轮实测相差 2。 | 无动作（读 journal 即可）；若要程序化判断，需 phoenix 侧返回状态对象，属该仓库的改动。 |
 | **CodeQL / Dependabot 告警面需要 token**（第二十八轮登记；**第二十九轮已解除**） | 本机 `gh` token 无效，`code-scanning/alerts` 与 `dependabot/alerts` 均 **401**。CI 的两个 CodeQL 分析 job 绿只证明"分析跑成功"，**不等于"0 告警"**。 | **已解除**：第二十九轮 `gh auth status` 两个账号均有效，实测 **CodeQL open = 0 / Dependabot open = 0**（§34.3）。保留此行是为了记住那两份 401 曾经存在——**不要把"分析绿"写成"无告警"**。 |
 | **`envNote` 只在失败路径可见**（第二十九轮新增） | `runner.ts` 在**成功**结果上也产出 `envNote`（配置的 `ROS_LOG_DIR` 被收紧/被拒绝、`rosSetup` 段缺失），但**没有任何消费者读它**：L1 适配器 `ros2Tool` 成功分支只带 `tail(stderr)`，手写工具从不读 `res.envNote`。只有**失败**时它才随 `error.code`/`message` 里的诊断出现。⇒ 第二十八轮的验收判据"工具结果 `envNote` 里出现收紧说明"**在成功调用上不可观察**——本轮为此不得不**故意制造一次失败**才看到它。 | 未修（本轮范围已满）。修法很小：在 `ros2Tool` 的成功分支把 `res.envNote` 折进 `warnings`。**但注意**：note 现在是"只报一次"（§34.6），折进 `warnings` 后它仍是一次性的——写进测试时别假设"每次都能看到"。 |
-| **`ros2_env_check` 的 `stale` 只比版本号**（第二十八轮登记，**第二十九轮复核仍未做**） | 比较的是 `loaded` 与 `installed` 的 `package.json` **版本**。改了 `lib/` 不改版本号 ⇒ `stale: false`，而活进程内存里是旧代码。第二十九轮的三处修复**全部**落在 `packages/common/lib/*.js` 且都没有改版本号 ⇒ 本轮的重载判定**仍然不能靠它**，只能靠"改的文件是不是活进程的必经之路"（§34.12）。 | **下一轮的现成入口**（§6 第 13 条已写成计划）：把 `registerLoadedBundle` 记下的判据从"版本"换成"内容指纹"（`lib/` 的文件名+内容哈希），`bundleDriftReport` 重算比对。注意 `LoadedBundle` 的现有测试会构造该对象，新增字段要可选，否则要改一批夹具。 |
+| **`ros2_env_check` 的 `stale` 只比版本号**（第二十八轮登记，**第二十九轮复核仍未做**） | 比较的是 `loaded` 与 `installed` 的 `package.json` **版本**。改了 `lib/` 不改版本号 ⇒ `stale: false`，而活进程内存里是旧代码。第二十九轮的三处修复**全部**落在 `packages/common/lib/*.js` 且都没有改版本号 ⇒ 本轮的重载判定**仍然不能靠它**，只能靠"改的文件是不是活进程的必经之路"（§34.12）。 | **下一轮的现成入口**（修法见本行「建议」列）：把 `registerLoadedBundle` 记下的判据从"版本"换成"内容指纹"（`lib/` 的文件名+内容哈希），`bundleDriftReport` 重算比对。注意 `LoadedBundle` 的现有测试会构造该对象，新增字段要可选，否则要改一批夹具。 |
 | **`dsh.phoenix` 的服务面与第二十八轮的记录不一致**（第二十九轮新增） | 本轮从 `ctx.get('dsh.phoenix')` 上实测：`canRestart` 是**函数**（日志逐字为 `(...args) => {`），**不是**布尔；`lifecycle` / `generation` 读出来是 **`undefined`**。第二十八轮记的是 `canRestart = true` / `generation = 32`。请求返回值仍是 `undefined`（与第二十八轮一致）。 | 无动作（两轮都靠 journal 的 `restart requested (gen N)` 行确认）。记在这里是为了让下一轮**不要**把 `canRestart` 当成布尔属性用——要调用它。 |
 | 审计 JSONL（§18） | 仍**未做**（`docs/safety.md` §4 仍如实写着"本版未做"） | 晚批独立项，不影响边界 |
 
@@ -252,7 +252,7 @@ dsh-phoenix 已在 web profile 安装并生效：
    `packages/common/lib/{toolkit,runner}.js`——入口闭点（每个工具结果都要过）与 `ROS_LOG_DIR` 判据
    （每条命令都要过）**都是活进程的必经之路** ⇒ 必须重载才生效。请求已发出，journal 逐字为
    `[dsh-phoenix] restart requested (gen 34): round 29: make the ingress-error + log-dir re-judge fixes live (gen-36)`；
-   **落地情况由下一轮按 §34.12 的验收清单逐条复测**。同样注意 `ros2_env_check` 的 `stale` **看不到**这件事。）
+   **落地情况由下一轮按 §34.11 的验收清单逐条复测**。同样注意 `ros2_env_check` 的 `stale` **看不到**这件事。）
    （**gen-34 已于 2026-11-05 09:51:41 落地**（宿主重启），第二十八轮开工逐字确认，见 §33.3.1。
    **第二十八轮登记 gen-35**：本轮改的 `packages/common/lib/{toolkit,runner,runtime-dir,index}.js`
    是**六个 bundle 的必经之路**（入口预算/字符判据/ROS_LOG_DIR 判定都在里面），而活进程的
