@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { lstat, readFile } from 'node:fs/promises'
 import os from 'node:os'
-import { defineTool, type ParameterSchemaSpec } from '@deepseek-ai/dsh-tools'
+import { type ParameterSchemaSpec } from '@deepseek-ai/dsh-tools'
 import {
   type ToolDeps,
   type ToolResult,
@@ -42,6 +42,7 @@ import {
   tail,
   jsonOf,
   ensurePrivateRuntimeDir,
+  defineRos2Tool,
 } from 'dsh-ros2-common'
 import { spawnJob } from 'dsh-ros2-common'
 
@@ -201,7 +202,7 @@ async function readTrajectoryJson(file: string): Promise<{ joint_names?: string[
 }
 
 function makeMoveitDiscoverTool(deps: ToolDeps) {
-  return defineTool({
+  return defineRos2Tool({
     name: 'moveit_discover',
     description:
       'Discover MoveIt2 configuration packages and their callable interfaces (generic, not bound to a specific package). ' +
@@ -231,7 +232,7 @@ function makeMoveitDiscoverTool(deps: ToolDeps) {
 }
 
 function makeMoveitStatusTool(deps: ToolDeps) {
-  return defineTool({
+  return defineRos2Tool({
     name: 'moveit_status',
     description:
       'Runtime status of the MoveIt stack (generic, read-only): whether the standard move_group interfaces (/move_action, /execute_trajectory, /compute_cartesian_path, controller_manager) are online, the current joint state (sample of /joint_states), and the SRDF planning frame. Optional srdf path.',
@@ -255,7 +256,7 @@ function makeMoveitStatusTool(deps: ToolDeps) {
 }
 
 function makeMotionValidateTool(deps: ToolDeps) {
-  return defineTool({
+  return defineRos2Tool({
     name: 'motion_validate',
     description:
       'Deterministic pre-execution motion validation (read-only, no motion): validate a planned trajectory / trajectoryOut artifact / motion proposal against the robot profile — joint limits (position/velocity/acceleration), NaN/Inf, joint names & group coverage, monotonic timestamps, duration, state freshness, optional pose workspace box, fingerprint + TTL. ' +
@@ -311,7 +312,7 @@ function makeMotionValidateTool(deps: ToolDeps) {
 }
 
 function makeMoveitMoveTool(deps: ToolDeps) {
-  return defineTool({
+  return defineRos2Tool({
     name: 'moveit_move',
     description:
       'Unified MoveIt motion interface (approval-gated; moves the real robot). Five essential modes behind one tool — generic (standard moveit_msgs + SRDF, never a specific package): ' +

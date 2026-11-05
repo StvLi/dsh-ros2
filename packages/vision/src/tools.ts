@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 import os from 'node:os'
 import path from 'node:path'
 import { existsSync } from 'node:fs'
-import { defineTool, type ParameterSchemaSpec } from '@deepseek-ai/dsh-tools'
+import { type ParameterSchemaSpec } from '@deepseek-ai/dsh-tools'
 import {
   type ToolDeps,
   type ToolResult,
@@ -45,6 +45,7 @@ import {
   type NodeInfo,
   tail,
   jsonOf,
+  defineRos2Tool,
 } from 'dsh-ros2-common'
 import { spawnJob } from 'dsh-ros2-common'
 import { createVisionProvider } from './vision.js'
@@ -115,7 +116,7 @@ export function bridgeServiceForTopic(topic: string): string {
 }
 
 function makeVisionDescribeTool(deps: VisionToolDeps) {
-  return defineTool({
+  return defineRos2Tool({
     name: 'ros2_vision_describe',
     description: 'Describe an image file with the configured multimodal model (Gemini/OpenAI, or mock). The type is decided by the file content, and a file above the 20 MiB inline budget is refused WITHOUT being read. API key resolution: config apiKey → ${ENV} reference → local secrets file (~/.dsh-ros2/secrets.json, written by ros2_vision_set_key). When no key is found the tool returns VLM_API_KEY_REQUIRED — ask the user for the key and store it with ros2_vision_set_key.',
     parameters: {
@@ -160,7 +161,7 @@ function snapshotDir(): string {
 }
 
 function makeImageSnapshotTool(deps: VisionToolDeps) {
-  return defineTool({
+  return defineRos2Tool({
     name: 'ros2_image_snapshot',
     description: 'Grab the latest frame from a sensor_msgs/Image or sensor_msgs/CompressedImage topic (e.g. /camera/image or /rviz/scene) and save it as JPEG. Headless image acquisition — no X11/screenshots, and NO custom ROS2 package needed (plain rclpy; works on any host with ROS2 sourced). Optional v4l fallback grabs a frame from a camera device via ffmpeg when the topic is silent. The saved file can be consumed by the Agent\'s own multimodal model directly. `output` defaults to the capture directory; a path outside it needs approval, and the destination must be a plain .jpg/.jpeg file (no symlinks, devices or directories).',
     parameters: {
@@ -222,7 +223,7 @@ function makeImageSnapshotTool(deps: VisionToolDeps) {
 }
 
 function makeVlmAnalyzeTool(deps: VisionToolDeps) {
-  return defineTool({
+  return defineRos2Tool({
     name: 'ros2_vlm_analyze',
     description: 'Analyze an image with the parallel VLM ROS2 node (OpenAI-compatible gateway). Two modes: (a) imagePath — send an image file via /vlm/describe; (b) useBridge — analyze the vlm_bridge_node\'s latest cached frame via /vlm_bridge/analyze_latest (no file, in-memory transfer; bridge holds the newest frame from its image topic). Requires the dsh_ros2_vlm package and a running vlm_node — when the pipeline is unavailable, fall back to ros2_image_snapshot + the Agent\'s own multimodal model.',
     parameters: {
@@ -267,7 +268,7 @@ function makeVlmAnalyzeTool(deps: VisionToolDeps) {
  * path for a key. Stored outside the repo (0600), never committed/uploaded.
  */
 function makeVisionSetKeyTool(deps: VisionToolDeps) {
-  return defineTool({
+  return defineRos2Tool({
     name: 'ros2_vision_set_key',
     description:
       'Store the VLM API Key the user just provided into the local secrets file (~/.dsh-ros2/secrets.json, 0600). ONLY use it when the user explicitly hands you a key (e.g. after ros2_vision_describe returned VLM_API_KEY_REQUIRED). The file lives outside the repository, is never committed to git, never packed into npm, never uploaded anywhere; the key is never echoed in results. Overwrites any previously stored key.',
@@ -322,7 +323,7 @@ function makeVisionTopicsTool(deps: VisionToolDeps) {
 }
 
 function makeVisionAnalyzeTool(deps: VisionToolDeps) {
-  return defineTool({
+  return defineRos2Tool({
     name: 'ros2_vision_analyze',
     description: 'Analyze the latest frame of any live image topic through the auto-brought-up vision pipeline (vision_bringup per-topic vlm_bridge_node → vlm_node). Routes to the topic\'s bridge service; in-memory frame transfer, no file. Requires vlm_node + vision_bringup running — when the pipeline is unavailable, fall back to ros2_image_snapshot + the Agent\'s own multimodal model.',
     parameters: {
@@ -390,7 +391,7 @@ export function visionInstallDirs(opts: { workspaceRoot?: string; rosSetup?: str
  * pipeline is ready, and a clear degradation path when it is not.
  */
 function makeVisionDoctorTool(deps: VisionToolDeps) {
-  return defineTool({
+  return defineRos2Tool({
     name: 'ros2_vision_doctor',
     description:
       'Vision pipeline self-check (read-only): is the vlm workspace built, are vlm_node / vision_bringup running, is the gateway reachable, which image topics are visible, is the API key resolved from env or plaintext, and does the key travel encrypted (http:// to a non-loopback host is reported as a cleartext warning)? Gives one-click build/launch guidance and a clear degradation path (ros2_image_snapshot + Agent multimodal) when the pipeline is not ready.',

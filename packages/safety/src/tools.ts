@@ -5,7 +5,7 @@
  */
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
-import { defineTool, type ParameterSchemaSpec } from '@deepseek-ai/dsh-tools'
+import { type ParameterSchemaSpec } from '@deepseek-ai/dsh-tools'
 import {
   type ToolDeps,
   type ToolResult,
@@ -39,6 +39,7 @@ import {
   type NodeInfo,
   tail,
   jsonOf,
+  defineRos2Tool,
 } from 'dsh-ros2-common'
 import { spawnJob, buildSafetyMonitorCommand } from 'dsh-ros2-common'
 
@@ -81,7 +82,7 @@ function parseServiceCall(stdout: string): Record<string, JsonValue> {
 }
 
 function makeRobotSafetyStartTool(deps: ToolDeps) {
-  return defineTool({
+  return defineRos2Tool({
     name: 'robot_safety_start',
     description:
       'Start the generic safety_monitor node for a registered robot as a background job (approval-gated; long-running, stop with DSH job controls). ' +
@@ -126,7 +127,7 @@ function makeRobotSafetyStartTool(deps: ToolDeps) {
 }
 
 function makeRobotSafetyStateTool(deps: ToolDeps) {
-  return defineTool({
+  return defineRos2Tool({
     name: 'robot_safety_state',
     description:
       'Read the current latched safety state from the safety_monitor (/safety/state, transient-local): NORMAL or LOCKED with severity, trigger cause and detail. ' +
@@ -150,7 +151,7 @@ function makeRobotSafetyStateTool(deps: ToolDeps) {
 }
 
 function makeRobotSafetyArbitrateTool(deps: ToolDeps) {
-  return defineTool({
+  return defineRos2Tool({
     name: 'robot_safety_arbitrate',
     description:
       'Semantic safety arbitration (event-driven, slow layer — only pull up when needed): formats a fixed safety prompt (task context + trigger cause + joint state + fresh render frame) and asks the VLM (via /vlm/describe) whether the robot is in a dangerous state. ' +
@@ -189,7 +190,7 @@ function makeRobotSafetyArbitrateTool(deps: ToolDeps) {
 }
 
 function makeRobotSafetyLockTool(deps: ToolDeps) {
-  return defineTool({
+  return defineRos2Tool({
     name: 'robot_safety_lock',
     description:
       'Human-gated explicit lock (approval required): latch the robot into LOCKED via the safety_monitor /safety/set_lock service. ' +
@@ -216,7 +217,7 @@ function makeRobotSafetyLockTool(deps: ToolDeps) {
 }
 
 function makeRobotSafetyUnlockTool(deps: ToolDeps) {
-  return defineTool({
+  return defineRos2Tool({
     name: 'robot_safety_unlock',
     description:
       'Human-gated unlock (approval required): clear the LOCKED latch via the safety_monitor /safety/unlock service. ' +

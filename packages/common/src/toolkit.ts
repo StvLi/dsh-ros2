@@ -9,7 +9,13 @@
  */
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
-import { defineTool, type ParameterSchemaSpec } from '@deepseek-ai/dsh-tools'
+import {
+  defineTool,
+  type DefineToolOptions,
+  type ParameterSchemaSpec,
+  type ToolDefinition,
+  type ValueSchemaSpec,
+} from '@deepseek-ai/dsh-tools'
 import { runCommand, type JobHooks, type RunOptions, type RosResult } from './runner.js'
 import { type JsonValue, parseJsonOrRaw } from './parse.js'
 import { isWhitespace, isWordChar } from './chars.js'
@@ -256,6 +262,57 @@ function boundedOk(tool: string, command: string, data: JsonValue, extra?: strin
     data: bounded.value,
     ...(warnings.length > 0 ? { warnings } : {}),
   }
+}
+
+/**
+ * The ONE finalizer every tool result passes through.
+ *
+ * Round 28 closed the *success* payload (`okResult` and the `ros2Tool` adapter),
+ * which left the other half of the same door open: `error.message` went to the
+ * model verbatim — up to `MAX_BUFFER` (16 MiB) of a child process's stderr, with
+ * no character rule. Real callers: `robot_load`, `robot_topology show`,
+ * `ros2_lifecycle get`, `ros2_component list` and `ros2_daemon status` all put
+ * raw `res.stderr`/`res.stdout` there, and none of them needs approval.
+ *
+ * Applying the policy to the WHOLE result (not just `data`) puts `data`, `error`
+ * and `warnings` under one rule, and `defineRos2Tool` wires this in for every
+ * tool in the family — a new tool cannot opt out by forgetting to call it.
+ */
+export function finalizeToolResult<T>(result: T): T {
+  const bounded = applyIngress(result as unknown as JsonValue)
+  if (bounded.warning === undefined) return result
+  const value = bounded.value as unknown as ToolResult
+  // The marker rides `warnings`, which `defineTool` always shows next to the
+  // error: a shortened error must not read like a complete one.
+  return { ...value, warnings: [...(value.warnings ?? []), bounded.warning] } as unknown as T
+}
+
+/**
+ * `defineTool` for this family: identical contract, plus the ingress finalizer
+ * on EVERY outcome (success, error, approval denial, safety rejection).
+ *
+ * Every bundle builds its tools through this, so the closed point is a property
+ * of the tool factory rather than a convention each tool author must remember.
+ * `tests/finalize.spec.ts` pins that no package imports `defineTool` directly.
+ */
+export function defineRos2Tool<const S extends ParameterSchemaSpec, const O extends ValueSchemaSpec>(
+  options: DefineToolOptions<S, O>,
+): ToolDefinition {
+  // Types are widened to `unknown` before wrapping on purpose: spreading a
+  // generic `DefineToolOptions<S, O>` makes tsc compare `InferObject<S, ?>`
+  // against itself and bail out with TS2321 (excessive stack depth). The runtime
+  // object is the caller's, unchanged — `defineTool` still validates the
+  // arguments before `execute` runs, and every other option keeps its meaning.
+  const base = options as unknown as Record<string, unknown>
+  const inner = options.execute as unknown as (args: unknown, exec: unknown) => Promise<unknown>
+  const wrapped = {
+    ...base,
+    execute: async (args: unknown, exec: unknown) => finalizeToolResult(await inner(args, exec)),
+  }
+  // `as never`: handing `defineTool` a `DefineToolOptions<S, O>` makes it infer
+  // `S`/`O` from themselves and tsc bails with TS2321 (excessive stack depth).
+  // The runtime object is the caller's own options, with `execute` wrapped.
+  return defineTool(wrapped as never)
 }
 
 // ── safety framework helpers ─────────────────────────────────────────────
