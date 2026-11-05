@@ -460,7 +460,8 @@ export async function judgeConfiguredRosLogDir(
 interface JudgedLogDir {
   /** dev:ino:mode:kind of the object the decision was made against. */
   identity: string
-  dir: string
+  /** Where ROS_LOG_DIR ends up; `null` = remove it from the child environment. */
+  dir: string | null
   /** The note describes one event, so it is shown once — not replayed forever. */
   notified: boolean
   note?: string
@@ -505,12 +506,21 @@ export async function ensureWritableRosLogDir(env: Record<string, string>): Prom
       // Refusal falls back to the private directory rather than failing the
       // command: the operator's intent (a writable log dir) is preserved, and
       // the note says the configured path was not used and why.
+      //
+      // `null` means "remove the variable", NOT "leave it alone": a fallback is
+      // only created when the default `~/.ros/log` is unwritable, so on the
+      // ordinary host `probeRosLogFallback()` answers undefined — and leaving
+      // the variable untouched handed the REFUSED path to every ros2 process
+      // while the note claimed it had been refused. CI caught this in round 29;
+      // it is invisible on a host that needs the fallback.
       const fallback = probeRosLogFallback()
       judged = {
         identity: '',
-        dir: fallback ?? '',
+        dir: fallback ?? null,
         notified: false,
-        note: `已拒绝配置的 ROS_LOG_DIR ${configured}（${outcome.code}: ${outcome.reason}）${fallback ? '，改用私有临时目录' : ''}`,
+        note:
+          `已拒绝配置的 ROS_LOG_DIR ${configured}（${outcome.code}: ${outcome.reason}）` +
+          (fallback ? `，改用私有临时目录 ${fallback}` : '，已从环境移除（回退到 ROS 默认日志目录）'),
       }
     }
     // Identity is recorded AFTER the judgement: tightening changes the mode, so
@@ -518,7 +528,8 @@ export async function ensureWritableRosLogDir(env: Record<string, string>): Prom
     judged.identity = identityOf(configured)
     judgedLogDirs.set(configured, judged)
   }
-  if (judged.dir !== '') env.ROS_LOG_DIR = judged.dir
+  if (judged.dir === null) delete env.ROS_LOG_DIR
+  else if (judged.dir !== '') env.ROS_LOG_DIR = judged.dir
   if (judged.note === undefined || judged.notified) return undefined
   judged.notified = true
   return judged.note

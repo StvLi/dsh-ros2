@@ -77,9 +77,15 @@ describe('ensureWritableRosLogDir re-judges and reports once', () => {
       const env: Record<string, string> = { ROS_LOG_DIR: dir }
       const note = await ensureWritableRosLogDir(env)
       expect(note).toContain('已拒绝')
-      // The link must not be handed to a ROS process: fall back to a private dir.
+      // The invariant, independent of whether this host needs a fallback: a
+      // refused path must never be handed to a ROS process. When `~/.ros/log`
+      // is writable there is no fallback dir, and the variable has to be
+      // REMOVED — leaving it alone was the bug CI caught (the refusal was
+      // reported but not enforced on the ordinary host).
       expect(env.ROS_LOG_DIR).not.toBe(dir)
-      expect(env.ROS_LOG_DIR === undefined ? '' : env.ROS_LOG_DIR).not.toContain('dsh-logrerun-')
+      expect(env.ROS_LOG_DIR ?? '').not.toContain('dsh-logrerun-')
+      // Either outcome is acceptable, and the note says which one happened.
+      expect(note).toMatch(/改用私有临时目录|已从环境移除/)
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
