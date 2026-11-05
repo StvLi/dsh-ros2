@@ -1,7 +1,7 @@
 # dsh-ros2 日常维护文档（Maintenance Log）
 
 > 仓库：`StvLi/dsh-ros2` · 本地代码：`/home/stvli/Desktop/embody_agent_ws/dsh-ros2`（git remote `git@github.com:StvLi/dsh-ros2.git`）
-> 维护日期：2026-10-31（最近一轮） · 维护者：DSH scheduled-run agent（StvLi 仓）
+> 维护日期：2026-11-06（最近一轮：第二十九轮，§34；第二十八轮见 §33） · 维护者：DSH scheduled-run agent（StvLi 仓）
 > 维护轮次：第一轮 2026-09-03（§0–§7）；第二轮 2026-09-04（§8）；第三轮 2026-09-05（§9，安全修复）；第四轮 2026-09-05（§10，无 open issue → 安全检查 → 两项维护卫生修复）；第五轮 2026-09-06（§11，无 open issue → 安全检查 → 落地 `ros2_install` 注入修复）；第六轮 2026-09-11（§12，无 open issue → 安全检查 → 落地 `safety_monitor` / `zero_pose_semantics` 注入修复 + vitest 4 升级 + CI 最小权限）；第七轮 2026-09-13（§13，open issue #19 → journey skills + 组合不变量）；第八轮 2026-09-14（§14，3 个 open issue → #21 修复并真机复核、#22 落地但保留 open、#19 完成验收测量）；第九轮 2026-09-21（§15）：open issue #22 → 补齐"会话技能目录对账"（其唯一未实现项）+ 修复 `ros2_env_check` 的"报告 ≠ 执行"缺陷（第八轮存疑项的真因）+ 安全复测；**第十轮 2026-09-22（§16，本轮）：补齐第九轮"在途无 PR"的缺口（PR #27，CI 首跑即抓出"本地绿、CI 红"）→ 在运行中进程里验收并关闭 issue #22 → 定位并修复线上故障真因（`rosSetup` 只校验第一段）→ 3 个 PR 全部合入 main**；第十二轮 2026-09-24（§17，收尾超时遗留的在途 PR #32 → 实测第十轮的重启请求已按硬期限落地 → 修复"配置没送到 doctor"的接线缺口 + API Key 来源语义）；第十三轮 2026-09-25（§18，0 open issue / 0 open PR → 安全扫描发现并落地 3 处真实缺陷 = PTY 会话 id 路径穿越 · 发布物携带 `__pycache__` 字节码 · 安装器选项注入，并开启 Dependabot 告警）；**第十四轮 2026-09-26（§19）：0/0 → 先闭环第十三轮唯一的未闭环观测（gen-21 重启逐字命中），再落地 3 个 PR = 明文传输的 VLM API Key 可见化 · 插件自建 IPC 对象权限收紧（PTY 会话文件 / sidecar UDS / 安装器脚本）· Dependabot 版本更新；并把跨五轮未处理的部署配置项升级为 issue #40；**第十五轮 2026-09-29（§20）：open issue #40 → step 2 评估（合理、必要，但配置在仓库外且需运维决定）→ **承接上一轮时间窗被截断留下的在途分支** `fix/workspace-path-hygiene` 并落地 `fix(common)`：自愈探针用**原始文本**比对存在性，把**存活但写成 `~/…`** 的工作区判为缺失、剔除该段、并在只剩它时**静默切换到 `/opt/ros/<distro>`** —— 恰是本轮文档新推荐的路径形式；闭环第十四轮的 gen-22 观测（逐字命中）；实测线上 **6 处**死链（issue #40 少算 1 处）；本轮**无 GitHub API token**，改用一次性 `ci/probe-*` 分支取得 CI（Node 22/24 双绿）后删除**；**第十六轮 2026-09-30（§21，本轮）：open issue #40 → step 2 复核（逐字确认**仍然准确**、更正为**实测 6 处**死链、结论仍交运维）→ **上一轮唯一的运维缺口已消失：`gh` 有了 token**，于是第一个动作就是把第十五轮卡住的在途分支**开成 PR #48、CI 双绿后合入 main**（第一次拿到**真实** PR CI，不再需要 `ci/probe-*` 代跑）；随后落地 3 个 PR = `fix(packaging)` 发布面 `__pycache__` 守卫（**此前只有"碰巧出现过"的那 3 个包有守卫**，实测 moveit 可复现泄漏 `.pyc`）+ `ci(security)` **CodeQL 代码扫描基线**（第十四/十五轮连续两次建议、本轮首次落地）+ `fix(security)` 首个基线 **29 条告警**中的**2 处真实缺陷**（`ros2_interface_create` 的 TOCTOU 可被符号链接穿出 · 自愈探针的自动探测路径未加引号）；Dependabot 积压 6 → 4（#47 合入并替掉失败的 #44）**；**第十七轮 2026-10-01（§22，本轮）：open issue #40 → step 2 第三次复核（事实逐字不变、结论仍交运维、故不再重复评论）→ 把第十六轮**有意不修**的 3 条 ReDoS 告警**先测量再修**：走真实入口实测后只有 **1 条真实可达**（`parseTopicList`，n=4000 阻塞 **14.8 s**，k=2.11；并发现**第二种**形状 `[`×n+` ]x]` 在 n=20000 阻塞 **697 ms**）、1 条被调用方的 `trim()`/`split('\n')` **消掉而不可达**、1 条**不可复现**（贪婪 `.*` 一步到 `$`，不回溯）→ 三条全部改为**可证明线性**的扫描 + `chars.ts` 逐码点字符类 + **差分等价测试**（穷举 + 10 万条随机/解析器，**0 分歧**），PR #55 CI/CodeQL **5/5 绿**后合入；**闭环第十六轮唯一的遗留观测**（gen-24：`lifecycleState: running`、无残留 `deferDeadline`、`pendingResume: false`）；Dependabot 积压 4 → 3（#43 vitest 4→5 dev-only 合入；#42/#45/#46 抬的是 **type-only peer 下界**，而 CI 装的是**该 PR 自己抬上去的 devDependency** ⇒ **结构上无法评估下界**，升级为 **issue #56**）；CodeQL open **13 → 10**；发布面用**预先种入 `.pyc` + 摘守卫正向对照**复测 9/9 CLEAN；并更正第十六轮快照表里与 §21.8 矛盾的"main 344"（实测 **347**）**。；**第十九轮 2026-10-11（§24，本轮）：open issue #40 → step 2 第五次复核（事实逐字不变、结论仍交运维）→ **把 §5「已知限制」里从第一轮躺到现在的 PTY 幻影会话修掉**：实测旧行为比原文更严重（无 pty 时 `start` 退出 0 并打印 `started session … (pid N)`，`status` **永远**报 `STATE running`，**连不存在的会话 id 也报 running**）⇒ 在父进程 fork 前探测 pty、失败写 `state=failed` 并退出 3、工具返回明确的 `PTY_UNAVAILABLE`；顺带查出**同一个 REMAINDER 解析缺陷**把 `--dir` 当参数投喂给下载来的 sudo 安装脚本（安装器 argv 实测 `["--dir", <dir>]`，修后为 `[]`），且 `--all` 名义存在却不可达 ⇒ 改为"flag 必须在 action 之前"并对 `status`/`stop` 的多余参数**报错而非静默忽略**；**安全扫描发现本地审计门禁在这台机器上根本跑不起来**（`~/.npmrc` 指向的镜像没有 advisory 端点⇒ 前几轮"本地复算供应链"实际无法复现）⇒ 把权威 registry 钉进 `pnpm run audit` / `audit:all` 并让 CI 调用同一条命令；文档计数全面漂移的修正**其中一次被仓库自己的组合不变量测试当场打回**（README 的 83 是"全家族六包"、聚合包只挂 81 ⇒ 改回 83，并在安装步骤把两个数分别说清）→ 并把它升格为 **issue #68**；2 个 PR（#66/#67）CI/CodeQL **5/5 绿**后合入，`main 66a139a → 7dc553f`**。**第二十轮 2026-10-12（§25，本轮）：2 open issue（#40 + #68）→ **issue #68 落地**（`fix(metadata)`：聚合包按"它实际挂的东西"宣称 81、家族 83 仍是家族的数）→ 顺带扫出**同一类缺陷的更大缺口**：三个**已发布**的 per-package `README.md` 从未被任何不变量读过（core 33 对 61、vision 5 对 7、聚合 51+4 对 81+9），已修并把"每个包 README 的第一个工具计数必须等于实测"写进组合不变量（**可证伪**：换回修复前文件即报 `expected 33 to be 61`）→ **issue #40 第六次复核后经运维确认、本轮真正落地**（备份 + 删 5 条死段尾 + 删第 63 行整条 `rosSetup`，YAML 校验通过，行为与自愈后的实际链逐字等价，等 gen-27 重启生效）→ 安全扫描审计/密钥/发布面/CodeQL 全不变（10 条 open 同规则同数量）、**远程已合并分支 16 → 1**（15 条全部是 main 的祖先）→ 1 个 PR（#70）CI/CodeQL **5/5 绿**后合入，`main 7dc553f → 316c142`，**open issue 归零**。**
 >
 > **第二十一轮 2026-10-13（§26，本轮）：0 open issue / 0 open PR → 走 step 5；先闭环上一轮唯一的未闭环观测（gen-27 逐字落地于 10-12 12:40:48，且 `ros2_env_check` 不再报 `missingSources` = issue #40 的最终判据达成）→ 安全扫描沿用同口径全绿（audit prod/含 dev 干净、CodeQL 10 不变、密钥 0、发布面 9/9 CLEAN、Python/TS 执行面与既有防线逐条回归）→ **但真正的高价值发现不是扫描器给的**：把"每个能执行/输入的接口"与"审批面"对照后，发现 `ros2_gui_interact` 可以在**无审批、无目标限制**下把任意按键/文本送进**任意窗口**（选中终端即宿主机命令执行），而更窄的 `ros2_run`/`ros2_service_call` 反而都要审批；且这本是仓库**自己**在 `docs/safety-todo.md` §17 / 验收 #11 决定过、却一直未落地的事（README 还反过来写着"no approval, same as other L3 tools"）→ 落地 `fix(security)`：默认应用白名单（rviz2/rqt/rqt_graph，可配 `guiAllowedApplications`）+ 按**解析后**窗口标题判定 + 白名单外（含不传 `windowTitle`）**先审批**且 fail-closed；用例 **362 → 371**（+9，且删掉 gate 块会让 3 条断言当场变红）；PR #73 CI/CodeQL **5/5 绿**后合入，`main 845f04f → 4ab647c`，并登记 gen-28 让这**真实的运行时变更**（`lib/` 变了）在跑着的 dsh 里生效。**
@@ -50,6 +50,23 @@
 > `0c13bd0`）；用例 **425 → 450**
 > （449 过 + 1 pty-skip），Python 自检 **69 → 82** ＋ sidecar **11 → 19 场景**；**本轮无需重启**
 > （判据在活进程里没有可达路径，证据见 §32.9）。
+
+> **第二十八轮 2026-11-05（§33）：0 open issue / 0 open PR → step 5；换了「面」——前七轮的门都在出口面，
+> 第八次问「进模型的那份字节，谁看过它？」→ 落地 `ingress.ts` 一个闭点（4 MiB 话题字段实测只留 8 KiB）
+> ＋配置面（文档建议的 `rosLogDir: /tmp/ros-log` 正是代码刻意避开的形状，部署实测 0775）＋L4 `vlm_node`
+> 同形状遗留；**本轮无 GitHub token，PR 步骤无法执行**（直接推 main），故 §5 留下「告警面不可读」缺口。**
+
+> **第二十九轮 2026-11-06（§34，本轮）：0 open issue / 0 open PR → 走 step 5；`gh` token 已恢复 ⇒ 先补齐
+> 第二十八轮留下的**唯一硬缺口**（CodeQL **0** / Dependabot **0** 实测可读），再逐条闭环其 §33.11 三条
+> 验收判据（`/tmp/dsh-ros2-log` 已 `0700`、`envNote` 出现、PID 已换新），并纠正一条措辞：**收紧是
+> "下一次命令"触发的，不是 "重载"触发的**；「执行面 × 审批面」第九次连做，**换了第三个面——入口面的
+> "另一扇门"和"检查本身"**：F1 = 第 28 轮的闭点只闭了 `data`，`error.message` 仍是 `maxBuffer`
+> （16 MiB）无字符判据的直通（实测 **896,016 → 8,219 字节**）；F2 = 配置 `ROS_LOG_DIR` 的判据被
+> **按路径 memo 成一次性**，进程存活期内换符号链接/放宽权限都不再复查，而 note 每次都复述"已收紧"
+> （实测：note 说已收紧，`ls -ld` 仍 `drwxrwxr-x`）；F3 = **CI 抓出的第三个真缺陷**——拒绝分支在没有
+> fallback 时把被拒绝的路径**继续留在环境里**（本地因为需要 fallback 而看不见，即"本地绿、CI 红"
+> 又一次是 CI 对）。两个 PR（**#97** F1 · **#98** F2+F3）CI/CodeQL **5/5 绿**后合入，
+> `main` `e7d0823 → 3a0a81c`，用例 **470 → 479**，登记 **gen-36**。
 
 本文件记录 dsh-ros2 插件的一次完整日常维护循环：**查 issue → 评估建议 → 分支开发 → 验证 → 推送 → 交付维护文档**。每次维护在下方追加一节。
 
@@ -218,7 +235,10 @@ dsh-phoenix 已在 web profile 安装并生效：
 | **`ros2_env_check` 的 `stale` 只比版本号，不比内容**（第二十八轮新增） | 它比较 `loaded` 与 `installed` 的 `package.json` **版本**。本轮改了 `packages/common/lib/*.js` 而没有改版本号 ⇒ `stale: false`，但活进程内存里是**旧代码**。本轮的重载判定因此**不能**靠它，靠的是"改的文件是不是活进程的必经之路"（§33.11）。 | 要真检测需要比**内容**（例如 `lib/` 的 mtime/哈希），属小改动但不是本轮范围；使用上记住：**`stale: false` ≠ 磁盘代码已生效**。 |
 | **L4 `vlm_node` 不判它收到的 `ROS_LOG_DIR`**（第二十八轮新增） | F2 的判定在 TS 侧（`runCommand`）。节点自己只在**兜底**时选私有目录；如果运维把 `ROS_LOG_DIR` 显式传给节点，它原样使用。由插件经 `runCommand` 拉起的节点**会**被判定（同一环境变量），**手工** `ros2 run` 起的不会。 | 有意（Python 侧不重复实现判据，避免第二十六轮那种"两侧漂移"）。手工起节点时运维自己负责该路径。 |
 | **`dsh.phoenix.requestRestart()` 不返回受理凭据**（第二十八轮新增） | 服务契约写"幂等、复用同一合并路径"，实测返回 `undefined`（`ok/lifecycle/generation` 全无），因此"请求有没有被接受"只能从 `journalctl --user -u dsh-web` 的 `[dsh-phoenix] restart requested (gen N)` 行读。另：phoenix 的 `generation` 与本文档的 `gen-NN`（进程重启计数）**不是同一个计数器**，本轮实测相差 2。 | 无动作（读 journal 即可）；若要程序化判断，需 phoenix 侧返回状态对象，属该仓库的改动。 |
-| **CodeQL / Dependabot 告警面需要 token**（第二十八轮登记，本机当前缺口） | 本机 `gh` token 无效，`code-scanning/alerts` 与 `dependabot/alerts` 均 **401**。CI 的两个 CodeQL 分析 job 绿只证明"分析跑成功"，**不等于"0 告警"**。 | 运维恢复 token（`gh auth login`）后补读；否则每轮都要在维护文档里如实留空，**不要**把"分析绿"写成"无告警"。 |
+| **CodeQL / Dependabot 告警面需要 token**（第二十八轮登记；**第二十九轮已解除**） | 本机 `gh` token 无效，`code-scanning/alerts` 与 `dependabot/alerts` 均 **401**。CI 的两个 CodeQL 分析 job 绿只证明"分析跑成功"，**不等于"0 告警"**。 | **已解除**：第二十九轮 `gh auth status` 两个账号均有效，实测 **CodeQL open = 0 / Dependabot open = 0**（§34.3）。保留此行是为了记住那两份 401 曾经存在——**不要把"分析绿"写成"无告警"**。 |
+| **`envNote` 只在失败路径可见**（第二十九轮新增） | `runner.ts` 在**成功**结果上也产出 `envNote`（配置的 `ROS_LOG_DIR` 被收紧/被拒绝、`rosSetup` 段缺失），但**没有任何消费者读它**：L1 适配器 `ros2Tool` 成功分支只带 `tail(stderr)`，手写工具从不读 `res.envNote`。只有**失败**时它才随 `error.code`/`message` 里的诊断出现。⇒ 第二十八轮的验收判据"工具结果 `envNote` 里出现收紧说明"**在成功调用上不可观察**——本轮为此不得不**故意制造一次失败**才看到它。 | 未修（本轮范围已满）。修法很小：在 `ros2Tool` 的成功分支把 `res.envNote` 折进 `warnings`。**但注意**：note 现在是"只报一次"（§34.6），折进 `warnings` 后它仍是一次性的——写进测试时别假设"每次都能看到"。 |
+| **`ros2_env_check` 的 `stale` 只比版本号**（第二十八轮登记，**第二十九轮复核仍未做**） | 比较的是 `loaded` 与 `installed` 的 `package.json` **版本**。改了 `lib/` 不改版本号 ⇒ `stale: false`，而活进程内存里是旧代码。第二十九轮的三处修复**全部**落在 `packages/common/lib/*.js` 且都没有改版本号 ⇒ 本轮的重载判定**仍然不能靠它**，只能靠"改的文件是不是活进程的必经之路"（§34.12）。 | **下一轮的现成入口**（§6 第 13 条已写成计划）：把 `registerLoadedBundle` 记下的判据从"版本"换成"内容指纹"（`lib/` 的文件名+内容哈希），`bundleDriftReport` 重算比对。注意 `LoadedBundle` 的现有测试会构造该对象，新增字段要可选，否则要改一批夹具。 |
+| **`dsh.phoenix` 的服务面与第二十八轮的记录不一致**（第二十九轮新增） | 本轮从 `ctx.get('dsh.phoenix')` 上实测：`canRestart` 是**函数**（日志逐字为 `(...args) => {`），**不是**布尔；`lifecycle` / `generation` 读出来是 **`undefined`**。第二十八轮记的是 `canRestart = true` / `generation = 32`。请求返回值仍是 `undefined`（与第二十八轮一致）。 | 无动作（两轮都靠 journal 的 `restart requested (gen N)` 行确认）。记在这里是为了让下一轮**不要**把 `canRestart` 当成布尔属性用——要调用它。 |
 | 审计 JSONL（§18） | 仍**未做**（`docs/safety.md` §4 仍如实写着"本版未做"） | 晚批独立项，不影响边界 |
 
 ---
@@ -226,10 +246,13 @@ dsh-phoenix 已在 web profile 安装并生效：
 ## 6. 下次维护建议动作
 
 1. 若需重载运行时变更：走 §4 的 dsh-phoenix 优雅重启循环，而非手动 `systemctl restart`。
-   （**gen-32 已于 2026-10-30 13:27:38 落地**（宿主重启），**gen-33 已于 2026-10-31 14:49:41 落地**
-   （宿主再次重启）；本轮开工逐字确认，见 §32.3.1。**第二十七轮不登记新的 gen**：
-   本轮改的 TS `lib/` 消费者只有 `dsh-ros2-state`，而它没有挂进这个进程；两处 Python helper
-   按路径读盘、无需重载——证据逐条见 §32.9。）
+   （**gen-35 已于 2026-11-05 10:10:41 落地**：journal 逐字为 `[dsh-phoenix] restart requested (gen 33)` →
+   `10:10:30 agent idle; executing deferred restart` → `10:10:41 [dsh-phoenix] loaded`，新 PID **35696**，
+   第二十九轮开工逐字确认，见 §34.2.1。**第二十九轮登记 gen-36**：本轮两处修复都落在
+   `packages/common/lib/{toolkit,runner}.js`——入口闭点（每个工具结果都要过）与 `ROS_LOG_DIR` 判据
+   （每条命令都要过）**都是活进程的必经之路** ⇒ 必须重载才生效。请求已发出，journal 逐字为
+   `[dsh-phoenix] restart requested (gen 34): round 29: make the ingress-error + log-dir re-judge fixes live (gen-36)`；
+   **落地情况由下一轮按 §34.12 的验收清单逐条复测**。同样注意 `ros2_env_check` 的 `stale` **看不到**这件事。）
    （**gen-34 已于 2026-11-05 09:51:41 落地**（宿主重启），第二十八轮开工逐字确认，见 §33.3.1。
    **第二十八轮登记 gen-35**：本轮改的 `packages/common/lib/{toolkit,runner,runtime-dir,index}.js`
    是**六个 bundle 的必经之路**（入口预算/字符判据/ROS_LOG_DIR 判定都在里面），而活进程的
@@ -246,12 +269,17 @@ dsh-phoenix 已在 web profile 安装并生效：
    `ROS_LOG_DIR` 观察到 `/tmp/ros-log-<随机后缀>`。）
    （第二十二轮登记 gen-29 的原因同样是**真正的运行时变更**：`packages/core/lib/*.js` 与
    `packages/vision/lib/*.js` 都变了——新审批门与图片内容校只有在重载后才会在跑着的 dsh 里生效。）
-2. 全量用例基数：**470 例（469 过 + 1 pty-skip）**。pty 可用机器（如 CI）上 470/470。
+2. 全量用例基数：**479 例（478 过 + 1 pty-skip）**。pty 可用机器（如 CI）上 479/479。
+   （第二十九轮 **470 → 479**：common **147 → 156**，即 `finalize.spec.ts` 6 例 + `ros-log-dir-rerun.spec.ts` 3 例。）
    Python 自检另 **101 项**（`robot_profile` 38 / `private_paths` 16 / `zero_pose` 21 /
    `image_snapshot` 7 / **`vlm_node` 19（第二十八轮新增，离线：stub ROS + 回环捕获服务器，
    已接进 vision 的 `test` 脚本）**）＋ sidecar **19 场景**。
 3. 远端分支卫生：第二十轮把 16 → 1；第二十一/二十二轮**合入即删**保持 `origin` 只有 `main`。
+   第二十九轮两个 PR 均 `--delete-branch` 合入，实测 `git ls-remote --heads origin` 仍**只有 `main`**。
 4. 保持“提交前 typecheck+test+build 全绿 + 行为变更补测试 + push 后 CI 绿”的验收线。
+   **注意 PR 上的 CI 只有 5 个 check**（`CodeQL` + `analyze (javascript-typescript|python)` + `check (22|24)`）：
+   `audit.yml` 的触发条件是 `push: branches: [main]` / `schedule` / `dispatch`，**不跑 PR**。
+   所以 PR 绿**不包含**供应链审计——它是本地 `pnpm run audit` 那一格（已把权威 registry 钉进脚本）。
 5. **凡文档里出现"已知限制 / 静默 / 无输出"这类词，都当作"待复现的假设"**（第十九轮教训的正面用法）。
 6. **每轮固定做一次"执行面 × 审批面"对照**（§27.4.1 的 A/B 两张表）：把"能执行 / 能写 / 能把数据送出去"的
    接口列出来，逐个问**"它凭什么不需要审批"**。这条已经**连续五轮**是唯一产出真实缺陷的动作
@@ -327,6 +355,33 @@ dsh-phoenix 已在 web profile 安装并生效：
     写「那个文件里正是 `safety` 段」——在本机它**根本没有 `safety` 段**（`urdf` 还指向已删除的
     `/tmp` 文件、`tf_root` 为空）。代码读对了，**事实没量**。所以每条「已知限制」要写清它是
     「代码会写成什么」还是「这台机器上是什么」，后者每次复核都要重新 `stat` / 重新读一遍。
+
+19. **闭点要问"它闭的是哪一半"**（第二十九轮，F1）：第二十八轮把入口判据接在"成功结果的唯一出口"，
+    于是 `error.message` 从同一扇门的**另一半**原样通过（16 MiB 上限、零字符判据）。这不是疏漏，
+    是把"我接在成功路径上"说成了"我接在出口上"。**写"一个闭点"时必须列出它没覆盖的分支**
+    （成功 / 失败 / 拒绝 / 安全拦截），并让判据落在**工厂**而不是"记得调用它的每个工具"上。
+    本轮的做法：`defineRos2Tool` 包住 `execute`，于是新工具**结构上**无法绕过。
+
+20. **memo 化一个"判据"时，要连"它判的是什么对象"一起记**（第二十九轮，F2）：
+    `judgedLogDirs` 只记了**结论**，于是判据只跑一次，之后换符号链接/放宽权限都不再复查——
+    而 note 还在复述第一次的"已收紧"。**缓存结论 = 假设对象不会变**；安全相关的判据必须缓存
+    **对象的身份**（`dev:ino:mode:kind`）并在身份变化时重判。同一条也适用于"配置文件读一次就缓存"。
+
+21. **一条 note 描述的是"一次事件"，不是"当前状态"**（第二十九轮）：`已收紧` 是**过去式的事件**，
+    被 memo 反复返回后读起来像现在时。凡是要"每次都能看到"的信息，措辞必须与状态同步；
+    凡是一次性事件，就只报一次并让状态自证（`ls -ld` 能证明的事，不必echo 第二遍）。
+
+22. **"本地绿、CI 红"第七次，第七次都是环境差异**（第二十九轮，F3）：拒绝分支只在
+    **需要 fallback** 时才会改写环境变量；本机 `~/.ros/log` 不可写（于是有 fallback），
+    CI 可写（于是没有 fallback）⇒ 本机绿、CI 红，而红的那一侧才是**普通主机**的真实形态。
+    所以：**测试要断言与环境无关的不变量**（"被拒绝的路径不能出现在子进程环境里"），
+    而不是断言某一条分支的实现细节（"这是不是 fallback 目录"）。凡是 `if (fallback)` 后面跟着
+    赋值的地方，都要问"fallback 为 undefined 时，上一份值还在吗"。
+
+23. **用"编译产物 + 直接调用 vs 经工厂"做修前/修后对照**（第二十九轮的方法学，值得复用）：
+    要证明"旧行为有多糟"不必回到旧 commit——把同一个 payload **直接喂给 helper**（旧调用形态）
+    与**经 `defineRos2Tool` 走真实路径**（新调用形态）分别量一次，同一份 `lib/`、同一次构建，
+    差异只来自封装。`_maint/r29/measure-error-channel.mjs` 即此法（896,016 → 8,219 字节）。
 
 ---
 
@@ -7491,3 +7546,356 @@ journal 读。这条已记进 §5（**返回值不能当作受理凭据**）。
   这类缺陷不会被任何扫描器报出来，只能靠"拿仓库自己的判据去量部署"。
 - CodeQL / Dependabot 的**告警面本轮不可读**（无 token）。CI 的两个 CodeQL 分析 job 是绿的，
   但那只证明"分析跑成功"，**不等于"没有新告警"**——下一轮必须补齐这一格。
+
+---
+
+## 34. 维护记录（2026-11-06 04:00 CST / UTC 2026-11-05 20:00 · 第二十九轮：0 open issue / 0 open PR → step 5；`gh` token 已恢复 ⇒ 先补齐第二十八轮唯一的硬缺口（CodeQL **0** / Dependabot **0**）并逐条闭环其 §33.11 验收判据（含一条**措辞纠正**：收紧是"下一条命令"触发、不是"重载"触发）；第九次「执行面 × 审批面」换了第三个面——**入口面的另一半与"检查本身"**：F1 = 第 28 轮的闭点只闭了 `data`，`error.message` 仍是 16 MiB 无字符判据的直通（实测 **896,016 → 8,219 字节**）· F2 = 配置 `ROS_LOG_DIR` 的判据被按路径 **memo 成一次性**（换符号链接/放宽权限都不再复查，而 note 每次复述"已收紧"）· F3 = **CI 抓出的第三处**——拒绝分支在没有 fallback 时把被拒路径**继续留在环境里**；两个 PR（**#97** · **#98**）CI/CodeQL **5/5 绿**后合入，`main` `e7d0823 → 3a0a81c`，用例 **470 → 479**，登记 **gen-36**）
+
+### 34.1 是否存在未处理的 issue / PR
+
+```text
+$ gh issue list --state open --limit 50     → （空）
+$ gh pr   list --state open --limit 30      → （空）
+```
+
+⇒ **0 open issue / 0 open PR**，进入与离开时都是。本轮全部产出属于 **step 5（安全扫描）**，
+没有 step 2（建议评估）要做的事。最近关闭的 5 个 issue（#68 #56 #40 #22 #21）均为历史轮次成果。
+
+### 34.2 第二十八轮交接闭环（逐条，不是复述）
+
+#### 34.2.1 gen-35 已落地（journal 逐字）
+
+```text
+Nov 05 10:08:18  [dsh-phoenix] restart requested (gen 33): round 28: make the ingress / rosLogDir fixes live (gen-35)
+Nov 05 10:08:21  [dsh-phoenix] restart already in-flight; coalesced plugin-change
+Nov 05 10:10:30  [dsh-phoenix] agent idle; executing deferred restart (gen 33)
+Nov 05 10:10:30  [dsh-phoenix] restart cmd exit=0
+Nov 05 10:10:41  [dsh-phoenix] loaded (graceful restart + client reconnect + lifecycle)
+```
+
+```text
+$ ps -o pid,lstart -p 35696
+ 35696  Thu Nov  5 10:10:39 2026     ← 旧 PID 2007（09:51:48）已被替换
+$ journalctl --user -u dsh-web --since "2026-11-05 10:11" | grep -icE "loaded|restart"  → 0
+```
+
+⇒ **自 10:10:41 起没有再次重启**；本轮开工时活进程仍是这一个（`systemctl --user is-active` = `active`）。
+
+#### 34.2.2 §33.11 三条验收判据逐条复测（**其中一条要纠正措辞**）
+
+| # | 第二十八轮写的判据 | 本轮实测 | 结论 |
+| --- | --- | --- | --- |
+| 1 | `ls -ld /tmp/dsh-ros2-log` → **`0700`** | 开工时是 **`drwxrwxr-x`（0775，mtime `Nov 5 09:55`）**；**第一次 `runCommand` 之后**才是 `drwx------`（mtime `Nov 6 04:01`） | **判据成立，但措辞不准**：收紧是**下一条 `runCommand`** 触发的（判据在 `runCommand` 里），**不是"重载"触发的**。§33.11 写成"重载后该目录会被就地收紧"，会让下一轮在重载后立刻 `ls` 得到 0775 并误判失败 |
+| 2 | 工具结果 `envNote` 里出现"已收紧" | 只有**失败**结果里出现，逐字为 `[env] 配置的 ROS_LOG_DIR /tmp/dsh-ros2-log 位于临时根目录（1777），权限宽于 0700，已收紧（同 private-runtime-dir 判据）` | **判据只在失败路径可观察**：`ros2Tool`（L1）**成功分支丢弃 `res.envNote`**，手写工具从不读它（`grep envNote packages/*/src/*.ts` → 零个消费者）。已登记为 §5 新条目 |
+| 3 | 新 PID + `/__dsh_health` token 变化 | PID `2007 → 35696`（§34.2.1）；token 属机制自证（client 自动重连），本轮未取，**不当作已验** | 部分确认 |
+
+> 判据 1 的纠正值得单独记：**"重载后生效"是错的，实际是"下一次调用时生效"**。这类"生效时机"的
+> 措辞在本文件里出现过至少两次（判据 1 与 §33.7 的部署目录），下一轮写验收判据时**必须写清
+> 触发条件**（"重载后" / "下一条命令后" / "下次 `robot_register` 后"）。
+
+#### 34.2.3 §33.7 的两个 **401** 缺口：已解除，实测 0 / 0
+
+第二十八轮因为 `gh` token 无效，把 CodeQL 与 Dependabot 的告警面留空。本轮 token 有效
+（`gh auth status` → `Logged in to github.com account StvLi (keyring)`，两个账号均 valid）：
+
+```text
+$ gh api repos/StvLi/dsh-ros2/code-scanning/alerts?state=open     --jq length   → 0
+$ gh api repos/StvLi/dsh-ros2/dependabot/alerts?state=open        --jq length   → 0
+```
+
+⇒ **CodeQL open = 0 · Dependabot open = 0**。这是**读到的 0**，不是"分析 job 绿所以推断 0"——
+第二十八轮 §5 明确禁止把后者写成前者，本轮把它变成可读的实测值。
+
+#### 34.2.4 §33.8 的程序偏离（直接推 `main`、跳过合入前 CI）：本轮恢复
+
+第二十八轮如实记了"没有 token ⇒ 开不了 PR ⇒ 先合后验"。本轮 token 在手，**两个修复都走了完整
+的真 PR**：分支 → push → `gh pr create` → **PR 上 CI 5/5 绿** → `gh pr merge --merge --delete-branch`。
+`main` 的每一步都能追到 PR 号（§34.8）。
+
+#### 34.2.5 台账复测（`lite.yaml` 仍陈旧，**需运维决定**，本轮不代做）
+
+```text
+keys                = ['cameras','description','joints','moveit','name','registered_at','tf_root',
+                       'topology','urdf','urdf_links','zero_pose']
+tf_root             = ''
+urdf                = /tmp/lite_latest_low3.urdf   →  exists = False
+has safety section  = False
+```
+
+⇒ 与第二十七/二十八轮**逐字一致**。入口条件（图里没有 `/robot_description`）仍未满足，
+且重写会覆盖 operator 的 `zero_pose`/`topology`/`moveit`，因此继续挂"运维决定"。
+
+### 34.3 仓库快照（本轮起点）
+
+| 项 | 值 |
+| --- | --- |
+| 分支 / HEAD | `main` = `origin/main` = **`e7d0823`**（round-28 合入后），工作树**干净** |
+| 远端分支 | `origin` 只有 **`main`**（1 条） |
+| open issue / PR | **0 / 0** |
+| 活进程 | PID **35696**（2026-11-05 10:10:39 起），`dsh-web.service` = `active` |
+| CI（main 最近） | round-28 三次合并的 `CI` / `Supply chain` / `CodeQL` **全部 success**；此后只有两次 Dependabot 定时运行（success，未产出 PR） |
+| CodeQL / Dependabot open | **0 / 0**（§34.2.3） |
+| 最新发布 | 9 包基线 `0.1.0 / common 0.1.1 / core 0.1.5 / vision 0.1.3`（与 `installed` 版本全等） |
+| 本地 Node / pnpm | `v24.16.0` / `11.22.0`（与 root `packageManager` 一致） |
+| 工具面 | **81** 条（`grep` 计数与 `ros2_env_check` 的 `tools 81` 一致） |
+
+### 34.4 第九次「执行面 × 审批面」：这次问的是**门的另一半**
+
+前八次的问题分别是：谁能在 GUI 里注入（R21）· 谁能 `source`/外发文件（R22）· 日志写哪（R23）·
+上传多大（R24）· 路径凭什么是我的（R25–R26）· 对端是谁（R27）· 进模型的字节谁看过（R28）。
+§6 第 6 条留的教训是"同一张表连问七轮只剩边角料时，**换面比换问句**产出更高"，
+所以本轮把 R28 刚建好的入口判据当作**新对象**来审——不是"还有没有别的面"，
+而是**"这扇门关严了吗"**：R28 说"一个闭点"，那就要问**它闭的是哪一个分支**。
+
+#### 34.4.1 先做否证：两条假设都是**负结果**（如实记录）
+
+在动 F1 之前，先量了两个"看起来更像漏洞"的方向，**都是负的**，记下来是为了下一轮不必重跑：
+
+| 假设 | 测法 | 结果 |
+| --- | --- | --- |
+| **子进程继承凭据**：`runCommand` 是 `env = { ...process.env, ... }`，`vision.apiKey` 配的是 `${VLM_API_KEY}` 引用 ⇒ 密钥若在环境里，每个 `ros2` 子进程（含 `ros2_run` 拉起的节点）都继承它 | 活进程环境（`env`，由 dsh 进程派生）与 `~/.dsh-ros2/secrets.json` 对比 | **负**：`VLM_API_KEY` **不在**环境里（`env | grep -iE "VLM|API_KEY|TOKEN|SECRET"` 为空），密钥只存在于 `~/.dsh-ros2/secrets.json`（`0600`）⇒ 子进程继承不到。56 个环境变量里也没有 provider 凭据 |
+| **超时后的孤儿子进程**：`runCommand` 走 `bash -lc 'source … && ros2 …'`，Node 的 SIGKILL 只打 `bash`，`ros2` 是孙进程 ⇒ 超时后节点仍在跑 | `ros2_topic_hz /parameter_events`（`timeoutMs=3000`，无人发布）后 `ps -eo pid,ppid,cmd | grep '[r]os2 topic'` | **负**：无残留进程。原因是 bash 对 `-c` 里的**最后一条简单命令**做 `exec` 优化，`bash` 的 PID 就是 `ros2` 的 PID，SIGKILL 打在真身上 |
+
+> 两条都是"结构性看着危险、实测不成立"。**负结果要写下来**，否则下一轮会当成新线索再花一遍时间。
+
+#### 34.4.2 F1【已修·真实】第 28 轮的"一个闭点"只闭了成功路径
+
+**代码事实**（`grep -n applyIngress packages/common/src/*.ts` → 唯一调用点 `toolkit.ts:249`，
+即 `boundedOk`）。而 `toolError` / `safetyDenied` / `deniedResult` 三个错误构造器**完全不经过它**：
+
+```ts
+export function toolError(tool, command, code, message): ToolResult {
+  return { ok: false, tool, command, data: null, error: { code, message } }   // 无预算、无字符判据
+}
+```
+
+`message` 的来源是子进程的 `stderr`/`stdout`，上限只有 `maxBuffer = 16 MiB`，
+字符判据（C0/C1、方向覆盖字符）**一个都没有**——而成功面是 8 KiB/字段、256 KiB/结果。
+
+**可达的调用者（都不需要审批）**：`robot_load`、`robot_topology show|search`、`ros2_lifecycle get|list`、
+`ros2_component list`、`ros2_daemon status`——全部把 `res.stderr.trim()` / `res.stdout.trim()`
+原样交给 `toolError`。合计 20 处 `toolError(… res.stderr …)`（`grep` 计数）。
+
+**实测（同一份编译产物，两种调用形态；`_maint/r29/measure-error-channel.mjs`）**：
+
+```text
+payload：14000 × "\x1b[31mTraceback…\x1b[0m \u202eEVIL path=/tmp/x\n" + "LAST-LINE-MARKER"
+input                    896 016 bytes，含 ESC 与 U+202E
+
+before（toolError 直调 = 旧形态）
+  error.message bytes    896 016
+  contains ESC           true
+  contains U+202E        true
+  keeps LAST-LINE-MARKER true
+  warnings               (none)
+
+after（经 defineRos2Tool = 真实路径）
+  error.message bytes    8 219
+  contains ESC           false
+  contains U+202E        false
+  keeps LAST-LINE-MARKER false
+  warnings               ['ingress: 截断 1 处（共 817824 字节）；移除 42000 个控制字符，
+                           其中 14000 个方向覆盖字符 —— 工具结果按入口预算/字符判定收窄
+                           （外部数据，未经判据不得直入上下文）']
+```
+
+**修法**：不逐个改 20 个调用点，而是**把闭点挪到工厂**。
+
+- `finalizeToolResult()`：对**整个结果对象**套用 ingress 判据（`data` + `error` + `warnings` 一条规则），
+  有改动就追加那一条 `ingress:` 告警（"缩短过的错误不能看起来完整"）。
+- `defineRos2Tool()`：`defineTool` + 上面这个 finalizer，包在 `execute` 外面。**六个包的 52 个
+  调用点全部改成经它构建**（`sed` 逐文件替换 + 只改 import 行），于是"某个新工具忘了调用判据"
+  在**结构上**不可能发生。
+- 一个实现细节值得记：`execute` 的返回类型就是 `ToolResult`（`output.schema = resultSchema`），
+  所以"包住 execute"恰好覆盖成功与失败两种规范结果——**这也是为什么它能当唯一闭点**。
+
+**撤门实测**：把 finalizer 从工厂里拿掉 → `finalize.spec.ts` **3/6 红**
+（1 MiB 错误信息未收窄、`okResult` 之后追加的 warnings 未收窄、静态断言"没有包直接 import `defineTool`"）。
+`tsc` 也踩了一个坑：`defineTool(wrapped as never)` 是必需的，否则 `DefineToolOptions<S,O>` 会让
+tsc 自己推自己，报 `TS2321 Excessive stack depth`（已在代码注释里写明原因，下一轮别"优化"掉它）。
+
+### 34.5 F2【已修·真实】判据被 memo 成一次性：检查停止了检查，而 note 还在复述
+
+第二十八轮为了"每条命令不再多一次 `lstat`"，把配置 `ROS_LOG_DIR` 的判定结果按路径缓存：
+
+```ts
+const judgedLogDirs = new Map<string, { dir: string; note?: string }>()   // 只记结论
+```
+
+**两个后果，都在活进程里实测**：
+
+**(a) 检查只跑一次。** 判据（符号链接/非目录/非本 uid 拒绝、宽于 0700 收紧）在第一次命令后
+不再执行。实测：把 `/tmp/dsh-ros2-log` 换成指向 0777 目录的**符号链接** → 后续命令**照常执行**，
+没有拒绝。而这条判据的全部前提就是"另一个本地用户可以先建这个路径"——
+**只跑一次的检查挡不住"之后被换掉"**。
+
+**(b) note 变成了假话。** memo 把第一次的 note 原样返回，于是：
+
+```text
+$ chmod 0775 /tmp/dsh-ros2-log          # 该路径在本进程内早已判定过
+$ ros2_lifecycle get /nonexistent
+  → "[env] 配置的 ROS_LOG_DIR /tmp/dsh-ros2-log … 权限宽于 0700，已收紧…"
+$ ls -ld /tmp/dsh-ros2-log
+  drwxrwxr-x                            # 什么都没被收紧
+```
+
+即**报告了一次没有发生的动作**。这正是本仓库自己的复发性缺陷类（第十五轮"探针报告 ≠ 探针执行"、
+第二十三轮"静默失效的运维指示"）——只是这次是"报告**成功**了一个没做的动作"。
+
+**修法**：memo 里连**被判对象的身份**一起记。
+
+```ts
+interface JudgedLogDir { identity: string; dir: string | null; notified: boolean; note?: string }
+const identity = identityOf(configured)   // `${dev}:${ino}:${mode}:${kind}`（lstat，非 follow）
+if (judged === undefined || judged.identity !== identity) { /* 重判 */ }
+```
+
+- 身份在**判定之后**记录（收紧会改 mode，先记就会显得"每次都变了"）；
+- 每条命令多一次 `lstat`——这是判据真正生效的代价，明确接受（原来的 `Map` 省下的正是这一条）；
+- note 描述的是**一次事件**，用 `notified` 只报一次，不再复读。
+
+**撤门实测**（两半各自独立）：去掉身份重判 → **2 红**（放宽后不再收紧、换符号链接后未被拒绝）；
+去掉 `notified` → **1 红**（第二次调用复读 note）。
+
+### 34.6 F3【已修·真实·CI 抓到】拒绝报告了，但没有执行
+
+F2 的 PR 第一次跑 CI **红了**（本地全绿），失败断言逐字：
+
+```text
+AssertionError: expected '/tmp/dsh-logrerun-Hzoj3B/dsh-ros2-log'
+                     not to be '/tmp/dsh-logrerun-Hzoj3B/dsh-ros2-log'
+```
+
+原因在**拒绝分支**（第二十八轮写的，本轮之前一直没人走到）：
+
+```ts
+const fallback = probeRosLogFallback()
+judged = { dir: fallback ?? '', note: `已拒绝…` }        // 旧
+if (judged.dir !== '') env.ROS_LOG_DIR = judged.dir       // '' ⇒ 什么都不做
+```
+
+而 `probeRosLogFallback()` 只在**默认 `~/.ros/log` 不可写**时才创建兜底目录。于是：
+
+| 主机 | `~/.ros/log` | fallback | `dir` | 结果 |
+| --- | --- | --- | --- | --- |
+| 本机（需要兜底） | 不可写 | 有 | 私有目录 | env 被改写 ⇒ 本地绿 |
+| CI / 普通主机 | **可写** | `undefined` | `''` | **env 原样保留** ⇒ 被拒绝的路径**继续喂给每个 `ros2` 进程** |
+
+⇒ **第二十八轮的拒绝判据在普通配置上是"报告而不执行"**。这是本轮最有价值的一处：
+它不会出现在任何扫描器里，也不会出现在本机跑的任何一次测试里。
+
+**修法**：`null` 表示"从环境里**移除**"（区别于"不动它"）：
+
+```ts
+if (judged.dir === null) delete env.ROS_LOG_DIR      // 回退到 ROS 默认 ~/.ros/log
+else if (judged.dir !== '') env.ROS_LOG_DIR = judged.dir
+```
+
+并且**测试断言的是与环境无关的不变量**——"被拒绝的路径**永远不会**是交给子进程的值"——
+而不是"它是不是 fallback 目录"。两条分支（改成私有目录 / 删掉变量）都满足该不变量，
+note 里分别写明是哪一种。**遗留**：本机与 CI 的 `~/.ros/log` 都可写，所以"fallback 措辞"那一支
+仍未被覆盖，如实记在此处而不假装覆盖了。
+
+### 34.7 安全扫描（同口径）
+
+| 面 | 结果 | 与上一轮 |
+| --- | --- | --- |
+| 供应链审计（`pnpm run audit` / `audit:dev-high` / `audit:all`） | `No known vulnerabilities found` ×3（脚本已钉权威 `registry.npmjs.org`） | 不变 |
+| 密钥（tracked 文件） | **0 条真密钥**；唯一命中仍是**本维护文档自己**引用的 `-----BEGIN OPENSSH PRIVATE KEY-----` 字面量（第二十二轮测试用例的引用） | 不变 |
+| `~/.dsh-ros2` 权限 | `0700`/`0700`（`robots/`）/`0600`/`0600`/`0600`（`secrets.json`、`zero-pose.yaml`、`lite.yaml`） | 不变（第二十六轮的收紧在重启后仍成立） |
+| 发布面（9 包 `pnpm pack` + `tar -tzf`） | **9/9 CLEAN**：`lib/index.js` 全在、**0 个 `.pyc`**；本轮新增的两个测试文件**不进包**（`files` 只有 `lib`/`scripts`/`README`/`LICENSE` + 两条 `!__pycache__`/`!*.pyc`） | 不变 |
+| 远端分支 | `origin` **1 条**（`main`），两个 PR 合入即删 | 不变 |
+| **CodeQL open** | **0**（token 恢复后**实测读到**） | **缺口已解除**（上一轮 401） |
+| **Dependabot open** | **0**（同上；open PR 同为 0） | **缺口已解除**（上一轮 401） |
+| `/tmp/ros-log-*` 残留 | 开工随宿主重启清空；本轮**多次**跑全量测试后累计 **31 个**空目录，**全部 `0700`**、属主自、内容空；另有 **6 个** `dsh-ros2-zero-pose-*`（`0700`，selftest 未清） | 形状与第二十四/二十八轮一致；**无害，不修** |
+| 配置的 `ROS_LOG_DIR` | `/tmp/dsh-ros2-log`：开工 `0775` → 首条命令后 `0700`（§34.2.2 判据 1）；F2/F3 修好后**权限被放宽或换成符号链接都会在下一条命令重判** | **本轮修复项** |
+
+### 34.8 开发管理（分支 + 规范提交 + **真 PR** + CI 绿）
+
+| 项 | 值 |
+| --- | --- |
+| 分支 1 | `fix/round-29-ingress-error-channel` → **PR #97** |
+| 提交 1 | `461f30f` `fix(common): put error.message under the same ingress policy as data` |
+| 分支 2 | `fix/round-29-log-dir-rejudge` → **PR #98** |
+| 提交 2 | `bd711e4` `fix(common): re-judge the configured ROS_LOG_DIR instead of trusting a memo`<br>`6830c29` `fix(common): a refused ROS_LOG_DIR must not stay in the child environment` |
+| 本地门（CI 同口径） | `pnpm run audit` ✅ · `typecheck` ✅（10/10 工程）· `test` ✅ **479（478 + 1 pty-skip）** · `build` ✅ · 发布面 9 包 ✅ |
+| **PR CI** | #97 **5/5 绿**（`CodeQL` · `analyze (javascript-typescript)` · `analyze (python)` · `check (22)` · `check (24)`）；#98 **首跑红两次**（都是我自己引入的：F2 的符号链接断言依赖本机有 fallback）→ 修好后 **5/5 绿** |
+| 合入 | 均 `gh pr merge --merge --delete-branch`；`main` `e7d0823 → e4bfbb1`（#97）`→ 3a0a81c`（#98） |
+
+> **CI 只有 5 个 check 是正常的**：`audit.yml` 只在 `push: main` / `schedule` / `dispatch` 触发，
+> **不跑 PR**。所以"PR 绿"不等于"供应链审计跑过"——后者由本地 `pnpm run audit` 提供（§6 第 4 条已写明）。
+
+### 34.9 本轮自己的错（如实记录）
+
+1. **F2 的测试一开始只在本机绿**：符号链接那条断言 `expect(env.ROS_LOG_DIR).not.toBe(dir)`
+   依赖"存在 fallback 目录"，而本机需要 fallback、CI 不需要 ⇒ **CI 红**。它同时挖出了 F3（§34.6）。
+   教训与第二十六轮同源：**断言要写"与环境无关的不变量"，不要写"某条分支的实现细节"**（已写进 §6 第 22 条）。
+2. **一处测试断言写成了无意义的形状**：我第一版写了 `env.ROS_LOG_DIR?._isFallback`（一个不存在的属性），
+   当场自己发现改掉。记在这里是因为它说明"写断言时我在猜属性名"，而猜出来的断言**永远不会红**。
+3. **`tsc` 两次被我自己的封装写法打回**（`TS2321 Excessive stack depth`）：先试 `Parameters<typeof inner>`，
+   再试 `{...options, execute}`，都让 `InferObject<S,?>` 自比。最终解法是 `defineTool(wrapped as never)`。
+   这是**类型系统**的坑，不是逻辑的坑——但注释必须留下，否则下一轮"顺手简化"会再踩一次。
+4. **一开始把"重载后收紧"当成事实**（沿用第二十八轮的措辞），实测才发现是"下一条命令后收紧"（§34.2.2）。
+   与第二十七轮 §32.7.3 同一类错误：**把文档里的因果当成了实测的因果**。
+
+### 34.10 用例与自检基线
+
+| 面 | 上一轮 | 本轮 |
+| --- | --- | --- |
+| vitest（全量） | 470（469 + 1 pty-skip） | **479（478 + 1 pty-skip）**，**+9**：common **147 → 156**（`finalize.spec.ts` 6 例 + `ros-log-dir-rerun.spec.ts` 3 例） |
+| 逐包 | core 166（+1 skip）/ vision 64 / common 147 / dsh-ros2 29 / moveit 21 / state 19 / profile 14 / safety 10 | core **166** / vision **64** / common **156** / dsh-ros2 **29** / moveit **21** / state **19** / profile **14** / safety **10** |
+| Python 自检 | 101 项 | **101 项**（不变：`robot_profile` 38 / `private_paths` 16 / `zero_pose` 21 / `image_snapshot` 7 / `vlm_node` 19） |
+| sidecar 自检 | 19 场景 | **19 场景**（不变） |
+| 撤门实测（可证伪） | — | 入口闭点直通 ⇒ **3** 红；配置 `ROS_LOG_DIR` 去掉身份重判 ⇒ **2** 红 / 去掉 `notified` ⇒ **1** 红 |
+
+### 34.11 step 4：dsh-phoenix 循环与 **gen-36**
+
+**要不要重载：要。** 本轮两处修复都落在**活进程的必经之路**：
+
+1. `packages/common/lib/toolkit.js`——`defineRos2Tool` 是**每个工具结果**的出口；
+2. `packages/common/lib/runner.js`——`ensureWritableRosLogDir` 是**每条命令**的出口。
+
+而活进程的 `node_modules/dsh-ros2-*` 是指向本仓库 `packages/*` 的符号链接 ⇒
+build 之后磁盘是新代码，**PID 35696 内存里仍是旧代码**。`ros2_env_check` 的 `stale` 依旧看不到
+（只比版本号，本轮也没改版本号，见 §5）。
+
+**实际执行**：`dsh.phoenix` 不在 Inspect 的 Service 目录里（`ctx.provide` 注册、无生成签名），
+所以与第二十八轮一样经一个**动态 Host 插件**取服务后请求：
+
+```text
+[cordis:phnx-1] [r29] phoenix mounted; canRestart = (...args) => {
+[cordis:phnx-1] [r29] state lifecycle = undefined, generation = undefined
+[dsh-phoenix]    restart requested (gen 34): round 29: make the ingress-error + log-dir re-judge fixes live (gen-36)
+[cordis:phnx-1] [r29] requestRestart returned undefined
+```
+
+**两处与第二十八轮记录的出入（已登记进 §5）**：`canRestart` 实测是**函数**（不是布尔），
+`lifecycle`/`generation` 读出来是 **`undefined`**；第二十八轮记的是 `canRestart = true` / `generation = 32`。
+请求返回值仍为 `undefined`（与第二十八轮一致，受理凭据只能从 journal 读）。
+
+**验收判据（重载后逐条复测，写给下一轮）**：
+
+1. `ps -o pid,lstart -p $(systemctl --user show -p MainPID --value dsh-web)` → **新 PID**（不是 35696）；
+   journal 里出现 `[dsh-phoenix] loaded (graceful restart + …)`。
+2. **F1**：让一个只读工具出错（例如 `ros2_lifecycle get /nonexistent`），看 `error.message`/`error.code`
+   是否**仍然完整**（小消息不应被改写，也不应出现 `ingress:` 告警）；
+   要看到收窄效果需要一条**大**错误——用 §34.4.2 的度量脚本（它不依赖活进程）。
+3. **F2**：`chmod 0775 /tmp/dsh-ros2-log` 后再跑一条 `ros2_*` 命令 → **目录被改回 `0700`**，
+   且 note **出现一次**；紧接着再跑一条 → **不再出现 note**。
+4. **F3**：把该路径换成符号链接 → 下一条命令的 `envNote` 出现 `已拒绝…`，
+   并且 `ROS_LOG_DIR` **不是**那个链接（`delete` 或私有目录）。
+
+### 34.12 结论
+
+- **0 open issue / 0 open PR**（进入与离开时都是），本轮全部产出属于 **step 5**。
+- 第二十八轮留下的**唯一硬缺口**（告警面 401）已用恢复的 token **实测补齐**：CodeQL **0**、Dependabot **0**。
+- 三档审计、密钥、发布面（9/9）、权限、分支卫生**全部不变**；`/tmp` 残留形状与既有登记一致。
+- **三处真实缺陷都不来自扫描器**，而来自同一张表换了一个问法——"**这扇门关严了吗**"：
+  F1（闭点只闭成功路径，实测 896,016 → 8,219 字节）· F2（判据被 memo 成一次性，换符号链接不再复查，
+  且 note 复述"已收紧"而 mode 仍是 0775）· F3（拒绝报告了但没执行，**CI 抓到、本机永远看不到**）。
+- 两条假设被**否证**（子进程不继承凭据；超时不留孤儿进程），已记录以免下一轮重跑。
+- 值得记住的形状：**"我接在成功路径上"不等于"我接在出口上"**（F1）；**缓存结论 = 假设对象不会变**（F2）；
+  **`if (fallback)` 后面跟着赋值时，要问 fallback 为空时上一份值还在不在**（F3）。
+- 遗留（都已写进 §5/§6，不是私藏）：`stale` 只比版本号（**下一轮现成入口**，修法已写明）·
+  `envNote` 成功路径不可见（修法一行）· 本轮修复需 **gen-36 重载**后才在活进程生效。
+
