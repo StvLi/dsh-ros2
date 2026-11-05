@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { access, mkdir, writeFile } from 'node:fs/promises'
 import { execFile } from 'node:child_process'
-import { defineTool, type ParameterSchemaSpec } from '@deepseek-ai/dsh-tools'
+import { type ParameterSchemaSpec } from '@deepseek-ai/dsh-tools'
 import {
   type ToolDeps,
   type ToolResult,
@@ -49,6 +49,7 @@ import {
   isSafePathComponent,
   bundleDriftReport,
   formatBundleStartupReport,
+  defineRos2Tool,
 } from 'dsh-ros2-common'
 import { spawnJob } from 'dsh-ros2-common'
 
@@ -236,7 +237,7 @@ function windowToJson(window: { id: string; x: number; y: number; width: number;
 }
 
 function makeGraphTool(deps: CoreToolDeps) {
-  return defineTool({
+  return defineRos2Tool({
   name: 'ros2_graph',
   description: 'Aggregate communication topology: enumerate nodes and fold each node\'s publishers/subscribers/services/actions into a JSON graph. `ros2_topology` supersedes this (same shape plus topics/services/actions/TF in one call for the whole system) — reach for that first.',
   parameters: {
@@ -290,7 +291,7 @@ function makeGraphTool(deps: CoreToolDeps) {
 }
 
 function makeBuildTool(deps: CoreToolDeps) {
-  return defineTool({
+  return defineRos2Tool({
     name: 'ros2_colcon_build',
     description: 'Build a colcon workspace (optionally selected packages) as a background job. Requires approval; track progress with ros2_job_status and stop with the DSH job controls.',
     parameters: {
@@ -340,7 +341,7 @@ function makeBuildTool(deps: CoreToolDeps) {
 }
 
 function makeRosdepInstallTool(deps: CoreToolDeps) {
-  return defineTool({
+  return defineRos2Tool({
     name: 'ros2_rosdep_install',
     description: 'Install package dependencies with rosdep (`rosdep install --from-paths <paths> --ignore-src -y`). Writes to the system — requires approval. Use dryRun to preview.',
     parameters: {
@@ -382,7 +383,7 @@ function makeRosdepInstallTool(deps: CoreToolDeps) {
 }
 
 function makeInterfaceCreateTool(deps: CoreToolDeps) {
-  return defineTool({
+  return defineRos2Tool({
     name: 'ros2_interface_create',
     description: 'Create a custom ROS2 message/service/action skeleton file under <outputRoot>/<package>/<kind>/<Name>.<kind>. Requires approval; never overwrites existing files.',
     parameters: {
@@ -451,7 +452,7 @@ function makeInterfaceCreateTool(deps: CoreToolDeps) {
 }
 
 function makeParamSetTool(deps: CoreToolDeps) {
-  return defineTool({
+  return defineRos2Tool({
     name: 'ros2_param_set',
     description: 'Set a parameter on a running node (`ros2 param set <node> <param> <value>`). Mutates runtime state — requires approval.',
     parameters: {
@@ -489,7 +490,7 @@ function makeParamSetTool(deps: CoreToolDeps) {
 }
 
 function makeBagRecordTool(deps: CoreToolDeps) {
-  return defineTool({
+  return defineRos2Tool({
     name: 'ros2_bag_record',
     description: 'Record topics into a rosbag for a bounded duration (`ros2 bag record ... --output <dir>`). Requires approval. Recording is stopped automatically after `duration` seconds.',
     parameters: {
@@ -533,7 +534,7 @@ function makeBagRecordTool(deps: CoreToolDeps) {
 }
 
 function makeBagPlayTool(deps: CoreToolDeps) {
-  return defineTool({
+  return defineRos2Tool({
     name: 'ros2_bag_play',
     description: 'Replay a rosbag into its topics (`ros2 bag play <path> [--topics ...] [--rate X] [--loop] [--start-offset S]`). Publishes to the graph — requires approval. Runs in the foreground for timeoutMs (default 60000 ms); raise it to let longer bags finish.',
     parameters: {
@@ -576,7 +577,7 @@ function makeBagPlayTool(deps: CoreToolDeps) {
 }
 
 function makeJobsListTool(deps: CoreToolDeps) {
-  return defineTool({
+  return defineRos2Tool({
     name: 'ros2_jobs_list',
     description: 'List background jobs started by this agent (`ctx.jobs.list`), e.g. colcon builds.',
     parameters: {},
@@ -595,7 +596,7 @@ function makeJobsListTool(deps: CoreToolDeps) {
 }
 
 function makeJobStatusTool(deps: CoreToolDeps) {
-  return defineTool({
+  return defineRos2Tool({
     name: 'ros2_job_status',
     description: 'Status of one background job by id (e.g. colcon-build-1).',
     parameters: {
@@ -657,7 +658,7 @@ export function buildRos2InstallDownloadCommand(installer: string, bootDir: stri
 }
 
 function makeRos2InstallTool(deps: CoreToolDeps) {
-  return defineTool({
+  return defineRos2Tool({
     name: 'ros2_install',
     description:
       'One-click ROS2 install via the FishROS installer (http://fishros.com/install) when ROS2 is missing on the host. ' +
@@ -815,7 +816,7 @@ function makeRos2InstallTool(deps: CoreToolDeps) {
 }
 
 function makeLaunchTool(deps: CoreToolDeps) {
-  return defineTool({
+  return defineRos2Tool({
     name: 'ros2_launch',
     description: 'Launch a ROS2 launch file as a background job (`ros2 launch <package> <launch_file> [extra args]`). Long-running: starts a background job (returns jobId), track with ros2_job_status and stop with the DSH job controls. Requires approval.',
     parameters: {
@@ -855,7 +856,7 @@ function makeLaunchTool(deps: CoreToolDeps) {
 }
 
 function makeGuiStartTool(deps: CoreToolDeps) {
-  return defineTool({
+  return defineRos2Tool({
     name: 'ros2_gui_start',
     description: 'Launch a ROS2 GUI app on the host display (RViz2 with optional -d config, rqt_graph, rqt). Sessions are tracked; close with ros2_gui_close.',
     parameters: {
@@ -889,7 +890,7 @@ function makeGuiStartTool(deps: CoreToolDeps) {
 }
 
 function makeGuiListTool(deps: CoreToolDeps) {
-  return defineTool({
+  return defineRos2Tool({
     name: 'ros2_gui_list',
     description: 'List tracked GUI sessions and, optionally, all X11 windows (wmctrl -lG).',
     parameters: {
@@ -909,7 +910,7 @@ function makeGuiListTool(deps: CoreToolDeps) {
 }
 
 function makeGuiCloseTool(deps: CoreToolDeps) {
-  return defineTool({
+  return defineRos2Tool({
     name: 'ros2_gui_close',
     description: 'Close a tracked GUI session by label (SIGTERM to the whole process group, SIGKILL fallback after a grace period — some Qt apps ignore SIGTERM). List labels with ros2_gui_list.',
     parameters: {
@@ -964,7 +965,7 @@ async function gateCaptureOutput(
 }
 
 function makeScreenshotTool(deps: CoreToolDeps) {
-  return defineTool({
+  return defineRos2Tool({
     name: 'ros2_screenshot',
     description: 'Capture the X11 screen (or a window whose title contains windowTitle) to a PNG file. Returns the image path for ros2_vision_describe or attachments.',
     parameters: {
@@ -990,7 +991,7 @@ function makeScreenshotTool(deps: CoreToolDeps) {
 }
 
 function makeGuiObserveTool(deps: CoreToolDeps) {
-  return defineTool({
+  return defineRos2Tool({
     name: 'ros2_gui_observe',
     description: 'Observe a GUI app: ensure it is running (start if needed), capture a screenshot, and return the multimodal description of what is on screen.',
     parameters: {
@@ -1053,7 +1054,7 @@ function makeGuiObserveTool(deps: CoreToolDeps) {
 }
 
 function makeGuiInteractTool(deps: CoreToolDeps) {
-  return defineTool({
+  return defineRos2Tool({
     name: 'ros2_gui_interact',
     description: 'Unified xdotool interaction on the host display: action=click (mouse click/scroll: button 1 left, 2 middle, 3 right, 4 scroll up, 5 scroll down; count repeats), action=drag (press-drag-release: RViz2 view control, left-drag orbit / middle-drag pan / right-drag zoom), action=key (key combos like "ctrl+shift+r" or typed text). With windowTitle the pointer/coordinates are relative to that window (default: its center); without it they are absolute (drag start defaults to the current pointer). Confined to allowlisted application windows (default rviz2/rqt/rqt_graph, see `guiAllowedApplications`); interaction outside that allowlist — including omitting windowTitle — requires approval. Requires xdotool.',
     parameters: {
@@ -1659,7 +1660,7 @@ async function reconcileSkillCatalogue(
  * packages/nodes. Read-only, no approval.
  */
 function makeEnvCheckTool(deps: CoreToolDeps) {
-  return defineTool({
+  return defineRos2Tool({
     name: 'ros2_env_check',
     description:
       'Self-check the ROS2 environment resolution: which setup is sourced (session override / configured rosSetup / auto-detected), whether paths exist, and what packages/nodes are visible. Also reports the loaded dsh-ros2 bundle versions against the ones now on disk, so a running process that predates a plugin update is visible instead of surfacing later as an unknown tool. Read-only, no approval.',
@@ -1802,7 +1803,7 @@ function makeEnvCheckTool(deps: CoreToolDeps) {
  * session served by this DSH process, not just the caller's. `show` reports it.
  */
 function makeWorkspaceTool(deps: CoreToolDeps) {
-  return defineTool({
+  return defineRos2Tool({
     name: 'ros2_workspace',
     description:
       'Switch or show the ROS2 workspace for subsequent tool calls WITHOUT editing config or restarting (in-memory; process-wide for this DSH run). ' +
@@ -1876,7 +1877,7 @@ function makeWorkspaceTool(deps: CoreToolDeps) {
  * node's parameters.
  */
 function makeParamDeleteTool(deps: ToolDeps) {
-  return defineTool({
+  return defineRos2Tool({
     name: 'ros2_param_delete',
     description: 'Delete a parameter of a node (`ros2 param delete <node> <param>`). Approval-gated (mutates the node).',
     parameters: {
@@ -1906,7 +1907,7 @@ function makeParamDeleteTool(deps: ToolDeps) {
  * read-only; set changes state (approval-gated).
  */
 function makeLifecycleTool(deps: ToolDeps) {
-  return defineTool({
+  return defineRos2Tool({
     name: 'ros2_lifecycle',
     description:
       'Manage a lifecycle node (`ros2 lifecycle get|list|set <node> [state]`). get (current state) and list (available transitions) are read-only; set <state> changes the node state (approval-gated).',
@@ -1943,7 +1944,7 @@ function makeLifecycleTool(deps: ToolDeps) {
  * list is read-only; load creates a component (approval-gated).
  */
 function makeComponentTool(deps: ToolDeps) {
-  return defineTool({
+  return defineRos2Tool({
     name: 'ros2_component',
     description:
       'Inspect/manage component containers (`ros2 component list` / `ros2 component load <container> <pkg> <type>`). list is read-only; load loads a component into a container (approval-gated).',
@@ -2006,7 +2007,7 @@ function parseServiceRepr(stdout: string): Record<string, JsonValue> {
  * reported as a successful measurement.
  */
 function makeTopicBwTool(deps: ToolDeps) {
-  return defineTool({
+  return defineRos2Tool({
     name: 'ros2_topic_bw',
     description:
       'Measure the bandwidth of a topic (`ros2 topic bw <topic>`). Runs for `timeoutMs` (default 8s) and returns the measured bandwidth (average/mean/min/max over the window). Read-only, no approval.',
@@ -2049,7 +2050,7 @@ function makeTopicBwTool(deps: ToolDeps) {
  * Timeout-terminated, reported as a successful measurement.
  */
 function makeTopicDelayTool(deps: ToolDeps) {
-  return defineTool({
+  return defineRos2Tool({
     name: 'ros2_topic_delay',
     description:
       'Measure the end-to-end delay of a topic (`ros2 topic delay <topic>`). Runs for `timeoutMs` (default 8s) and returns average/mean/min/max delay in seconds. Read-only, no approval.',
@@ -2087,7 +2088,7 @@ function makeTopicDelayTool(deps: ToolDeps) {
  * service, which may mutate system/robot state.
  */
 function makeServiceCallTool(deps: ToolDeps) {
-  return defineTool({
+  return defineRos2Tool({
     name: 'ros2_service_call',
     description:
       'Call a ROS2 service (`ros2 service call <service> <type> "<request yaml>"`). Approval-gated (invokes a service; may mutate state). Response parsed from the repr.',
@@ -2125,7 +2126,7 @@ function makeServiceCallTool(deps: ToolDeps) {
  * triggers robot/task behavior.
  */
 function makeActionSendGoalTool(deps: ToolDeps) {
-  return defineTool({
+  return defineRos2Tool({
     name: 'ros2_action_send_goal',
     description:
       'Send an action goal (`ros2 action send_goal <action> <type> "<goal yaml>"`). Approval-gated (triggers robot/task behavior). Returns the goal id and final status; --feedback shows progress.',
@@ -2168,7 +2169,7 @@ function makeActionSendGoalTool(deps: ToolDeps) {
  * read-only; stop/start are approval-gated (affect whole-graph discovery).
  */
 function makeDaemonTool(deps: ToolDeps) {
-  return defineTool({
+  return defineRos2Tool({
     name: 'ros2_daemon',
     description:
       'Manage the ROS2 daemon (`ros2 daemon status|stop|start`). status is read-only; stop/start are approval-gated (restarting the daemon re-discovers the graph — useful when discovery is stale).',
@@ -2198,7 +2199,7 @@ function makeDaemonTool(deps: ToolDeps) {
  * termination is the measurement timeout — reported as a successful result.
  */
 function makeTopicHzTool(deps: ToolDeps) {
-  return defineTool({
+  return defineRos2Tool({
     name: 'ros2_topic_hz',
     description:
       'Measure the publish frequency of a topic (`ros2 topic hz <topic>`). Runs for `timeoutMs` (default 8s) and returns the measured rate (average/min/max/std dev/messages over the window) — the natural termination is the timeout, reported as a successful measurement. Read-only, no approval. When you also want a sample message and the pub/sub counts, `ros2_topic_sample` gets all of it in one call.',
@@ -2243,7 +2244,7 @@ function makeTopicHzTool(deps: ToolDeps) {
  * QoS overrides let you reach TRANSIENT_LOCAL (latched) topics.
  */
 function makeTopicPubTool(deps: ToolDeps) {
-  return defineTool({
+  return defineRos2Tool({
     name: 'ros2_topic_pub',
     description:
       'Publish messages to a topic (`ros2 topic pub <topic> <type> "<yaml>"`). Approval-gated (publishes to the graph). Bounded: --once, or -n count, or -t duration; rate via -r. QoS overrides (--qos-reliability / --qos-durability) reach TRANSIENT_LOCAL latched topics.',
@@ -2303,7 +2304,7 @@ function makeTopicPubTool(deps: ToolDeps) {
  * long-running nodes.
  */
 function makeRunTool(deps: ToolDeps) {
-  return defineTool({
+  return defineRos2Tool({
     name: 'ros2_run',
     description:
       'Run any installed ROS2 executable (`ros2 run <package> <executable> [args]`). Approval-gated. Foreground (default, stops at timeoutMs) or a background job (background=true, returns jobId, stop with DSH job controls) for long-running nodes.',
@@ -2371,7 +2372,7 @@ function makeRunTool(deps: ToolDeps) {
 const KILL_SIGNAL_RE = /^(?:SIG)?[A-Za-z][A-Za-z0-9]{0,7}$|^\d{1,2}$/
 
 function makeProcessCleanupTool(deps: ToolDeps) {
-  return defineTool({
+  return defineRos2Tool({
     name: 'ros2_process_cleanup',
     description:
       'Kill leftover ROS2 processes matching a pattern (pgrep + kill by PID; self-safe via the [p]attern trick — the tool never kills its own process). Approval-gated (kills processes).',

@@ -5,7 +5,7 @@
  */
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
-import { defineTool, type ParameterSchemaSpec } from '@deepseek-ai/dsh-tools'
+import { type ParameterSchemaSpec } from '@deepseek-ai/dsh-tools'
 import {
   type ToolDeps,
   type ToolResult,
@@ -39,6 +39,7 @@ import {
   type NodeInfo,
   tail,
   jsonOf,
+  defineRos2Tool,
 } from 'dsh-ros2-common'
 import { spawnJob, buildSafetyMonitorCommand, isSafeProfileName } from 'dsh-ros2-common'
 
@@ -62,7 +63,7 @@ function withProfileWarnings(result: ToolResult): ToolResult {
 }
 
 function makeZeroPoseSemanticsTool(deps: ToolDeps) {
-  return defineTool({
+  return defineRos2Tool({
     name: 'ros2_zero_pose_semantics',
     description:
       'Calibrate the robot\'s zero-pose semantics interactively (generic, approval-gated; may publish all-zero joint angles / write a config file). ' +
@@ -118,7 +119,7 @@ function makeZeroPoseSemanticsTool(deps: ToolDeps) {
 }
 
 function makeRobotRegisterTool(deps: ToolDeps) {
-  return defineTool({
+  return defineRos2Tool({
     name: 'robot_register',
     description:
       'Register a robot body profile (approval-gated; writes ~/.dsh-ros2/robots/<name>.yaml). ' +
@@ -197,7 +198,7 @@ function makeRobotRegisterTool(deps: ToolDeps) {
 }
 
 function makeRobotLoadTool(deps: ToolDeps) {
-  return defineTool({
+  return defineRos2Tool({
     name: 'robot_load',
     description:
       'Load a registered robot body profile as structured JSON (fast path — no discovery needed): URDF links/joints, TF root, cameras, MoveIt groups, zero-pose semantics. Empty name lists all profiles. Profiles come from robot_register.',
@@ -229,7 +230,7 @@ function makeRobotLoadTool(deps: ToolDeps) {
 }
 
 function makeRobotTopologyTool(deps: ToolDeps) {
-  return defineTool({
+  return defineRos2Tool({
     name: 'robot_topology',
     description:
       'Robot communication topology, strictly structured in the robot profile (trade-off between full verbose ROS2 graphs and zero knowledge). ' +

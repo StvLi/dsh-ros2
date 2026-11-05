@@ -2,8 +2,7 @@
  * dsh-ros2-state tools — read reduced, fresh robot state from the sidecar
  * data plane (no ROS2 subprocess per read). Read-only (L1-style).
  */
-import { defineTool } from '@deepseek-ai/dsh-tools'
-import { type ToolResult, okResult, toolError, renderResult, resultSchema, type JsonValue } from 'dsh-ros2-common'
+import { defineRos2Tool, type ToolResult, okResult, toolError, renderResult, resultSchema, type JsonValue } from 'dsh-ros2-common'
 import type { StateClient } from './state-client.js'
 
 export type StateDeps = { state?: StateClient }
@@ -15,7 +14,7 @@ function noState(tool: string, command: string): ToolResult {
 
 export function createRos2StateTools(deps: StateDeps) {
   return [
-    defineTool({
+    defineRos2Tool({
       name: 'state_get',
       description:
         'Read one reduced/fresh robot state entry from the sidecar data plane (milliseconds, no ROS2 subprocess): e.g. obstacle_front, cup_pose, safety_lock. Returns {value, text, stamp_ms, ttl_ms} — value for logic, text for the LLM. STALE (=cache not refreshed in time) and DOWN (sidecar offline) are structured errors; safety-relevant reads should fail closed.',
@@ -38,7 +37,7 @@ export function createRos2StateTools(deps: StateDeps) {
         }
       },
     }),
-    defineTool({
+    defineRos2Tool({
       name: 'state_snapshot',
       description:
         'Read ALL reduced states as one semantic summary (one call instead of many state_get): the agent sees "how the world is now" from the sidecar cache. Read-only, milliseconds.',
