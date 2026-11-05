@@ -1,7 +1,7 @@
 import { execFile, spawn, type ExecFileOptions } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
-import { accessSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { accessSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { expandShellWord, parseSourceWord, resolveSourcePath } from './shellword.js'
 import { ensurePrivateRuntimeDir, isUnderTempRoot } from './runtime-dir.js'
@@ -446,8 +446,37 @@ export async function judgeConfiguredRosLogDir(
   return note === undefined ? { ok: true, dir: ensured.path } : { ok: true, dir: ensured.path, note }
 }
 
-/** Per-path memo, so the judgement costs one lstat per configured dir, not per command. */
-const judgedLogDirs = new Map<string, { dir: string; note?: string }>()
+/**
+ * Per-path memo of the judgement AND the identity of the object it judged.
+ *
+ * The identity half is what makes the memo safe. Remembering only the decision
+ * meant the check ran once per process and then stopped: after the first
+ * command, the configured path could be replaced by a symlink or widened back to
+ * 0775 and nothing re-judged it — while the memo kept replaying the first
+ * call's "已收紧" note (round 29 measured exactly that: the note said the
+ * directory had just been tightened while `ls -ld` still showed `drwxrwxr-x`).
+ * One `lstat` per command buys the re-check.
+ */
+interface JudgedLogDir {
+  /** dev:ino:mode:kind of the object the decision was made against. */
+  identity: string
+  dir: string
+  /** The note describes one event, so it is shown once — not replayed forever. */
+  notified: boolean
+  note?: string
+}
+const judgedLogDirs = new Map<string, JudgedLogDir>()
+
+/** Cheap identity of whatever sits at `p` (absent/unreadable are distinct). */
+function identityOf(p: string): string {
+  try {
+    const st = lstatSync(p)
+    const kind = st.isSymbolicLink() ? 'link' : st.isDirectory() ? 'dir' : 'other'
+    return `${st.dev}:${st.ino}:${(st.mode & 0o7777).toString(8)}:${kind}`
+  } catch {
+    return `absent`
+  }
+}
 
 /**
  * Set ROS_LOG_DIR in `env` to a writable dir when the default would fail, and
@@ -455,7 +484,9 @@ const judgedLogDirs = new Map<string, { dir: string; note?: string }>()
  *
  * Returns an optional human note (tightened / refused) that the caller folds
  * into `envNote`, so a rewritten or discarded configuration is visible in the
- * tool result instead of silently replaced.
+ * tool result instead of silently replaced. The note is returned once per
+ * judgement — a maintenance round reads it as "this just happened", so replaying
+ * it on every command would make it a claim about the present that is false.
  */
 export async function ensureWritableRosLogDir(env: Record<string, string>): Promise<string | undefined> {
   const configured = env.ROS_LOG_DIR !== undefined && env.ROS_LOG_DIR !== '' ? env.ROS_LOG_DIR : process.env.ROS_LOG_DIR
@@ -464,24 +495,32 @@ export async function ensureWritableRosLogDir(env: Record<string, string>): Prom
     if (fallback) env.ROS_LOG_DIR = fallback
     return undefined
   }
+  const identity = identityOf(configured)
   let judged = judgedLogDirs.get(configured)
-  if (judged === undefined) {
+  if (judged === undefined || judged.identity !== identity) {
     const outcome = await judgeConfiguredRosLogDir(configured)
     if (outcome.ok) {
-      judged = { dir: outcome.dir, ...(outcome.note ? { note: outcome.note } : {}) }
+      judged = { identity: '', dir: outcome.dir, notified: false, ...(outcome.note ? { note: outcome.note } : {}) }
     } else {
       // Refusal falls back to the private directory rather than failing the
       // command: the operator's intent (a writable log dir) is preserved, and
       // the note says the configured path was not used and why.
       const fallback = probeRosLogFallback()
       judged = {
+        identity: '',
         dir: fallback ?? '',
+        notified: false,
         note: `已拒绝配置的 ROS_LOG_DIR ${configured}（${outcome.code}: ${outcome.reason}）${fallback ? '，改用私有临时目录' : ''}`,
       }
     }
+    // Identity is recorded AFTER the judgement: tightening changes the mode, so
+    // recording it beforehand would look like "the object changed" on every call.
+    judged.identity = identityOf(configured)
     judgedLogDirs.set(configured, judged)
   }
   if (judged.dir !== '') env.ROS_LOG_DIR = judged.dir
+  if (judged.note === undefined || judged.notified) return undefined
+  judged.notified = true
   return judged.note
 }
 
