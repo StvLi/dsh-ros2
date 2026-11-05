@@ -15,10 +15,13 @@ The vision backend is the OpenAI-compatible chat/completions endpoint
 API key comes from parameters or the VLM_API_KEY env var, never logged.
 """
 
+import atexit
 import base64
 import json
 import os
+import shutil
 import sys
+import tempfile
 import time
 import urllib.request
 
@@ -33,6 +36,40 @@ from dsh_ros2_vlm.msg import VlmDescription
 DEFAULT_BASE_URL = "http://121.9.219.138:8888/v1"
 DEFAULT_MODEL = "gemini-2.5-flash"
 HTTP_TIMEOUT_S = 60.0
+
+# Output budget. Some OpenAI-compatible gateways count reasoning ("thinking")
+# tokens inside `completion_tokens`, so the old hard-coded 512 was consumed by
+# the thinking phase and the answer came back with `finish_reason: length` and
+# only a few dozen words of content. 2048 leaves room for both.
+#
+# Configurable like the node's other settings: the `max_tokens` ROS parameter
+# (default from `VLM_MAX_TOKENS`, else DEFAULT_MAX_TOKENS). An unusable value
+# must not take the node down at import time — it falls back and says so.
+DEFAULT_MAX_TOKENS = 2048
+
+
+def resolve_max_tokens(raw) -> "tuple[int, str]":
+    """Parse a max_tokens value. Returns (value, warning); warning is '' when fine.
+
+    A malformed or non-positive setting is a misconfiguration, not a reason to
+    crash: the node keeps serving with the documented default and reports the
+    value it rejected. (The first cut of this change parsed the env var with a
+    bare `int(...)` at module scope, so `VLM_MAX_TOKENS=bogus` killed the node
+    before rclpy ever initialised.)
+    """
+    if raw is None or (isinstance(raw, str) and raw.strip() == ""):
+        return DEFAULT_MAX_TOKENS, ""
+    try:
+        value = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return DEFAULT_MAX_TOKENS, (
+            f"max_tokens={raw!r} is not an integer; using {DEFAULT_MAX_TOKENS}"
+        )
+    if value <= 0:
+        return DEFAULT_MAX_TOKENS, (
+            f"max_tokens={value} is not positive; using {DEFAULT_MAX_TOKENS}"
+        )
+    return value, ""
 
 # Transient-local: a late subscriber instantly receives the latest result.
 LATEST_QOS = QoSProfile(
@@ -66,7 +103,8 @@ def sniff_image_mime(head: bytes) -> str:
     return ""
 
 
-def call_vlm(base_url: str, api_key: str, model: str, image_bytes: bytes, mime: str, prompt: str) -> str:
+def call_vlm(base_url: str, api_key: str, model: str, image_bytes: bytes, mime: str, prompt: str,
+             max_tokens: int = DEFAULT_MAX_TOKENS) -> str:
     """One OpenAI-compatible multimodal completion. Returns the text."""
     body = {
         "model": model,
@@ -79,7 +117,7 @@ def call_vlm(base_url: str, api_key: str, model: str, image_bytes: bytes, mime: 
                 }},
             ],
         }],
-        "max_tokens": 512,
+        "max_tokens": max_tokens,
     }
     req = urllib.request.Request(
         f"{base_url.rstrip('/')}/chat/completions",
@@ -102,9 +140,13 @@ class VlmNode(Node):
         self.declare_parameter("base_url", os.environ.get("VLM_BASE_URL", DEFAULT_BASE_URL))
         self.declare_parameter("api_key", os.environ.get("VLM_API_KEY", ""))
         self.declare_parameter("model", os.environ.get("VLM_MODEL", DEFAULT_MODEL))
+        self.declare_parameter("max_tokens", os.environ.get("VLM_MAX_TOKENS", str(DEFAULT_MAX_TOKENS)))
         self._base_url = str(self.get_parameter("base_url").value)
         self._api_key = str(self.get_parameter("api_key").value)
         self._model = str(self.get_parameter("model").value)
+        self._max_tokens, token_warning = resolve_max_tokens(self.get_parameter("max_tokens").value)
+        if token_warning:
+            self.get_logger().warn(token_warning)
         if not self._api_key:
             self.get_logger().error("VLM_API_KEY is not set (declare api_key param or export VLM_API_KEY)")
         # Latest-result cache: a late /vlm/description subscriber gets it at once.
@@ -115,6 +157,7 @@ class VlmNode(Node):
         self.create_service(VlmDescribe, "/vlm/describe", self._handle_describe)
         self.get_logger().info(
             f"vlm_node ready: base={self._base_url} model={self._model} "
+            f"max_tokens={self._max_tokens} "
             f"service=/vlm/describe topic=/vlm/description"
         )
 
@@ -143,7 +186,8 @@ class VlmNode(Node):
             else:
                 raise ValueError("provide image_path or image_bytes_b64")
             model = request.model or self._model
-            description = call_vlm(self._base_url, self._api_key, model, image, mime, request.prompt)
+            description = call_vlm(self._base_url, self._api_key, model, image, mime,
+                                   request.prompt, self._max_tokens)
             elapsed_ms = (time.perf_counter() - started) * 1000.0
             response.success = True
             response.description = description
@@ -166,19 +210,33 @@ class VlmNode(Node):
 
 
 def _ensure_ros_log_dir() -> None:
-    """rclpy aborts when ~/.ros/log is not writable; fall back to a writable dir."""
+    """rclpy aborts when ~/.ros/log is not writable; fall back to a private dir.
+
+    The fallback used to be `/tmp/ros-log-<uid>` — a guessable fixed name in a
+    1777 directory, which is the shape the TypeScript runner replaced (round 23)
+    for exactly these reasons: another local user can create that path first,
+    read every log written into it, and pre-plant the file names ROS will
+    create. Measured on the maintenance host (round 28, an unwritable HOME):
+    `ROS_LOG_DIR=/tmp/ros-log-1000`, mode `0775`.
+
+    `mkdtemp` gives an unpredictable path, owned by this user, created `0700`.
+    One directory per process is the price, so it is removed on exit.
+    """
     if os.environ.get("ROS_LOG_DIR"):
         return
     target = os.path.expanduser("~/.ros/log")
     try:
         os.makedirs(target, exist_ok=True)
-        probe = os.path.join(target, ".dsh-vlm-probe")
+        probe = os.path.join(target, f".dsh-vlm-probe-{os.getpid()}")
         with open(probe, "w", encoding="utf-8"):
             pass
         os.remove(probe)
     except OSError:
-        fallback = f"/tmp/ros-log-{os.getuid()}"
-        os.makedirs(fallback, exist_ok=True)
+        try:
+            fallback = tempfile.mkdtemp(prefix="ros-log-")
+        except OSError:
+            return  # nothing writable: let rclpy report it, do not invent a path
+        atexit.register(shutil.rmtree, fallback, True)
         os.environ["ROS_LOG_DIR"] = fallback
 
 
