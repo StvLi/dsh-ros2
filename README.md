@@ -444,7 +444,7 @@ knowledge base improves with every session and every diagnosis gets faster.
 | --- | --- | --- | --- |
 | `rosSetup` | string | `''` | Shell prefix to prepare the environment, e.g. `source /opt/ros/jazzy/setup.bash && ` |
 | `timeoutMs` | number | `15000` | Per-command timeout |
-| `rosLogDir` | string | `''` | Override `ROS_LOG_DIR` (helps when `~/.ros/log` is not writable) |
+| `rosLogDir` | string | `''` | Override `ROS_LOG_DIR` (helps when `~/.ros/log` is not writable). A value inside the temp root is judged like the plugin's own runtime dirs: a symlink/non-dir is refused, and a mode wider than `0700` is tightened (see the note below) |
 | `workspaceRoot` | string | `''` | cwd for `colcon` / `rosdep` when a tool omits `cwd` |
 | `includeStderr` | boolean | `false` | Attach trailing stderr to successful results |
 | `display` | string | `''` | DISPLAY override for GUI/screenshot tools |
@@ -457,6 +457,14 @@ knowledge base improves with every session and every diagnosis gets faster.
 | `vision.baseUrl` | string | `''` | API base URL override (OpenAI-compatible endpoints) |
 
 > `rosLogDir` also covers ROS2 Python CLIs spawned by tools (`topic echo/pub`, `ros2 run`); additionally `runCommand` auto-falls back to a writable dir when `~/.ros/log` is not writable.
+>
+> **Do not point `rosLogDir` at a fixed name in `$TMPDIR`** (e.g. `/tmp/ros-log`). The temp root is
+> `1777`, so any local user can create that path first, read every log written into it, and pre-plant
+> the file names ROS will create. A configured path **inside** the temp root is therefore judged with
+> the same rule the plugin applies to its own runtime dirs: a symlink or non-directory is **refused**
+> (the command falls back to a private `mkdtemp` dir and says so in `envNote`), and a mode wider than
+> `0700` is **tightened to `0700`**. Directories outside the temp root (`~/.ros/log`, a mount of your
+> choosing) are left exactly as you set them.
 
 ---
 
@@ -501,7 +509,7 @@ bundles you need (or the `dsh-ros2` aggregate for the full set):
 
 ## Troubleshooting / FAQ
 
-- **`~/.ros/log` Permission denied**: ROS2 cannot write its log dir. Set `rosLogDir` (e.g. `/tmp/ros-log`); `runCommand` also falls back automatically.
+- **`~/.ros/log` Permission denied**: ROS2 cannot write its log dir. Set `rosLogDir` to a directory **you own outside the temp root** (e.g. `~/.ros/log-dsh`); `runCommand` also falls back automatically to a private `mkdtemp` dir. Do not use a fixed name in `/tmp` — see the `rosLogDir` note in the configuration table for what that costs and what the plugin now checks.
 - **A flood of `RTPS_TRANSPORT_SHM` / FastDDS SHM warnings in stderr**: harmless noise when SHM transport is unavailable (common in containers/restricted environments); tools drop it by default.
 - **`ros2 topic echo` returns empty**: check `ros2_topic_info -v` for publisher count and QoS; sample transient-local topics with `--qos-durability transient_local`.
 - **Offscreen render: "all parts piled at origin"**: URDF link names do not match TF frame names (see mesh essentials #3); check the node log `FM transformHasProblems(<link>)=1` first.
