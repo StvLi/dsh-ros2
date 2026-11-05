@@ -67,6 +67,16 @@ function stepsUnderTempRoot(target: string): { steps: string[]; strict: boolean 
 }
 
 /**
+ * Whether `target` is inside the system temp root — the place where a fixed
+ * name can be pre-created by another local user, and therefore the only place
+ * these checks tighten a configured directory instead of leaving its mode as
+ * the operator set it.
+ */
+export function isUnderTempRoot(target: string): boolean {
+  return stepsUnderTempRoot(path.resolve(target)).strict
+}
+
+/**
  * Make sure `dir` is a directory this process owns and only it can use.
  *
  * Order matters and mirrors the verification rig: symlink → type → owner →
