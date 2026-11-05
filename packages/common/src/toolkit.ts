@@ -14,6 +14,7 @@ import { runCommand, type JobHooks, type RunOptions, type RosResult } from './ru
 import { type JsonValue, parseJsonOrRaw } from './parse.js'
 import { isWhitespace, isWordChar } from './chars.js'
 import { isSafeProfileName } from './names.js'
+import { applyIngress, boundToolData } from './ingress.js'
 
 /** Execution seam injected by the plugin entry (real runner in prod, fake in tests). */
 export type RunFn = (bin: string, args: string[], opts?: RunOptions) => Promise<RosResult>
@@ -175,8 +176,22 @@ export function jsonOf(value: unknown): JsonValue {
   return value as JsonValue
 }
 
+/**
+ * Last 8 non-empty stderr lines, bounded and character-judged.
+ *
+ * stderr reaches the model as `warnings`, through the same door `data` does,
+ * and it carries the same control bytes (a sourced setup script, a failing CLI
+ * echoing a message). The ingress character rule is applied here so both paths
+ * answer to one policy. `tailLines` in runner.ts keeps its own shape: job
+ * output is read by a human from the job log, not injected as a tool result.
+ */
 export function tail(stderr: string): string[] {
-  return stderr.split('\n').map((l) => l.trim()).filter((l) => l.length > 0).slice(-8)
+  return stderr
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0)
+    .slice(-8)
+    .map((l) => boundToolData(l).value as string)
 }
 
 /** Only approval outcome that grants execution. */
@@ -214,8 +229,33 @@ export function toolError(tool: string, command: string, code: string, message: 
   return { ok: false, tool, command, data: null, error: { code, message } }
 }
 
+/**
+ * Success result — the ONE chokepoint every tool's payload passes through.
+ *
+ * The ingress policy (size budget + character class, see `ingress.ts`) is
+ * applied here rather than per tool: `data` is often the decoded content of a
+ * topic that any DDS participant can publish, so "which tool produced it" is
+ * not a property that can be trusted to remember the rule. A payload the policy
+ * changed also gets one warning, so a shortened reading never looks complete.
+ * `ros2Tool` (the L1 adapter) builds its success results directly and applies
+ * the same policy with `boundedOk`.
+ */
 export function okResult(tool: string, command: string, data: JsonValue): ToolResult {
-  return { ok: true, tool, command, data }
+  return boundedOk(tool, command, data)
+}
+
+/** `okResult` with an extra warning already known by the caller. */
+function boundedOk(tool: string, command: string, data: JsonValue, extra?: string[]): ToolResult {
+  const bounded = applyIngress(data)
+  const warnings = [...(extra ?? [])]
+  if (bounded.warning) warnings.push(bounded.warning)
+  return {
+    ok: true,
+    tool,
+    command,
+    data: bounded.value,
+    ...(warnings.length > 0 ? { warnings } : {}),
+  }
 }
 
 // ── safety framework helpers ─────────────────────────────────────────────
@@ -373,13 +413,12 @@ export function ros2Tool(deps: ToolDeps, spec: RosToolSpec) {
       const command = `${bin} ${commandArgs.join(' ')}`
       if (!res.ok) {
         if (spec.onNonZero && !res.timedOut) {
-          const value: ToolResult = {
-            ok: true,
-            tool: spec.name,
+          const value: ToolResult = boundedOk(
+            spec.name,
             command,
-            data: spec.onNonZero(res),
-            ...(deps.includeStderr && res.stderr.trim() ? { warnings: tail(res.stderr) } : {}),
-          }
+            spec.onNonZero(res),
+            deps.includeStderr && res.stderr.trim() ? tail(res.stderr) : undefined,
+          )
           return value
         }
         const value: ToolResult = {
@@ -397,8 +436,7 @@ export function ros2Tool(deps: ToolDeps, spec: RosToolSpec) {
       }
       const data = spec.parse(res, params)
       const warnings = deps.includeStderr && res.stderr.trim() ? tail(res.stderr) : undefined
-      const value: ToolResult = { ok: true, tool: spec.name, command, data, ...(warnings ? { warnings } : {}) }
-      return value
+      return boundedOk(spec.name, command, data, warnings)
     },
   })
 }
