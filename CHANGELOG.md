@@ -185,6 +185,44 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 
 ### Fixed
 
+- **工具结果进入模型上下文前没有任何入口判据：大小与字符类都不判**（第二十八轮）。
+  前七轮的门都在**出口面**（谁能执行/写/外发、送出去多大），**入口面**从未判过——而
+  `result.data` 是**构造上可被影响**的数据：同一个 DDS 域里任何人都能发布一条被
+  `ros2_topic_sample` / `ros2_topic_echo` 采到的话题。**实测**（跑构建后的 `lib/`）：
+  一个 4 MiB 字段原样进入 `result.data`（4194380 字节），而**同样的字节**走
+  `ros2_topic_echo` 只得到 4010 字符——上限取决于**解析器**而不是内容（4000 字符截断只落在
+  `parseJsonOrRaw` 的 `{ raw: … }` 失败分支上）。字符类完全没判：`\x1b[2K`、`\x07`、`\0`、
+  `U+202E` 原样进入上下文与会话日志。新增 `packages/common/src/ingress.ts`，在**一个闭点**
+  （`okResult()` 与 `ros2Tool` 的两条成功路径）判：单字段 8 KiB、整份结果 256 KiB、数组 1000 项，
+  C0（除 `\t`/`\n`）/DEL/C1/方向覆盖字符移除；数值/布尔/null 从不改写（截断后仍可解析）。
+  任何改动都附一条 `ingress:` 告警——**缩短过的读数不能看起来像完整读数**；`tail()`（stderr →
+  `warnings`）走同一字符判据。
+  （撤门实测：把 `okResult` 的 `applyIngress` 换回直通 → common **2 项红**、core 集成 **2 项红**
+  （`expected 4194380 to be less than 8704`、`expected … not to contain '\u001b'`）。）
+- **配置的 `rosLogDir` 从来不判，而文档建议的正是代码刻意避开的形状**（第二十八轮）。
+  `runCommand` 把 `ROS_LOG_DIR` 原样透传给每个 `ros2` 进程，而 `README` / `docs/compatibility.md`
+  建议设成 `/tmp/ros-log`——1777 目录里的**固定名字**，正是 `makePrivateRosLogDir()` 用 `mkdtemp`
+  0700 刻意避开的形状（别人可以先建、读走日志、预先种下 ROS 要创建的文件名）。**实测**：维护主机
+  的部署照文档设置，`/tmp/dsh-ros2-log` 为 **0775**（组可写、其他可读）。现在
+  `judgeConfiguredRosLogDir()` 对**落在临时根目录内**的配置值套用 `ensurePrivateRuntimeDir`
+  同一条判据：符号链接/非目录/非本 uid **拒绝**（回退到私有 `mkdtemp` 目录），宽于 `0700`
+  **收紧**，结果写进该次调用的 `envNote`（不是静默替换）。临时根目录**之外**的目录保持运维给的
+  权限——那不是本仓库的树。三处文档（`README.md` / `README_CN.md` / `docs/compatibility.md`）
+  改成推荐"自己拥有、临时根目录之外"的目录，并写明判定行为。
+  （撤门实测：把判定换成恒真直通 → `ros-log-dir` **3 项红**（0775 未被收紧、符号链接/常规文件未被拒绝）。）
+- **L4 `vlm_node` 的两处遗留**（第二十八轮，承接工作树里被中断会话的在途改动）。
+  ① `max_tokens` 硬编码 512：部分 OpenAI 兼容网关把推理 token 计入 `completion_tokens`，
+  预算被思考过程吃光后返回 `finish_reason: length`。工作树里的在途改法（模块级
+  `int(os.environ[…]`）会让 `VLM_MAX_TOKENS=bogus` 在 rclpy 初始化之前**直接打死节点**，且没有
+  任何测试；现在改成 `max_tokens` ROS 参数（默认取 `VLM_MAX_TOKENS`，否则 2048），
+  `resolve_max_tokens()` 对非法/非正值回退到默认并**报告**它拒绝了什么。② `_ensure_ros_log_dir()`
+  的兜底仍是 `/tmp/ros-log-<uid>`——第二十三轮在 TS 侧（`runner.ts`）已经修掉的**可猜**路径，
+  Python 侧没跟上。**实测**（`HOME` 不可写）：`ROS_LOG_DIR=/tmp/ros-log-1000`，模式 **0775**。
+  现在用 `tempfile.mkdtemp(prefix="ros-log-")`（0700、不可预测、退出即清理）。
+  新增 `packages/vision/tests/vlm_node_selftest.py`（stub 掉 rclpy/`dsh_ros2_vlm` + 回环捕获服务器，
+  **不需要 ROS2 也不需要真网关**），已接进 vision 的 `test` 脚本。
+  （撤门实测：把兜底换回 `/tmp/ros-log-<uid>` → 自检 **3 项红**，含 `0o775` 与
+  `/tmp/ros-log-1000`；`max_tokens` 的默认值/覆盖/非法值回退/请求体实测 19 项全在自检里。）
 - **`image_snapshot.py` 作为独立 CLI 时，自己的默认目录既没判据也没权限**（第二十七轮；
   第二十六轮 §5 登记项）：`os.makedirs(dirname(output), exist_ok=True)` + 直写，而默认坐标是
   `$TMPDIR/dsh-ros2/snapshot_<ms>.jpg`（`1777` 的 `$TMPDIR` 下的可预测名字）。**实测**（宿主

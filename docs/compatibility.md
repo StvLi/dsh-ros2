@@ -19,8 +19,12 @@
 - `ros2 doctor` 做联网版本检查，默认超时已放宽至 60s
 - `ros2 topic echo --once` 在无发布者时会超时（返回 `TIMEOUT` finding，非错误）
 - FastDDS SHM stderr 噪音默认丢弃（`includeStderr=true` 可打开）
-- `~/.ros/log` 不可写时设 `rosLogDir`（如 `$TMPDIR`）；该覆盖同样作用于 GUI 启动进程，
-  `runCommand` 与 L4 ROS2 节点亦内置自动回退（`/tmp/ros-log-<uid>`）
+- `~/.ros/log` 不可写时设 `rosLogDir`，指向**自己拥有、且位于临时根目录之外**的目录（如
+  `~/.ros/log-dsh`）；该覆盖同样作用于 GUI 启动进程，`runCommand` 与 L4 ROS2 节点亦内置自动回退
+  （`mkdtemp` 私有目录，`0700`、不可预测、进程退出即清理）。
+  **不要**用 `$TMPDIR` 下的固定名字（旧版本文档曾建议 `/tmp/ros-log`）：1777 目录里别人可以先建，
+  然后读走写进去的日志、预先种下 ROS 要创建的文件名。配置值若落在临时根目录内，插件按自建运行目录
+  同一条判据检查——符号链接/非目录拒绝、宽权限收紧到 `0700`，并把结果写进 `envNote`。
 - L4 包的 colcon workspace **必须放在会持久存在的位置**：若建在 `/tmp`（或任何会被清理的目录），
   配置里的 `rosSetup` 就会指向一个已消失的工作区。自第十轮起插件会**剔除该类死段并在 `note` 里点名**
   （`ros2_env_check` 的 `setup.missingSources`），但配置本身仍需人工修正；`ros2_workspace use` 可做

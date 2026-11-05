@@ -425,7 +425,7 @@ snapshot` 固化聚合层；`robot_topology learn` 在使用中逐个追加重�
 | --- | --- | --- | --- |
 | `rosSetup` | string | `''` | 准备环境的 shell 前缀，如 `source /opt/ros/jazzy/setup.bash && ` |
 | `timeoutMs` | number | `15000` | 单命令超时 |
-| `rosLogDir` | string | `''` | 覆盖 `ROS_LOG_DIR`（`~/.ros/log` 不可写时很有用） |
+| `rosLogDir` | string | `''` | 覆盖 `ROS_LOG_DIR`（`~/.ros/log` 不可写时很有用）。**临时根目录之内**的值按插件自建运行目录同一条判据检查：符号链接/非目录一律拒绝，宽于 `0700` 的权限收紧（见下方说明） |
 | `workspaceRoot` | string | `''` | 工具省略 `cwd` 时 `colcon`/`rosdep` 的工作目录 |
 | `includeStderr` | boolean | `false` | 成功结果附带尾部 stderr |
 | `display` | string | `''` | GUI/截图工具的 DISPLAY 覆盖 |
@@ -478,7 +478,7 @@ dsh-ros2/                      # pnpm monorepo（工作区根，private）
 
 ## 故障排查 / FAQ
 
-- **`~/.ros/log` Permission denied**：ROS2 写日志目录失败。设 `rosLogDir`（如 `/tmp/ros-log`）即可；`runCommand` 也会自动回退。
+- **`~/.ros/log` Permission denied**：ROS2 写日志目录失败。把 `rosLogDir` 设成**你自己拥有的、临时根目录之外**的目录（如 `~/.ros/log-dsh`）；`runCommand` 也会自动回退到私有 `mkdtemp` 目录。**不要**用 `/tmp` 下的固定名字——代价与插件现在会做的判定见配置表里 `rosLogDir` 的说明。
 - **stderr 里一堆 `RTPS_TRANSPORT_SHM` / FastDDS SHM 警告**：SHM 传输不可用（常见于容器/受限环境）的无害噪音，工具默认丢弃。
 - **`ros2 topic echo` 返回空**：先 `ros2_topic_info -v` 看 publisher 数与 QoS；transient-local 话题用 `--qos-durability transient_local` 采样。
 - **RViz2 离屏渲染"零件全部堆在原点"**：URDF link 名与 TF 帧名不一致（详见上文 mesh 渲染要点 3）；先看节点日志 `FM transformHasProblems(<link>)=1` 定位。
