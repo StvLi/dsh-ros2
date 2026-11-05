@@ -4,6 +4,7 @@ import path from 'node:path'
 import { accessSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { expandShellWord, parseSourceWord, resolveSourcePath } from './shellword.js'
+import { ensurePrivateRuntimeDir, isUnderTempRoot } from './runtime-dir.js'
 
 export interface RosResult {
   ok: boolean
@@ -283,7 +284,7 @@ export async function runCommand(bin: string, args: string[], opts: RunOptions =
     ...(opts.rosLogDir ? { ROS_LOG_DIR: opts.rosLogDir } : {}),
     ...opts.env,
   }
-  ensureWritableRosLogDir(env)
+  const logDirNote = await ensureWritableRosLogDir(env)
   const baseOptions: ExecFileOptions = {
     timeout: timeoutMs,
     killSignal: 'SIGKILL',
@@ -300,7 +301,10 @@ export async function runCommand(bin: string, args: string[], opts: RunOptions =
   // the reported prefix stays faithful to the configuration.
   const joined = setup.prefix && !/\s$/.test(setup.prefix) ? `${setup.prefix} ` : setup.prefix
   const cmd = joined ? `${joined}${command}` : command
-  const envNote = setup.note
+  // A judged/rewritten ROS_LOG_DIR is a diagnostic about the environment, so it
+  // rides the same `envNote` channel a missing source does — visible in the
+  // result instead of silently replacing what the operator configured.
+  const envNote = [setup.note, logDirNote].filter((n): n is string => typeof n === 'string' && n.length > 0).join('\n')
   try {
     const { stdout, stderr } = setup.prefix
       ? await execFileP('bash', ['-lc', cmd], baseOptions)
@@ -411,15 +415,74 @@ function probeRosLogFallback(): string | undefined {
   return rosLogFallback
 }
 
-/** Set ROS_LOG_DIR in `env` to a writable dir when the default would fail. */
-export function ensureWritableRosLogDir(env: Record<string, string>): void {
-  if (env.ROS_LOG_DIR) return
-  if (process.env.ROS_LOG_DIR) {
-    env.ROS_LOG_DIR = process.env.ROS_LOG_DIR
-    return
+/**
+ * Judge a CONFIGURED `ROS_LOG_DIR` by the same rule this file uses for the
+ * directory it creates itself (round 28).
+ *
+ * The fallback above goes to `mkdtemp` 0700 and explains why a fixed name in a
+ * 1777 directory is not acceptable: another local user can create that path
+ * first, read the logs written into it, and pre-plant the file names the ROS
+ * processes will create. A path handed to us by configuration was never judged
+ * — the documented advice was `rosLogDir: /tmp/ros-log`, i.e. exactly the shape
+ * the code refuses to create. Measured on the maintenance host: the deployment
+ * follows that advice and `/tmp/dsh-ros2-log` was `0775` (group-writable,
+ * world-readable).
+ *
+ * The rule is deliberately narrow: only a path INSIDE the temp root is judged
+ * and tightened, because that is where a hostile pre-creation can happen.
+ * `~/.ros/log` or an operator directory elsewhere keeps the mode its owner
+ * chose — this function must not rewrite an operator's tree.
+ */
+export async function judgeConfiguredRosLogDir(
+  dir: string,
+): Promise<{ ok: true; dir: string; note?: string } | { ok: false; code: string; reason: string }> {
+  if (!isUnderTempRoot(dir)) return { ok: true, dir }
+  const ensured = await ensurePrivateRuntimeDir(dir, { label: 'ROS_LOG_DIR（配置值）' })
+  if (!ensured.ok) return { ok: false, code: ensured.code, reason: ensured.reason }
+  const note =
+    ensured.tightened.length > 0
+      ? `配置的 ROS_LOG_DIR ${ensured.path} 位于临时根目录（1777），权限宽于 0700，已收紧（同 private-runtime-dir 判据）`
+      : undefined
+  return note === undefined ? { ok: true, dir: ensured.path } : { ok: true, dir: ensured.path, note }
+}
+
+/** Per-path memo, so the judgement costs one lstat per configured dir, not per command. */
+const judgedLogDirs = new Map<string, { dir: string; note?: string }>()
+
+/**
+ * Set ROS_LOG_DIR in `env` to a writable dir when the default would fail, and
+ * make sure a CONFIGURED one passes the private-directory judgement first.
+ *
+ * Returns an optional human note (tightened / refused) that the caller folds
+ * into `envNote`, so a rewritten or discarded configuration is visible in the
+ * tool result instead of silently replaced.
+ */
+export async function ensureWritableRosLogDir(env: Record<string, string>): Promise<string | undefined> {
+  const configured = env.ROS_LOG_DIR !== undefined && env.ROS_LOG_DIR !== '' ? env.ROS_LOG_DIR : process.env.ROS_LOG_DIR
+  if (configured === undefined || configured === '') {
+    const fallback = probeRosLogFallback()
+    if (fallback) env.ROS_LOG_DIR = fallback
+    return undefined
   }
-  const fallback = probeRosLogFallback()
-  if (fallback) env.ROS_LOG_DIR = fallback
+  let judged = judgedLogDirs.get(configured)
+  if (judged === undefined) {
+    const outcome = await judgeConfiguredRosLogDir(configured)
+    if (outcome.ok) {
+      judged = { dir: outcome.dir, ...(outcome.note ? { note: outcome.note } : {}) }
+    } else {
+      // Refusal falls back to the private directory rather than failing the
+      // command: the operator's intent (a writable log dir) is preserved, and
+      // the note says the configured path was not used and why.
+      const fallback = probeRosLogFallback()
+      judged = {
+        dir: fallback ?? '',
+        note: `已拒绝配置的 ROS_LOG_DIR ${configured}（${outcome.code}: ${outcome.reason}）${fallback ? '，改用私有临时目录' : ''}`,
+      }
+    }
+    judgedLogDirs.set(configured, judged)
+  }
+  if (judged.dir !== '') env.ROS_LOG_DIR = judged.dir
+  return judged.note
 }
 
 /** Keep the last N lines of a stream, bounded. */

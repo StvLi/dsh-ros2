@@ -1,32 +1,46 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { ensureWritableRosLogDir } from '../src/runner.js'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
+import { ensureWritableRosLogDir, judgeConfiguredRosLogDir } from '../src/runner.js'
 
 describe('ensureWritableRosLogDir', () => {
-  it('keeps an explicitly set ROS_LOG_DIR in the env', () => {
-    const env = { ROS_LOG_DIR: '/tmp/x' }
-    ensureWritableRosLogDir(env)
-    expect(env.ROS_LOG_DIR).toBe('/tmp/x')
-  })
-
-  it('keeps the ambient process ROS_LOG_DIR when set', () => {
-    const prev = process.env.ROS_LOG_DIR
-    process.env.ROS_LOG_DIR = '/tmp/ambient'
+  it('keeps an explicitly set ROS_LOG_DIR in the env', async () => {
+    // A path inside the temp root must pass the same judgement as one this
+    // package creates itself; 0700 by the time it is handed to a command.
+    const dir = path.join(mkdtempSync(path.join(tmpdir(), 'dsh-logdir-')), 'configured')
     try {
-      const env: Record<string, string> = {}
-      ensureWritableRosLogDir(env)
-      expect(env.ROS_LOG_DIR).toBe('/tmp/ambient')
+      const env = { ROS_LOG_DIR: dir }
+      const note = await ensureWritableRosLogDir(env)
+      expect(env.ROS_LOG_DIR).toBe(dir)
+      expect(statSync(dir).mode & 0o777).toBe(0o700)
+      expect(note).toBeUndefined() // created 0700: nothing to report
     } finally {
-      if (prev === undefined) delete process.env.ROS_LOG_DIR
-      else process.env.ROS_LOG_DIR = prev
+      rmSync(path.dirname(dir), { recursive: true, force: true })
     }
   })
 
-  it('falls back to a writable dir without throwing when nothing is set', () => {
+  it('keeps the ambient process ROS_LOG_DIR when set', async () => {
+    const prev = process.env.ROS_LOG_DIR
+    const dir = path.join(mkdtempSync(path.join(tmpdir(), 'dsh-logdir-')), 'ambient')
+    process.env.ROS_LOG_DIR = dir
+    try {
+      const env: Record<string, string> = {}
+      await ensureWritableRosLogDir(env)
+      expect(env.ROS_LOG_DIR).toBe(dir)
+    } finally {
+      if (prev === undefined) delete process.env.ROS_LOG_DIR
+      else process.env.ROS_LOG_DIR = prev
+      rmSync(path.dirname(dir), { recursive: true, force: true })
+    }
+  })
+
+  it('falls back to a writable dir without throwing when nothing is set', async () => {
     const prev = process.env.ROS_LOG_DIR
     delete process.env.ROS_LOG_DIR
     try {
       const env: Record<string, string> = {}
-      expect(() => ensureWritableRosLogDir(env)).not.toThrow()
+      await expect(ensureWritableRosLogDir(env)).resolves.toBeUndefined()
       // writable host: no override; locked-down host: a non-empty fallback dir
       if (env.ROS_LOG_DIR !== undefined) expect(env.ROS_LOG_DIR.length).toBeGreaterThan(0)
     } finally {
