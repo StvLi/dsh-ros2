@@ -55,14 +55,21 @@ REQUEST → NORMALIZE → PLAN → VALIDATE → APPROVAL → FINGERPRINT CHECK �
 | 校验器不可用 / 输出异常 | 视为校验未通过（`VALIDATION_FAILED`） |
 | 关节状态缺失 / 过旧（相对运动） | 校验未通过（`state_freshness` fail） |
 | 控制器不在线（`require_controller_ready`） | 拒绝（`CONTROLLER_NOT_READY`） |
+| **指名了 `robot` 但档案读不出来**（缺失 / 权限 / 损坏 / 名字非法） | **fail-closed 拒绝执行**（`PROFILE_UNREADABLE` / `PROFILE_NAME_UNSAFE`）；`planOnly` 仍可规划（诊断用途）但结果带明确告警；`motion_validate` 拒绝给出"已校验"结论 |
 | 轨迹文件损坏 / 指纹变化 | 拒绝（`VALIDATION_FAILED` / `VALIDATION_CHANGED`） |
 | `safety_monitor` 失联 | 运动工具按 `safetyStrict`: `'reject'` fail-closed 拒绝；`'warn'`（默认）放行并提示——生产环境建议 `'reject'` |
 | 执行中超时 | `moveit_common` 先 cancel goal 再报错（看门狗，不留失控轨迹） |
 | 监视器 CRITICAL | 锁存 `LOCKED`，仅人工解锁（`robot_safety_unlock`） |
 
-**降级策略**：未注册机器人（无 profile）时校验器对未知限位**警告跳过**（
+**降级策略**：未注册机器人（**不传** `robot`）时校验器对未知限位**警告跳过**（
 `require_limits` 默认 false）；注册后（URDF 限位入档）即全量 fail-closed。文档与
 `robot_register` 流程均引导先注册再运动。
+
+**"不传"与"传了读不到"是两件事**（第三十轮）：前者是操作者**显式**放弃 profile 限位，
+后者是**控制悄悄失效**——而且 `require_limits` 本身就写在那个读不到的文件里，
+所以它没法自救。两者在旧实现里都塌缩成 `profile = null`，实测同一条 `99 rad` 越限轨迹
+在档案可读时 `safe=false`、档案不可读时 `safe=true status=pass`。现在指名了却读不到
+一律 fail-closed，且 `planOnly`/`motion_validate` 会把"没读到档案"明说出来。
 
 ### 3.1 档案本身是可写的判据来源，所以它必须是私有的
 

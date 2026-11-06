@@ -35,7 +35,9 @@ import {
   renderResult,
   resolveProfilePath,
   loadRobotProfile,
+  loadRequestedProfile,
   type ProfileSafetyView,
+  type ProfileLoadFailure,
   type VisionProvider,
   type JobSnapshot,
   type NodeInfo,
@@ -79,6 +81,25 @@ function parsePose(s: string): Record<string, number> {
     if (v !== undefined && Number.isFinite(v)) out[k] = v
   })
   return out
+}
+
+/**
+ * Resolve the profile a caller NAMED, keeping the failure reason.
+ *
+ * `profile: null` from `loadRobotProfile` means two incompatible things: the
+ * caller omitted `robot` (profile-driven bounds intentionally unused) or the
+ * caller named one we could not read (its bounds silently stopped applying).
+ * Motion-gating callers must distinguish them, so this wrapper keeps the
+ * reason instead of dropping it.
+ */
+async function resolveNamedProfile(
+  deps: ToolDeps,
+  robotName: string,
+): Promise<{ profile: { robot: ProfileSafetyView } | null; failure: ProfileLoadFailure | null }> {
+  if (!robotName) return { profile: null, failure: null }
+  const loaded = await loadRequestedProfile(deps, robotName)
+  if (!loaded.ok) return { profile: null, failure: loaded }
+  return { profile: { robot: loaded.robot }, failure: null }
 }
 
 function buildMotionValidationConfig(
@@ -259,7 +280,7 @@ function makeMotionValidateTool(deps: ToolDeps) {
     name: 'motion_validate',
     description:
       'Deterministic pre-execution motion validation (read-only, no motion): validate a planned trajectory / trajectoryOut artifact / motion proposal against the robot profile — joint limits (position/velocity/acceleration), NaN/Inf, joint names & group coverage, monotonic timestamps, duration, state freshness, optional pose workspace box, fingerprint + TTL. ' +
-      'Deterministic and LLM-free (motion_validator.py). Collision/singularity are checked by MoveIt planning, not here. Pass robot to enable full limit checks (unknown limits warn unless safety.require_limits).',
+      'Deterministic and LLM-free (motion_validator.py). Collision/singularity are checked by MoveIt planning, not here. Pass robot to enable full limit checks: a profile that loads but declares no limits warns unless safety.require_limits, while a NAMED profile that cannot be read is refused (PROFILE_UNREADABLE) instead of being reported safe.',
     parameters: {
       trajectory: { type: 'string', description: 'Path to a planned trajectory JSON (from moveit_move planOnly + trajectoryOut).' },
       robot: { type: 'string', default: '', description: 'Robot profile name (limits/group coverage/workspace from ~/.dsh-ros2/robots/<name>.yaml).' },
@@ -276,7 +297,16 @@ function makeMotionValidateTool(deps: ToolDeps) {
       const mode = strOrUndefined(params.mode) ?? 'trajectory'
       const group = strOrUndefined(params.group) ?? ''
       const robotName = strOrUndefined(params.robot) ?? ''
-      const profile = robotName ? await loadRobotProfile(deps, robotName) : null
+      const command = `motion_validate trajectory=${trajectory}${robotName ? ` robot=${robotName}` : ''}`
+      const wanted = await resolveNamedProfile(deps, robotName)
+      // Same invariant as moveit_move: a profile the caller named but we could
+      // not read cannot yield a verdict. Reporting "safe" here would be the
+      // one lie a validator must never tell.
+      if (wanted.failure) {
+        return toolError('motion_validate', command, wanted.failure.code,
+          `无法读取机器人「${robotName}」的档案：${wanted.failure.reason} —— 拒绝给出「已校验」结论（fail-closed）。修复档案后重试，或不传 robot 只做通用校验。`)
+      }
+      const profile = wanted.profile
       const stateText = strOrUndefined(params.state) ?? ''
       let currentState: { stamp_ms: number; position: Record<string, number> } | undefined
       if (stateText.trim()) {
@@ -299,7 +329,6 @@ function makeMotionValidateTool(deps: ToolDeps) {
       const check = await checkTrajectoryFile(trajectory)
       if (!check.ok) return toolError('motion_validate', `motion_validate trajectory=${trajectory}`, check.code, check.reason)
       const config = buildMotionValidationConfig(vparams, profile, mode, group, currentState)
-      const command = `motion_validate trajectory=${trajectory}${robotName ? ` robot=${robotName}` : ''}`
       const v = await runMotionValidator(deps, trajectory, config)
       const result = okResult('motion_validate', command, v as JsonValue)
       if (v.safe !== true) {
@@ -324,7 +353,7 @@ function makeMoveitMoveTool(deps: ToolDeps) {
     parameters: {
       mode: { type: 'string', enum: ['joint_abs', 'joint_rel', 'pose_abs', 'pose_rel', 'trajectory'], description: 'Motion mode: joint_abs | joint_rel | pose_abs | pose_rel | trajectory.' },
       group: { type: 'string', description: 'MoveIt planning group name (e.g. right_arm, from moveit_discover).' },
-      robot: { type: 'string', default: '', description: 'Robot profile name (registered via robot_register) — enables full deterministic validation (limits from URDF, group coverage, workspace box, freshness, fingerprint).' },
+      robot: { type: 'string', default: '', description: 'Robot profile name (registered via robot_register) — enables full deterministic validation (limits from URDF, group coverage, workspace box, freshness, fingerprint). A named profile that cannot be read fails closed (PROFILE_UNREADABLE) for execution modes.' },
       joints: { type: 'string', default: '', description: 'joint_abs: space-separated "name:=value" pairs, e.g. "right_shoulder_roll:=0.5 right_elbow_pitch:=-0.3".' },
       deltaJoints: { type: 'string', default: '', description: 'joint_rel: space-separated "name:=delta" pairs, added to the current joint state.' },
       pose: { type: 'string', default: '', description: 'pose_abs: "x y z rx ry rz" (meters + RPY rad) in the planning frame.' },
@@ -362,7 +391,20 @@ function makeMoveitMoveTool(deps: ToolDeps) {
       // Safety gate: LOCKED /safety/state always rejects execution modes
       const gate = await enforceSafetyLock(deps, 'moveit_move', command, { skip: planOnly })
       if (gate.denied) return gate.denied
-      const profile = robotName ? await loadRobotProfile(deps, robotName) : null
+      const wanted = await resolveNamedProfile(deps, robotName)
+      // A named robot whose profile cannot be read is NOT "no profile given":
+      // the profile carries the limits, workspace box, freshness bounds and
+      // `require_limits` itself, so reading nothing would silently downgrade
+      // the validation to "no limits to check" (docs/safety.md §3). Planning
+      // stays available for diagnosis, but nothing may EXECUTE on that basis.
+      if (wanted.failure && !planOnly) {
+        return safetyDenied('moveit_move', command, wanted.failure.code,
+          `无法读取机器人「${robotName}」的档案：${wanted.failure.reason}。该档案承载限位/工作空间/新鲜度与 require_limits，读不到即无从建立安全性 —— fail-closed 拒绝执行（用 robot_register 重新注册或修复文件权限后重试）。`)
+      }
+      const profile = wanted.profile
+      const profileWarning = wanted.failure
+        ? `无法读取机器人「${robotName}」的档案（${wanted.failure.reason}）——本次仅规划，未应用 profile 限位校验；执行会被拒绝`
+        : undefined
       const timeoutSec = Math.max(10, Math.floor(numOrUndefined(params.timeoutMs) ?? 90000) / 1000)
       const timeoutMs = Math.max(30000, numOrUndefined(params.timeoutMs) ?? 90000) + 10000
       const mkModeArgs = (extra: string[], execMode?: string) => {
@@ -395,7 +437,8 @@ function makeMoveitMoveTool(deps: ToolDeps) {
           data.validation = (await runMotionValidator(deps, out, buildMotionValidationConfig(params, profile, mode, group))) as JsonValue
         }
         const result = okResult('moveit_move', command, data as JsonValue)
-        if (gate.warning) result.warnings = [gate.warning]
+        const warnings = [gate.warning, profileWarning].filter((w): w is string => typeof w === 'string' && w.length > 0)
+        if (warnings.length) result.warnings = warnings
         return result
       }
 

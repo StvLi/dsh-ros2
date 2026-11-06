@@ -57,6 +57,10 @@ async function call(name: string, run: RunFn, args: Record<string, unknown>): Pr
     validator?: Record<string, unknown>
     jointState?: Record<string, number>
     online?: Record<string, boolean>
+    /** Simulate a NAMED profile that cannot be read (missing / unreadable / corrupt). */
+    profileUnreadable?: boolean
+    /** Collect every helper the tool actually spawned, to prove a refusal came first. */
+    calls?: string[]
   } = {}) {
     const planStdout = opts.planStdout ?? JSON.stringify({ ok: true, planned: true, executed: false, mode: 'joint_abs' })
     const executeStdout = opts.executeStdout ?? JSON.stringify({ ok: true, executed: true, mode: 'trajectory' })
@@ -65,6 +69,7 @@ async function call(name: string, run: RunFn, args: Record<string, unknown>): Pr
     }
     return makeRun((bin, args) => {
       const cmd = args.join(' ')
+      opts.calls?.push(`${bin} ${cmd}`)
       if (bin === 'ros2' && args.includes('/safety/state')) {
         return opts.monitorDown ? { stdout: '' } : { stdout: 'state: NORMAL\nseverity: OK\ncause: \ndetail: \n' }
       }
@@ -82,6 +87,10 @@ async function call(name: string, run: RunFn, args: Record<string, unknown>): Pr
         return { stdout: JSON.stringify({ ok: true, packages: [] }) }
       }
       if (bin === 'python3' && cmd.includes('robot_profile.py')) {
+        if (opts.profileUnreadable) {
+          // exactly what robot_profile.py emits for a missing/unreadable/corrupt file
+          return { ok: false, exitCode: 1, stdout: JSON.stringify({ ok: false, error: "解析档案失败: [Errno 13] Permission denied: '/home/x/.dsh-ros2/robots/lite.yaml'" }) }
+        }
         return {
           stdout: JSON.stringify({
             ok: true,
@@ -221,10 +230,10 @@ describe('moveit_discover / moveit_status / moveit_move', () => {
 
   it('motion_validate reports a failing trajectory (read-only)', async () => {
     const run = makeRun((bin, args) => {
-      if (bin === 'python3' && args.includes('motion_validator.py')) {
+      if (bin === 'python3' && args.join(' ').includes('motion_validator.py')) {
         return { stdout: JSON.stringify({ safe: false, status: 'fail', errors: ['关节 a 位置超出限位'], checks: { joint_limits: 'fail' }, fingerprint: 'fp' }) }
       }
-      if (bin === 'python3' && args.includes('robot_profile.py')) return { stdout: JSON.stringify({ ok: true, robot: { joints: [], moveit: { groups: {} }, safety: {} } }) }
+      if (bin === 'python3' && args.join(' ').includes('robot_profile.py')) return { stdout: JSON.stringify({ ok: true, robot: { joints: [], moveit: { groups: {} }, safety: {} } }) }
       return { stdout: '' }
     })
     const { dir, file } = await realTrajectory()
@@ -343,6 +352,58 @@ describe('moveit_discover / moveit_status / moveit_move', () => {
     if (!t) throw new Error('not registered')
     const out = (await t.execute({ mode: 'joint_abs', group: 'right_arm', joints: 'a:=0.1', srdf: '/x.srdf', planOnly: true }, execStub)) as ToolResult
     expect(out.ok).toBe(true)
+  })
+
+  // A NAMED robot whose profile cannot be read must not collapse into "no
+  // profile given": the profile carries the limits, the workspace box, the
+  // freshness bounds and `require_limits` itself, so reading nothing silently
+  // downgrades the run to "no limits to check" (docs/safety.md §3).
+  describe('a named profile that cannot be read (fail-closed)', () => {
+    it('moveit_move refuses to EXECUTE, before it plans or validates', async () => {
+      const calls: string[] = []
+      const approval = async () => 'allowed-once'
+      const run = moveitFlowRun({ profileUnreadable: true, calls })
+      const t = createRos2Tools({ run, approval }).find((x) => x.name === 'moveit_move')
+      if (!t) throw new Error('not registered')
+      const out = (await t.execute({ mode: 'joint_abs', group: 'right_arm', joints: 'a:=0.1', srdf: '/x.srdf', robot: 'lite' }, execStub)) as ToolResult
+      expect(out.ok).toBe(false)
+      expect(out.error?.code).toBe('PROFILE_UNREADABLE')
+      // the refusal is the FIRST thing that happens: nothing planned, nothing validated, nothing moved
+      expect(calls.some((c) => c.includes('moveit_move.py'))).toBe(false)
+      expect(calls.some((c) => c.includes('motion_validator.py'))).toBe(false)
+    })
+
+    it('moveit_move still PLANS for diagnosis, with an explicit warning', async () => {
+      const approval = async () => 'allowed-once'
+      const run = moveitFlowRun({ profileUnreadable: true })
+      const t = createRos2Tools({ run, approval }).find((x) => x.name === 'moveit_move')
+      if (!t) throw new Error('not registered')
+      const out = (await t.execute({ mode: 'joint_abs', group: 'right_arm', joints: 'a:=0.1', srdf: '/x.srdf', robot: 'lite', planOnly: true }, execStub)) as ToolResult
+      expect(out.ok).toBe(true)
+      expect(out.warnings?.join(' ')).toContain('无法读取机器人')
+    })
+
+    it('motion_validate refuses to report a verdict (a validator must not say "safe" it did not check)', async () => {
+      const { dir, file } = await realTrajectory()
+      try {
+        const run = moveitFlowRun({ profileUnreadable: true })
+        const out = (await call('motion_validate', run, { trajectory: file, robot: 'lite' })) as ToolResult
+        expect(out.ok).toBe(false)
+        expect(out.error?.code).toBe('PROFILE_UNREADABLE')
+      } finally {
+        await rm(dir, { recursive: true, force: true })
+      }
+    })
+
+    it('omitting robot keeps the documented opt-out path (no regression)', async () => {
+      const approval = async () => 'allowed-once'
+      const run = moveitFlowRun({ profileUnreadable: true })
+      const t = createRos2Tools({ run, approval }).find((x) => x.name === 'moveit_move')
+      if (!t) throw new Error('not registered')
+      const out = (await t.execute({ mode: 'joint_abs', group: 'right_arm', joints: 'a:=0.1', srdf: '/x.srdf' }, execStub)) as ToolResult
+      expect(out.ok).toBe(true)
+      expect(out.error?.code).toBeUndefined()
+    })
   })
 
 
