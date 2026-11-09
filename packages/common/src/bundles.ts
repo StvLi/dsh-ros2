@@ -29,8 +29,18 @@
  * changes, so a startup probe at t=0 can never see it. The startup report
  * therefore covers "which bundles actually mounted and what they register";
  * the drift warning stays a post-start observation on `ros2_env_check`.
+ *
+ * Round 30: the drift judgement used to compare `version` strings only, which
+ * made it blind to the commonest case in this repo — `lib/` rebuilt without a
+ * version bump (rounds 28 and 29 both fixed live-process code this way, so both
+ * rounds had to reason around a `stale: false` that meant nothing). Each bundle
+ * now also records a *content* fingerprint of what it loaded, and the report
+ * recomputes it from disk: identical bytes cannot be "old code", different
+ * bytes cannot be "current code", whatever the version string says.
  */
-import { readFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 /** What one bundle registered in *this* process. */
@@ -50,6 +60,13 @@ export interface LoadedBundle {
   /** Absolute path of that package.json — where the drift check re-reads. */
   readonly packageJsonPath: string
   /**
+   * Content fingerprint of the runtime files this process loaded (`lib/**` plus
+   * the two root manifests). Optional: a bundle built before the fingerprint
+   * existed, or one whose `lib/` cannot be read, simply cannot be judged by
+   * content — `contentDrifted` stays `undefined` rather than guessing.
+   */
+  readonly fingerprint?: string
+  /**
    * Lazy description of the tools/skills this bundle registered. Evaluated at
    * report time (never at registration time), because every bundle registers
    * itself before it builds its tools. A bundle built before this feature
@@ -64,7 +81,14 @@ export interface BundleDrift {
   readonly loaded: string
   /** Version currently on disk, or null when the file is gone/unreadable. */
   readonly installed: string | null
+  /** True when the on-disk *version* differs from the loaded one. */
   readonly drifted: boolean
+  /**
+   * True when the on-disk *bytes* differ from the ones this process loaded,
+   * regardless of version. `undefined` when that cannot be judged (no load-time
+   * fingerprint, or `lib/` unreadable now) — absence must never read as `false`.
+   */
+  readonly contentDrifted?: boolean
 }
 
 /** Per-bundle tool/skill surface, as read from its `surface` thunk. */
@@ -112,10 +136,67 @@ let declaration: { readonly by: string; readonly names: readonly string[] } | nu
  * Read a package's own version from a module URL — pass `import.meta.url` of
  * the bundle's entry module (`../package.json` resolves to the package root
  * from both `src/` and the compiled `lib/`).
+ *
+ * The content fingerprint is taken here, at module load, because that is the
+ * only instant that knows *which* bytes this process is about to run.
  */
-export function readOwnVersion(moduleUrl: string): { version: string; packageJsonPath: string } {
+export function readOwnVersion(moduleUrl: string): { version: string; packageJsonPath: string; fingerprint?: string } {
   const packageJsonPath = fileURLToPath(new URL('../package.json', moduleUrl))
-  return { version: readVersionAt(packageJsonPath) ?? 'unknown', packageJsonPath }
+  const fingerprint = contentFingerprint(packageJsonPath)
+  return {
+    version: readVersionAt(packageJsonPath) ?? 'unknown',
+    packageJsonPath,
+    ...(fingerprint === null ? {} : { fingerprint }),
+  }
+}
+
+/** Root manifests that decide what a package mounts, alongside its `lib/`. */
+const ROOT_MANIFESTS = ['package.json', 'cordis.patch.yml'] as const
+
+/** Every regular file under `dir`, depth-first, as paths relative to `root`. */
+function walkFiles(root: string, dir: string): string[] {
+  const out: string[] = []
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const absolute = join(dir, entry.name)
+    if (entry.isDirectory()) out.push(...walkFiles(root, absolute))
+    else if (entry.isFile()) out.push(relative(root, absolute))
+  }
+  return out
+}
+
+/**
+ * Content fingerprint of a package's runtime surface: every file under `lib/`
+ * plus the root manifests, sorted so the value depends on the bytes and not on
+ * `readdir` order. `null` when there is no `lib/` to judge (a source-only
+ * checkout, or a fixture that only writes a package.json) — an answer of
+ * "unknown", never "unchanged".
+ */
+export function contentFingerprint(packageJsonPath: string): string | null {
+  const root = dirname(packageJsonPath)
+  const lib = join(root, 'lib')
+  if (!existsSync(lib)) return null
+  let files: string[]
+  try {
+    files = [
+      ...ROOT_MANIFESTS.filter((name) => existsSync(join(root, name))),
+      ...walkFiles(root, lib),
+    ].sort()
+  } catch {
+    return null
+  }
+  if (files.length === 0) return null
+  const hash = createHash('sha256')
+  for (const file of files) {
+    hash.update(file)
+    hash.update('\0')
+    try {
+      hash.update(readFileSync(join(root, file)))
+    } catch {
+      return null
+    }
+    hash.update('\0')
+  }
+  return `sha256:${hash.digest('hex').slice(0, 16)}`
 }
 
 /** Parsed package.json at an absolute path, or null when unreadable/invalid. */
@@ -181,20 +262,31 @@ export function listLoadedBundles(): LoadedBundle[] {
 }
 
 /**
- * Pure comparator: pair every loaded bundle with the version currently on
- * disk. `readInstalled` is injected so the comparison is testable without fs.
+ * Pure comparator: pair every loaded bundle with the version *and* the content
+ * currently on disk. Both readers are injected so the comparison is testable
+ * without fs.
+ *
+ * `contentDrifted` is only present when both ends are known: a bundle that
+ * never recorded a fingerprint, or whose `lib/` is unreadable now, yields
+ * `undefined` rather than a fabricated `false`.
  */
 export function compareBundles(
   bundles: readonly LoadedBundle[],
   readInstalled: (bundle: LoadedBundle) => string | null = (b) => readVersionAt(b.packageJsonPath),
+  readInstalledFingerprint: (bundle: LoadedBundle) => string | null = (b) => contentFingerprint(b.packageJsonPath),
 ): BundleDrift[] {
   return bundles.map((bundle) => {
     const installed = readInstalled(bundle)
+    const installedFingerprint = readInstalledFingerprint(bundle)
+    const contentDrifted = bundle.fingerprint !== undefined && installedFingerprint !== null
+      ? bundle.fingerprint !== installedFingerprint
+      : undefined
     return {
       name: bundle.name,
       loaded: bundle.version,
       installed,
       drifted: installed !== null && installed !== bundle.version,
+      ...(contentDrifted === undefined ? {} : { contentDrifted }),
     }
   })
 }
@@ -212,9 +304,10 @@ function readSurface(bundle: LoadedBundle): BundleSurface | null {
 
 /**
  * Loaded bundle set + drift against disk + the surface each bundle registered.
- * `stale` is true when any bundle's on-disk version differs from the loaded
- * one — i.e. the running process is older than the install and must be
- * restarted to pick up new tools/skills.
+ * `stale` is true when the running process is older than the install — either a
+ * different on-disk version OR different on-disk bytes, because a `lib/`
+ * rebuilt without a version bump leaves the process just as stale as a bumped
+ * version does.
  */
 export function bundleDriftReport(): BundleDriftReport {
   const bundles = listLoadedBundles()
@@ -234,7 +327,7 @@ export function bundleDriftReport(): BundleDriftReport {
   return {
     loaded: bundles.map(({ name, version }) => ({ name, version })),
     drift,
-    stale: drift.some((d) => d.drifted),
+    stale: drift.some((d) => d.drifted || d.contentDrifted === true),
     unresolved: drift.filter((d) => d.installed === null).map((d) => d.name),
     surface,
     unreported,
@@ -276,6 +369,16 @@ export function formatBundleStartupReport(report: BundleDriftReport): BundleStar
       '检测到磁盘上的 dsh-ros2 bundle 已更新，但运行中的进程仍是旧代码：' +
       drifted.map((d) => `${d.name} ${d.loaded} → ${d.installed}`).join('、') +
       '。新工具/技能不会被加载（症状是 unknown tool 或技能目录缺项）；请重启 harness 后重试。')
+  }
+  // Content drift with the version unchanged is the shape this repo actually
+  // produces (rebuild, no bump), so it gets its own sentence: reporting it as
+  // "0.1.0 → 0.1.0" would read like a non-event.
+  const contentOnly = report.drift.filter((d) => d.contentDrifted === true && !d.drifted)
+  if (contentOnly.length > 0) {
+    warnings.push(
+      '检测到磁盘上的 dsh-ros2 bundle 内容已变（版本号没变），运行中的进程仍是加载时的代码：' +
+      contentOnly.map((d) => `${d.name} ${d.loaded}`).join('、') +
+      '。版本的字符串没有权威性——请重启 harness 后重试。')
   }
   if (report.unresolved.length > 0) {
     warnings.push(`以下已加载 bundle 的 package.json 已不可读，无法判断是否陈旧：${report.unresolved.join('、')}`)
