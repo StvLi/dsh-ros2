@@ -185,6 +185,24 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 
 ### Fixed
 
+- **内容指纹只盖了 bundle 自己的 `lib/`，没盖它加载的共享库**（第三十轮；上一条落地后当场量出来的
+  另一半）。改动 `packages/common/lib/*.js` 时六个 bundle 一律 `contentDrifted: false` ——而这正是
+  第二十八、二十九轮三处修复落地的位置：`dsh-ros2-common` 是纯库、**从不挂载**，不会出现在
+  `loaded`/`drift` 里，所以任何"自己的字节"哈希都不可能因它而动。**修前实测**（活进程）：
+  往 `packages/common/lib/toolkit.js` 追加一个字节 → 六个 bundle 全部 `contentDrifted: false`、
+  `stale: false`；同样的字节追加到 `packages/core/lib/tools.js` → `dsh-ros2-core` 立刻
+  `contentDrifted: true`、`stale: true` 并给出告警。
+  现在指纹额外覆盖**声明为依赖的共享运行库**（`dsh-ros2-common`：它的 `lib/**` + `package.json`），
+  于是"改共享库"会报在**加载它的每个 bundle** 上。解析走**手写 `node_modules` 向上查找**
+  （`<祖先>/node_modules/<name>/package.json`），不用 `require.resolve`：后者跟 `exports` 映射、
+  会查 `NODE_PATH` 与全局目录（`~/.node_modules` 里的同名包不该冒充已安装的那个），
+  而且会被测试运行器替换——本轮实测 unresolved 的夹具在 vitest 下"解析成功"了（替换成了工作区副本）。
+  声明了共享库却解析不到 ⇒ 指纹返回 `null`（无法判断），**不**降级成"没变"。
+  用例 **485 → 490**（`bundles.spec.ts` +5：共享库改动移动指纹、共享库专有的 `contentDrifted`、
+  解析不到时字段缺席、真实工作区布局可解析、不声明依赖时只看自己的字节）；把共享库那半边撤掉，
+  **3 条**当场变红。`docs/versioning.md` 的示例也一并修正：原先拿 `dsh-ros2-common` 当 drift 条目，
+  而它**永远不会**出现在那张表里。
+
 - **`stale` 只比版本号，"版本号没变"被当成"没有陈旧"**（第三十轮；§5 登记了两轮、这次落地）。
   `bundleDriftReport()` 的判据是 `installed !== loaded`（两个字符串）——而本仓库最常见的形状
   恰好是 **`pnpm build` 重建 `lib/` 而不 bump 版本**：第二十八、二十九轮共三处修复都落在
