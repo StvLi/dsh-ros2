@@ -68,13 +68,20 @@ bundle 是**一次性加载**的：磁盘更新后，运行中的 harness 仍是
 
 **版本号不权威**（第三十轮修正）：本仓库最常见的形状是 **`pnpm build` 重建 `lib/` 而不 bump 版本**
 （第二十八、二十九轮的三处修复都是这样落地的）。只比版本号的自检对这种形状的回答是
-`stale: false` —— 而活进程内存里明明是旧代码。所以每个 bundle 在挂载时**额外记录一份内容指纹**
-（`lib/**` + `package.json` + `cordis.patch.yml` 的 SHA-256，取前 16 位），报告时重算：
+`stale: false` —— 而活进程内存里明明是旧代码。所以每个 bundle 在挂载时**额外记录一份内容指纹**，
+报告时重算。指纹覆盖**两处**字节（缺第二处就只闭了问题的小半边）：
+
+| 覆盖范围 | 内容 | 为什么 |
+| --- | --- | --- |
+| bundle 自己 | 它自己 `lib/**`（递归、路径排序）+ `package.json` + `cordis.patch.yml` | "这个包的构建换了没有" |
+| **它加载的共享库** | `dsh-ros2-common` 的 `lib/**` + `package.json` | **本仓库真正的热点**：第二十八、二十九轮的三处修复全部落在 `packages/common/lib/*.js`，而 `dsh-ros2-common` 是纯库、**从不挂载**，永远不会出现在 `loaded`/`drift` 里——只哈希自己的字节，改它时六个 bundle 一律 `contentDrifted: false` |
+
+条数之外的判据：
 
 | 判据 | 字段 | 说明 |
 | --- | --- | --- |
 | 版本 | `drifted` | 磁盘版本 ≠ 加载时版本（老实但现在**不再唯一**） |
-| 内容 | `contentDrifted` | 磁盘字节 ≠ 加载时字节，**与版本无关**；无法判断时**字段不出现**（不默认 `false`） |
+| 内容 | `contentDrifted` | 磁盘字节 ≠ 加载时字节，**与版本无关**；无法判断时**字段不出现**（不默认 `false`）。声明了共享库却**解析不到**（没装/路径不标准）同样算"无法判断"——不能把看不见的字节说成没变 |
 | 汇总 | `stale` | `drifted \|\| contentDrifted === true` —— 两者任一为真都算陈旧 |
 
 **怎么查**：每个 bundle 在挂载时都会报告自己（并打一行启动日志
@@ -88,8 +95,10 @@ bundle 是**一次性加载**的：磁盘更新后，运行中的 harness 仍是
       "drift": [
         // 版本变了
         { "name": "dsh-ros2-core", "loaded": "0.1.5", "installed": "0.1.6", "drifted": true },
-        // 只重建、没 bump —— 版本字符串看不出任何东西
-        { "name": "dsh-ros2-common", "loaded": "0.1.5", "installed": "0.1.5",
+        // 只重建、没 bump —— 版本字符串看不出任何东西。
+        // 改的是 packages/common/lib/*.js 时，报告的是「加载它的每个 bundle」：
+        // 共享库自己不在这个列表里（它不挂载），所以别去找 dsh-ros2-common 这一行。
+        { "name": "dsh-ros2-core", "loaded": "0.1.5", "installed": "0.1.5",
           "drifted": false, "contentDrifted": true }
       ],
       "stale":   true,           // drifted || contentDrifted
