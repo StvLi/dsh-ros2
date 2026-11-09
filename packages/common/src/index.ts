@@ -4,6 +4,7 @@
  * toolkit, the loaded-bundle registry (stale-process detection), and the
  * robot-profile script (zero-copy across packages).
  */
+export * from './env-notes.js'
 export * from './toolkit.js'
 export * from './runner.js'
 export * from './parse.js'

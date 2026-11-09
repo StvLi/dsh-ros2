@@ -21,6 +21,7 @@ import { type JsonValue, parseJsonOrRaw } from './parse.js'
 import { isWhitespace, isWordChar } from './chars.js'
 import { isSafeProfileName } from './names.js'
 import { applyIngress, boundToolData } from './ingress.js'
+import { collectEnvObservations } from './env-notes.js'
 
 /** Execution seam injected by the plugin entry (real runner in prod, fake in tests). */
 export type RunFn = (bin: string, args: string[], opts?: RunOptions) => Promise<RosResult>
@@ -295,6 +296,28 @@ export function finalizeToolResult<T>(result: T): T {
  * of the tool factory rather than a convention each tool author must remember.
  * `tests/finalize.spec.ts` pins that no package imports `defineTool` directly.
  */
+/**
+ * Fold whatever the run seam reported during this invocation into `warnings`.
+ *
+ * The observations themselves are produced by `runCommand()` via
+ * `noteEnvObservation()` (see `env-notes.ts`); this only decides where they land.
+ * Wrapped around the execute body rather than called at each call site, so a
+ * tool cannot forget it — the round-29 lesson applied to the environment channel.
+ */
+function withEnvObservations(
+  inner: (args: unknown, exec: unknown) => Promise<unknown>,
+): (args: unknown, exec: unknown) => Promise<unknown> {
+  return async (args, exec) => {
+    const { value, notes } = await collectEnvObservations(() => inner(args, exec))
+    if (notes.length === 0) return value
+    const result = value as unknown as ToolResult
+    const existing = result.warnings ?? []
+    const fresh = notes.filter((note) => !existing.includes(note))
+    if (fresh.length === 0) return value
+    return { ...result, warnings: [...existing, ...fresh] }
+  }
+}
+
 export function defineRos2Tool<const S extends ParameterSchemaSpec, const O extends ValueSchemaSpec>(
   options: DefineToolOptions<S, O>,
 ): ToolDefinition {
@@ -305,9 +328,10 @@ export function defineRos2Tool<const S extends ParameterSchemaSpec, const O exte
   // arguments before `execute` runs, and every other option keeps its meaning.
   const base = options as unknown as Record<string, unknown>
   const inner = options.execute as unknown as (args: unknown, exec: unknown) => Promise<unknown>
+  const observed = withEnvObservations(inner)
   const wrapped = {
     ...base,
-    execute: async (args: unknown, exec: unknown) => finalizeToolResult(await inner(args, exec)),
+    execute: async (args: unknown, exec: unknown) => finalizeToolResult(await observed(args, exec)),
   }
   // `as never`: handing `defineTool` a `DefineToolOptions<S, O>` makes it infer
   // `S`/`O` from themselves and tsc bails with TS2321 (excessive stack depth).
@@ -455,7 +479,14 @@ export interface RosToolSpec {
  */
 export function ros2Tool(deps: ToolDeps, spec: RosToolSpec) {
   const bin = spec.bin ?? 'ros2'
-  return defineTool({
+  // Through `defineRos2Tool`, not `defineTool`: this adapter lives in `common`,
+  // which the finalize invariant test skips (`no package imports defineTool
+  // directly` scans the six bundle packages, and the adapter is not one of
+  // them). Round 29 therefore declared the ingress closed point complete while
+  // the 32 tools built from this adapter still returned their FAILURE result —
+  // `error.message = res.error`, which for a killed or over-buffer child is the
+  // child's stderr up to MAX_BUFFER — without passing the finalizer.
+  return defineRos2Tool({
     name: spec.name,
     description: spec.description,
     parameters: (spec.parameters ?? {}) as ParameterSchemaSpec,
@@ -492,8 +523,18 @@ export function ros2Tool(deps: ToolDeps, spec: RosToolSpec) {
         return value
       }
       const data = spec.parse(res, params)
-      const warnings = deps.includeStderr && res.stderr.trim() ? tail(res.stderr) : undefined
-      return boundedOk(spec.name, command, data, warnings)
+      // `res.envNote` describes a rewritten/refused environment. On the failure
+      // path it already rides `error.message` (the run seam folds it into the
+      // diagnostics there); on SUCCESS it used to be dropped by everyone, so an
+      // operator only learnt the environment had been rewritten by making a call
+      // fail. Carried next to the result instead — and deduplicated against the
+      // observation channel, which reports the same sentence for tools that run
+      // commands directly.
+      const warnings = [
+        ...(deps.includeStderr && res.stderr.trim() ? tail(res.stderr) : []),
+        ...(typeof res.envNote === 'string' && res.envNote.trim().length > 0 ? [res.envNote] : []),
+      ]
+      return boundedOk(spec.name, command, data, warnings.length > 0 ? warnings : undefined)
     },
   })
 }
