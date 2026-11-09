@@ -185,6 +185,23 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 
 ### Fixed
 
+- **`stale` 只比版本号，"版本号没变"被当成"没有陈旧"**（第三十轮；§5 登记了两轮、这次落地）。
+  `bundleDriftReport()` 的判据是 `installed !== loaded`（两个字符串）——而本仓库最常见的形状
+  恰好是 **`pnpm build` 重建 `lib/` 而不 bump 版本**：第二十八、二十九轮共三处修复都落在
+  `packages/common/lib/*.js` 且都没动版本号 ⇒ 这两轮的开工人只能靠"改的文件是不是活进程的必经之路"
+  去猜，`ros2_env_check` 给出的 `stale: false` 在那两轮里**没有权威性**。
+  现在每个 bundle 在挂载时额外记录一份**内容指纹**（`lib/**` 逐文件 + `package.json` +
+  `cordis.patch.yml` 的 SHA-256，取前 16 位；`contentFingerprint()`），报告时对同一目录重算：
+  - `BundleDrift.contentDrifted`——**字节不同即为真，与版本无关**；判不了的时候（加载时没记指纹、
+    或 `lib/` 现在读不到）字段**不出现**，而不是默认 `false`（同第二十九轮 F3 的教训：
+    "没有答案"不能长成"没有变化"）；
+  - `stale = drifted || contentDrifted === true`；
+  - 版本没变而内容变了的 bundle 单独一条告警（不写成 `0.1.0 → 0.1.0` 那种"什么都没发生"的样子）；
+  - 同字节重建（`tsc` 重写但产物一致）**不**报陈旧——这正是要按内容判、而不是按 mtime/size 判的原因。
+  用例 **479 → 485**（`bundles.spec.ts` +6：无 `lib/` 时为 `null`、递归看到嵌套文件、加载时记录、
+  内容专有的 `stale`、告警措辞不重复、判不了时字段缺席）；把 `stale` 改回只比版本、把内容比较
+  短路成 `false`，这 3 条当场变红。
+
 - **工具结果进入模型上下文前没有任何入口判据：大小与字符类都不判**（第二十八轮）。
   前七轮的门都在**出口面**（谁能执行/写/外发、送出去多大），**入口面**从未判过——而
   `result.data` 是**构造上可被影响**的数据：同一个 DDS 域里任何人都能发布一条被

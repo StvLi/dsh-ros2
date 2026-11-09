@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 import {
   type LoadedBundle,
   bundleDriftReport,
   compareBundles,
+  contentFingerprint,
   declareExpectedBundles,
   declaredBundleNames,
   formatBundleStartupReport,
@@ -24,6 +26,26 @@ function tempPackage(name: string, version: string | undefined): { dir: string; 
   const packageJsonPath = path.join(dir, 'package.json')
   writeFileSync(packageJsonPath, JSON.stringify(version === undefined ? { name } : { name, version }))
   return { dir, packageJsonPath }
+}
+
+/**
+ * A temp package with a built `lib/` — the shape `contentFingerprint` judges.
+ * `libFile` and `nestedFile` are returned so a test can rewrite one byte-string
+ * and watch the fingerprint move without touching the version.
+ */
+function tempBuiltPackage(
+  name: string,
+  version: string,
+  body: string,
+): { dir: string; packageJsonPath: string; libFile: string; nestedFile: string } {
+  const { dir, packageJsonPath } = tempPackage(name, version)
+  const lib = path.join(dir, 'lib')
+  mkdirSync(path.join(lib, 'nested'), { recursive: true })
+  const libFile = path.join(lib, 'index.js')
+  const nestedFile = path.join(lib, 'nested', 'helper.js')
+  writeFileSync(libFile, body)
+  writeFileSync(nestedFile, 'export const helper = 1\n')
+  return { dir, packageJsonPath, libFile, nestedFile }
 }
 
 function bundle(name: string, version: string, packageJsonPath: string): LoadedBundle {
@@ -117,6 +139,51 @@ describe('compareBundles', () => {
   })
 })
 
+describe('content fingerprint (round 30)', () => {
+  it('answers null when there is no lib/ to judge, never "unchanged"', () => {
+    const { packageJsonPath } = tempPackage('dsh-ros2-src-only', '0.1.0')
+    expect(contentFingerprint(packageJsonPath)).toBeNull()
+  })
+
+  it('is stable for identical bytes and moves when any lib file changes', () => {
+    const pkg = tempBuiltPackage('dsh-ros2-fp', '0.1.0', 'export const build = 1\n')
+    const first = contentFingerprint(pkg.packageJsonPath)
+    expect(first).toMatch(/^sha256:[0-9a-f]{16}$/)
+    expect(contentFingerprint(pkg.packageJsonPath)).toBe(first)
+
+    // a nested file counts too — the walk is recursive, not a `lib/*.js` glob
+    writeFileSync(pkg.nestedFile, 'export const helper = 2\n')
+    const afterNested = contentFingerprint(pkg.packageJsonPath)
+    expect(afterNested).not.toBe(first)
+
+    writeFileSync(pkg.libFile, 'export const build = 2\n')
+    expect(contentFingerprint(pkg.packageJsonPath)).not.toBe(afterNested)
+  })
+
+  it('records the fingerprint at load time, so drift is judged by bytes not by the version string', () => {
+    const pkg = tempBuiltPackage('dsh-ros2-live', '0.1.0', 'export const a = 1\n')
+    const own = readOwnVersion(pathToFileURL(pkg.libFile).href)
+    expect(own.version).toBe('0.1.0')
+    expect(own.fingerprint).toMatch(/^sha256:/)
+
+    const asLoaded: LoadedBundle = { name: 'dsh-ros2-live', ...own }
+    expect(compareBundles([asLoaded]).map((d) => d.contentDrifted)).toEqual([false])
+
+    // rebuild WITHOUT bumping the version — the case `stale` used to miss
+    writeFileSync(pkg.libFile, 'export const a = 2\n')
+    expect(compareBundles([asLoaded])).toEqual([
+      { name: 'dsh-ros2-live', loaded: '0.1.0', installed: '0.1.0', drifted: false, contentDrifted: true },
+    ])
+  })
+
+  it('omits contentDrifted when it cannot be judged, instead of defaulting it to false', () => {
+    const noFingerprint: LoadedBundle = { name: 'dsh-ros2-old', version: '0.1.0', packageJsonPath: '/x/old/package.json' }
+    const unreadableLib: LoadedBundle = { name: 'dsh-ros2-gone', version: '0.1.0', packageJsonPath: '/x/gone/package.json', fingerprint: 'sha256:0000000000000000' }
+    const compared = compareBundles([noFingerprint, unreadableLib], () => '0.1.0', () => null)
+    expect(compared.map((d) => 'contentDrifted' in d)).toEqual([false, false])
+  })
+})
+
 describe('bundleDriftReport', () => {
   it('summarises loaded, drifted and unresolved bundles', () => {
     const drifted = tempPackage('dsh-ros2-drifted', '0.2.0')
@@ -135,6 +202,51 @@ describe('bundleDriftReport', () => {
     } finally {
       disposeA()
       disposeB()
+    }
+  })
+
+  it('reports stale for a content-only change, which the version cannot see (round 30)', () => {
+    const pkg = tempBuiltPackage('dsh-ros2-same-bytes', '0.1.0', 'export const a = 1\n')
+    const own = readOwnVersion(pathToFileURL(pkg.libFile).href)
+    const dispose = registerLoadedBundle({
+      name: 'dsh-ros2-same-bytes',
+      version: own.version,
+      packageJsonPath: own.packageJsonPath,
+      ...(own.fingerprint === undefined ? {} : { fingerprint: own.fingerprint }),
+    })
+    try {
+      expect(bundleDriftReport().stale).toBe(false)
+
+      writeFileSync(pkg.libFile, 'export const a = 2\n')
+      const report = bundleDriftReport()
+      expect(report.stale).toBe(true)
+      // the version is untouched, so ONLY the content reader can see this
+      expect(report.drift.filter((d) => d.drifted)).toEqual([])
+      expect(report.drift.filter((d) => d.contentDrifted === true).map((d) => d.name)).toEqual(['dsh-ros2-same-bytes'])
+    } finally {
+      dispose()
+    }
+  })
+
+  it('gives content-only drift its own sentence, never "0.1.0 → 0.1.0"', () => {
+    const pkg = tempBuiltPackage('dsh-ros2-content-warning', '0.1.0', 'export const a = 1\n')
+    const own = readOwnVersion(pathToFileURL(pkg.libFile).href)
+    const dispose = registerLoadedBundle({
+      name: 'dsh-ros2-content-warning',
+      version: own.version,
+      packageJsonPath: own.packageJsonPath,
+      ...(own.fingerprint === undefined ? {} : { fingerprint: own.fingerprint }),
+    })
+    try {
+      writeFileSync(pkg.libFile, 'export const a = 2\n')
+      const { warnings } = formatBundleStartupReport(bundleDriftReport())
+      const content = warnings.filter((w) => w.includes('内容已变'))
+      expect(content).toHaveLength(1)
+      expect(content[0]).toContain('dsh-ros2-content-warning 0.1.0')
+      // the version-drift sentence must not duplicate it
+      expect(warnings.filter((w) => w.includes('已更新'))).toEqual([])
+    } finally {
+      dispose()
     }
   })
 })

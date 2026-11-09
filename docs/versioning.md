@@ -66,6 +66,17 @@ bundle 是**一次性加载**的：磁盘更新后，运行中的 harness 仍是
 真正调用时才暴露症状——`Error: unknown tool "ros2_topology"`，或会话技能目录少了几项载体。
 拆分方案里的"profile 迁移需重启生效"是同样的约束。
 
+**版本号不权威**（第三十轮修正）：本仓库最常见的形状是 **`pnpm build` 重建 `lib/` 而不 bump 版本**
+（第二十八、二十九轮的三处修复都是这样落地的）。只比版本号的自检对这种形状的回答是
+`stale: false` —— 而活进程内存里明明是旧代码。所以每个 bundle 在挂载时**额外记录一份内容指纹**
+（`lib/**` + `package.json` + `cordis.patch.yml` 的 SHA-256，取前 16 位），报告时重算：
+
+| 判据 | 字段 | 说明 |
+| --- | --- | --- |
+| 版本 | `drifted` | 磁盘版本 ≠ 加载时版本（老实但现在**不再唯一**） |
+| 内容 | `contentDrifted` | 磁盘字节 ≠ 加载时字节，**与版本无关**；无法判断时**字段不出现**（不默认 `false`） |
+| 汇总 | `stale` | `drifted \|\| contentDrifted === true` —— 两者任一为真都算陈旧 |
+
 **怎么查**：每个 bundle 在挂载时都会报告自己（并打一行启动日志
 `dsh-ros2: loaded bundle dsh-ros2-<x>@<version>`）。只读诊断入口是 `ros2_env_check`：
 
@@ -74,12 +85,21 @@ bundle 是**一次性加载**的：磁盘更新后，运行中的 harness 仍是
   "data": {
     "bundles": {
       "loaded":  [{ "name": "dsh-ros2-core", "version": "0.1.5" }],
-      "drift":   [{ "name": "dsh-ros2-core", "loaded": "0.1.5", "installed": "0.1.6", "drifted": true }],
-      "stale":   true,           // 任一 bundle 的 loaded ≠ installed
+      "drift": [
+        // 版本变了
+        { "name": "dsh-ros2-core", "loaded": "0.1.5", "installed": "0.1.6", "drifted": true },
+        // 只重建、没 bump —— 版本字符串看不出任何东西
+        { "name": "dsh-ros2-common", "loaded": "0.1.5", "installed": "0.1.5",
+          "drifted": false, "contentDrifted": true }
+      ],
+      "stale":   true,           // drifted || contentDrifted
       "unresolved": []           // package.json 已不可读，无法判断的 bundle
     }
   },
-  "warnings": ["检测到磁盘上的 dsh-ros2 bundle 已更新，但运行中的进程仍是旧代码：… 请重启 harness 后重试。"]
+  "warnings": [
+    "检测到磁盘上的 dsh-ros2 bundle 已更新，但运行中的进程仍是旧代码：… 请重启 harness 后重试。",
+    "检测到磁盘上的 dsh-ros2 bundle 内容已变（版本号没变），运行中的进程仍是加载时的代码：… 请重启 harness 后重试。"
+  ]
 }
 ```
 

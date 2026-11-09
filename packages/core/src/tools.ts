@@ -1663,7 +1663,7 @@ function makeEnvCheckTool(deps: CoreToolDeps) {
   return defineRos2Tool({
     name: 'ros2_env_check',
     description:
-      'Self-check the ROS2 environment resolution: which setup is sourced (session override / configured rosSetup / auto-detected), whether paths exist, and what packages/nodes are visible. Also reports the loaded dsh-ros2 bundle versions against the ones now on disk, so a running process that predates a plugin update is visible instead of surfacing later as an unknown tool. Read-only, no approval.',
+      'Self-check the ROS2 environment resolution: which setup is sourced (session override / configured rosSetup / auto-detected), whether paths exist, and what packages/nodes are visible. Also reports what each loaded dsh-ros2 bundle registered against what is now on disk — by version AND by content fingerprint, so a `lib/` rebuilt without a version bump still shows up as stale. Read-only, no approval.',
     parameters: {},
     output: { schema: resultSchema, render: renderResult },
     async execute(_args, exec) {
