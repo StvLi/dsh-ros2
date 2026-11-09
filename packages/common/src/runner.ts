@@ -5,6 +5,7 @@ import { accessSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync,
 import { tmpdir } from 'node:os'
 import { expandShellWord, parseSourceWord, resolveSourcePath } from './shellword.js'
 import { ensurePrivateRuntimeDir, isUnderTempRoot } from './runtime-dir.js'
+import { ingressWarning, sanitizeText, type IngressReport } from './ingress.js'
 import { noteEnvObservation } from './env-notes.js'
 
 export interface RosResult {
@@ -607,7 +608,27 @@ export function spawnJob(bin: string, args: string[], opts: SpawnJobOptions = {}
     cancel: () => {
       if (!child.killed) child.kill('SIGTERM')
     },
-    readOutput: () => `[stdout]\n${out}\n[stderr]\n${err}`.trim(),
+    // Job output is the one stream in this plugin that reaches the model WITHOUT
+    // passing a tool result: the harness jobs channel shows it directly, so the
+    // ingress character rule (which rides the tool factory) never saw it. Round 30
+    // measured this on this very host: a background job printing ESC + U+202E put
+    // ~70 KiB of raw control and direction-override characters into the
+    // conversation, no warning attached.
+    //
+    // Character rule only — size stays `outputLimitBytes` (8 MiB) here, because a
+    // build log is genuinely long and the harness has its own spill limit. The
+    // point is that "外部数据进上下文前先剥掉控制/方向字符" now also holds for
+    // this channel, and that a stripped reading says so.
+    readOutput: () => sanitizeJobOutput(`[stdout]\n${out}\n[stderr]\n${err}`.trim()),
     done,
   }
+}
+
+/** Strip the refused characters from captured job output, and say when it did. */
+function sanitizeJobOutput(text: string): string {
+  const report: IngressReport = { dropped: 0, droppedBidi: 0, truncated: 0, droppedBytes: 0, budgetHit: false }
+  const clean = sanitizeText(text, report)
+  if (clean === text) return text
+  const warning = ingressWarning(report)
+  return warning === undefined ? clean : `${clean}\n${warning}`
 }
