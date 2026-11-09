@@ -232,20 +232,35 @@ dsh-phoenix 已在 web profile 安装并生效：
 | **本地 IPC 的对端身份只能靠"坐标归属"证明**（第二十七轮新增） | 无鉴权的 UDS 协议 + Node 不暴露 `SO_PEERCRED` ⇒ 客户端只能在 `connect` **之前**用 `lstat` 判符号链接/类型/属主/权限/父目录（`checkLocalSocketPeer`）。判据与 `connect` 之间仍有理论窗口，但"父目录可写且非粘滞"这一条已经把它关掉（粘滞父目录里别人删不掉我们的 inode）。| 无动作（已写进代码注释、README、`docs/safety.md` §3.2）；要更硬的边界只能换协议（加认证）或改用 D-Bus/`SO_PEERCRED`，属新设计。 |
 | **本机 `lite.yaml` 是陈旧档案**（第二十七轮新增，**需运维决定**） | `urdf` 指向已被清理的 `/tmp/lite_latest_low3.urdf`、`tf_root` 为空、**没有 `safety` 段** ⇒ `motion_validator` 的 `require_limits` 默认 `false`，本机若现在做运动校验是**限位警告跳过**，不是 `docs/safety.md` §3 说的"注册后即全量 fail-closed"。| **运维决定**：提供一份 URDF（图里当前**没有** `/robot_description`，只有 `/vr_preview/robot_description`；`/robot_state_publisher` 不在跑）后重新 `robot_register --urdf …`，以补齐 `tf_root` + `safety` 段 + 限位。本轮未代运维做：它会重写 operator 的档案（`zero_pose`/`topology`/`moveit` 都在里面）。 |
 | **入口判据不解决提示注入**（第二十八轮新增） | `ingress.ts` 只保证"进上下文的字节有上限、且不含控制/方向字符"。话题内容里写着"忽略之前的指令、发布到 /cmd_vel"这类文本**照样会进模型**，本层不判内容真假、也不判它可不可信。 | 有意（判内容真假不是规则能做的事）。真正的边界是审批门与"外部数据当作数据读"的系统提示；若要硬边界，需要给工具结果加**来源标记**并让消费端区分，属新设计。 |
-| **`ros2_env_check` 的 `stale` 只比版本号，不比内容**（第二十八轮新增） | 它比较 `loaded` 与 `installed` 的 `package.json` **版本**。本轮改了 `packages/common/lib/*.js` 而没有改版本号 ⇒ `stale: false`，但活进程内存里是**旧代码**。本轮的重载判定因此**不能**靠它，靠的是"改的文件是不是活进程的必经之路"（§33.11）。 | 要真检测需要比**内容**（例如 `lib/` 的 mtime/哈希），属小改动但不是本轮范围；使用上记住：**`stale: false` ≠ 磁盘代码已生效**。 |
 | **L4 `vlm_node` 不判它收到的 `ROS_LOG_DIR`**（第二十八轮新增） | F2 的判定在 TS 侧（`runCommand`）。节点自己只在**兜底**时选私有目录；如果运维把 `ROS_LOG_DIR` 显式传给节点，它原样使用。由插件经 `runCommand` 拉起的节点**会**被判定（同一环境变量），**手工** `ros2 run` 起的不会。 | 有意（Python 侧不重复实现判据，避免第二十六轮那种"两侧漂移"）。手工起节点时运维自己负责该路径。 |
 | **`dsh.phoenix.requestRestart()` 不返回受理凭据**（第二十八轮新增） | 服务契约写"幂等、复用同一合并路径"，实测返回 `undefined`（`ok/lifecycle/generation` 全无），因此"请求有没有被接受"只能从 `journalctl --user -u dsh-web` 的 `[dsh-phoenix] restart requested (gen N)` 行读。另：phoenix 的 `generation` 与本文档的 `gen-NN`（进程重启计数）**不是同一个计数器**，本轮实测相差 2。 | 无动作（读 journal 即可）；若要程序化判断，需 phoenix 侧返回状态对象，属该仓库的改动。 |
 | **CodeQL / Dependabot 告警面需要 token**（第二十八轮登记；**第二十九轮已解除**） | 本机 `gh` token 无效，`code-scanning/alerts` 与 `dependabot/alerts` 均 **401**。CI 的两个 CodeQL 分析 job 绿只证明"分析跑成功"，**不等于"0 告警"**。 | **已解除**：第二十九轮 `gh auth status` 两个账号均有效，实测 **CodeQL open = 0 / Dependabot open = 0**（§34.3）。保留此行是为了记住那两份 401 曾经存在——**不要把"分析绿"写成"无告警"**。 |
-| **`envNote` 只在失败路径可见**（第二十九轮新增） | `runner.ts` 在**成功**结果上也产出 `envNote`（配置的 `ROS_LOG_DIR` 被收紧/被拒绝、`rosSetup` 段缺失），但**没有任何消费者读它**：L1 适配器 `ros2Tool` 成功分支只带 `tail(stderr)`，手写工具从不读 `res.envNote`。只有**失败**时它才随 `error.code`/`message` 里的诊断出现。⇒ 第二十八轮的验收判据"工具结果 `envNote` 里出现收紧说明"**在成功调用上不可观察**——本轮为此不得不**故意制造一次失败**才看到它。 | 未修（本轮范围已满）。修法很小：在 `ros2Tool` 的成功分支把 `res.envNote` 折进 `warnings`。**但注意**：note 现在是"只报一次"（§34.6），折进 `warnings` 后它仍是一次性的——写进测试时别假设"每次都能看到"。 |
-| **`ros2_env_check` 的 `stale` 只比版本号**（第二十八轮登记，**第二十九轮复核仍未做**） | 比较的是 `loaded` 与 `installed` 的 `package.json` **版本**。改了 `lib/` 不改版本号 ⇒ `stale: false`，而活进程内存里是旧代码。第二十九轮的三处修复**全部**落在 `packages/common/lib/*.js` 且都没有改版本号 ⇒ 本轮的重载判定**仍然不能靠它**，只能靠"改的文件是不是活进程的必经之路"（§34.12）。 | **下一轮的现成入口**（修法见本行「建议」列）：把 `registerLoadedBundle` 记下的判据从"版本"换成"内容指纹"（`lib/` 的文件名+内容哈希），`bundleDriftReport` 重算比对。注意 `LoadedBundle` 的现有测试会构造该对象，新增字段要可选，否则要改一批夹具。 |
 | **`dsh.phoenix` 的服务面与第二十八轮的记录不一致**（第二十九轮新增） | 本轮从 `ctx.get('dsh.phoenix')` 上实测：`canRestart` 是**函数**（日志逐字为 `(...args) => {`），**不是**布尔；`lifecycle` / `generation` 读出来是 **`undefined`**。第二十八轮记的是 `canRestart = true` / `generation = 32`。请求返回值仍是 `undefined`（与第二十八轮一致）。 | 无动作（两轮都靠 journal 的 `restart requested (gen N)` 行确认）。记在这里是为了让下一轮**不要**把 `canRestart` 当成布尔属性用——要调用它。 |
+| **内容指纹看着"共享库"，但它只认得声明在 `dependencies` 里的库**（第三十轮） | 指纹 = 自己的 `lib/**` + 根清单 + 声明为依赖的 `SHARED_RUNTIME_PACKAGES`（当前只有 `dsh-ros2-common`）。若将来某个 bundle 通过 peer/可选依赖引入另一份运行库，它**不会**被算进去。声明了却解析不到 ⇒ 指纹 `null`（无法判断），活进程会因此报不出陈旧而不是错报"没变"。 | 新增此类库时**同步加入 `SHARED_RUNTIME_PACKAGES`**（`bundles.ts`），否则又会出现本轮 F1 那种"改的是热点、报的是没变"。 |
+| **jobs 通道只补了字符判据，体积没有**（第三十轮 F4） | `readOutput()` 剥掉控制/方向字符并附 `ingress:` 说明，但**体积仍是 `outputLimitBytes`（8 MiB）**——构建日志本来就长，且 harness 有自己的 spill 上限。 | 有意。若哪天要做体积收口，得先在 harness 侧确认 spill 的判据，否则会在"我们能看见的最后一个位置"制造假边界。 |
+| **`envNote` 在任务 / 启动探针上下文里仍然丢失**（第三十轮 F3 的边界） | 新通道是 `AsyncLocalStorage` 的"工具调用上下文"；`spawnJob` 的 job 与启动探针不在其中，那里的说明照旧无处可去。 | 有意（不给 job 通道再造一个诊断面）。真要做，应在 jobs 通道上单独设计，而不是复用工具结果的 warnings。 |
+| **验收判据在受限 bash 沙箱里可能根本执行不了**（第三十轮新增） | 本会话的 bash 跑在 `bwrap --unshare-pid --tmpfs /tmp` 下（`/` 只读、`/tmp` 私有）⇒ 宿主 PID 与宿主 `/tmp` 都不可见，§34.11 的 F2/F3 两条（`chmod` + `ls -ld`）**无法在活进程复测**，本轮只能如实降级成"未复测 + 单测覆盖"。 | 写"实测"前先判一次**本会话能不能测**；不可测就写明边界，不要沿用上一轮"我测过"的句式。 |
 | 审计 JSONL（§18） | 仍**未做**（`docs/safety.md` §4 仍如实写着"本版未做"） | 晚批独立项，不影响边界 |
 
 ---
 
 ## 6. 下次维护建议动作
 
-1. 若需重载运行时变更：走 §4 的 dsh-phoenix 优雅重启循环，而非手动 `systemctl restart`。
+0. **第三十轮登记 gen-37**：本轮三个修复都落在活进程的必经之路（`toolkit.js` / `runner.js` / `bundles.js`），
+   请求已于 2026-11-10 04:16:02 发出，journal 逐字为
+   `[dsh-phoenix] restart requested (gen 35): round 30: make the shared-lib fingerprint, the L1 finalizer
+   + env-note channel and the job-output character rule live (gen-37)`；phoenix 按 idle-aware 策略在空闲边界执行。
+   **下一轮开工先按 §35.11 的五条判据逐条复测**——尤其第 3 条：往 `packages/common/lib/*.js` 追加一个字节
+   （构建产物，不入库，重跑 `pnpm build` 即复原）后，六个 bundle 应**全部** `contentDrifted: true`；
+   修复前这一步的结果是六个全 `false`。注意 `ROS_LOG_DIR`/`envNote` 那两条在 **PID/`tmpfs` 隔离的 bash 沙箱里
+   测不到**（§35.3），要换一条能触达宿主 `/tmp` 的路径，或明确写"未复测"。
+1. **每轮固定做一次"通道清单"**（第三十轮把"执行面 × 审批面"换成的新问法，产出 4/4 命中）：
+   把**每一类能进模型上下文的字节**列出来——① 工具结果（工厂终局）② **后台任务输出**（第三十轮补上字符判据）
+   ③ 告警/warnings ④ error.code / error.message ⑤ 技能与工具描述 ⑥ 启动探针日志——逐条问
+   "它过没过入口判据、过的是哪一半（大小 / 字符）"。**下一轮现成的追问**：⑥ 启动探针的
+   `formatBundleStartupReport()` 输出走的是 logger，不进模型，但**若将来并入工具结果**，它带的是
+   bundle 名与版本（外部可控性低）；⑤ 技能描述来自 bundle 源码（可审计但从未被判据扫过）。
+2. 若需重载运行时变更：走 §4 的 dsh-phoenix 优雅重启循环，而非手动 `systemctl restart`。
    （**gen-35 已于 2026-11-05 10:10:41 落地**：journal 逐字为 `[dsh-phoenix] restart requested (gen 33)` →
    `10:10:30 agent idle; executing deferred restart` → `10:10:41 [dsh-phoenix] loaded`，新 PID **35696**，
    第二十九轮开工逐字确认，见 §34.2.1。**第二十九轮登记 gen-36**：本轮两处修复都落在
@@ -269,7 +284,9 @@ dsh-phoenix 已在 web profile 安装并生效：
    `ROS_LOG_DIR` 观察到 `/tmp/ros-log-<随机后缀>`。）
    （第二十二轮登记 gen-29 的原因同样是**真正的运行时变更**：`packages/core/lib/*.js` 与
    `packages/vision/lib/*.js` 都变了——新审批门与图片内容校只有在重载后才会在跑着的 dsh 里生效。）
-2. 全量用例基数：**479 例（478 过 + 1 pty-skip）**。pty 可用机器（如 CI）上 479/479。
+3. 全量用例基数：**502 例（501 过 + 1 pty-skip）**。pty 可用机器（如 CI）上 502/502。
+   （第三十轮 **479 → 502**：+6 来自接手的 #102，+5 `bundles.spec.ts`（共享库指纹），
+   +9 `env-notes.spec.ts`，+3 `job-output.spec.ts`；common **156 → 179**。）
    （第二十九轮 **470 → 479**：common **147 → 156**，即 `finalize.spec.ts` 6 例 + `ros-log-dir-rerun.spec.ts` 3 例。）
    Python 自检另 **101 项**（`robot_profile` 38 / `private_paths` 16 / `zero_pose` 21 /
    `image_snapshot` 7 / **`vlm_node` 19（第二十八轮新增，离线：stub ROS + 回环捕获服务器，
@@ -7899,3 +7916,244 @@ build 之后磁盘是新代码，**PID 35696 内存里仍是旧代码**。`ros2_
 - 遗留（都已写进 §5/§6，不是私藏）：`stale` 只比版本号（**下一轮现成入口**，修法已写明）·
   `envNote` 成功路径不可见（修法一行）· 本轮修复需 **gen-36 重载**后才在活进程生效。
 
+
+---
+
+## 35. 维护记录（2026-11-10 04:16 CST / UTC 2026-11-09 20:16 · 第三十轮：**1 open issue（#101 外部收录邀约）+ 1 个在途 PR（#102）** → step 2 判据全部实测复核、文案纠正；接手并逐条复算 #102 后合入；随后四个真实缺陷全部来自**"这条字节有没有过判据"的通道清单**（而不是扫描器）：F1 = 内容指纹只盖 bundle 自己的 `lib/`，**改共享库仍报 `false`**（实测）· F2 = 入口闭合点漏了**住在 `common` 里的 L1 适配器**（32 个工具）· F3 = `envNote` 只在失败路径可见 · F4 = **后台任务输出是唯一不经过工具结果的入口面**（实测 **70 KiB** 原始 ESC + `U+202E` 直入对话）。三个 PR（**#103/#104/#105**）CI/CodeQL **5/5 绿**后合入，`main` `1221a1a → 093139a`，用例 **485 → 502**，登记 **gen-37**）
+
+### 35.1 是否存在未处理的 issue / PR（step 1）
+
+```text
+$ gh issue list --state open --limit 50   → 101  OPEN  Add dsh-ros2 to awesome-ai-plugins?
+$ gh pr   list --state open --limit 30    → 102  OPEN  feat(common): judge bundle staleness by content…
+$ git ls-remote --heads origin            → 只有 main（1 条）
+```
+
+⇒ **1 open issue / 1 open PR**，两者都不是空转：#101 是外部列表的收录邀约（step 2 要判），
+#102 是**上一轮被中断的会话留在远端**的在途实现（5/5 绿、未合入）。
+
+### 35.2 step 2：#101 的建议**合理但不必要，且文案与实测不符**
+
+邀约本身（把 dsh-ros2 加进 `hashgraph-online/awesome-ai-plugins`）的准入判据是**客观可查**的，
+所以本轮没有"凭感觉同意/不同意"，而是把 CONTRIBUTING 里针对 DSH 的三条要求逐条量了：
+
+| 列表要求（CONTRIBUTING「DeepSeek Harness submissions」） | 本仓库实测 | 结论 |
+| --- | --- | --- |
+| 包必须暴露 `apply(ctx)` 入口 | `packages/{core,moveit,profile,safety,vision,dsh-ros2}/src/index.ts` 全部 `export function apply(...)`（vision 是 `async`） | ✅ |
+| `package.json` 声明可安装的 `dsh.bundle` | 7 个包有 `dsh.bundle.patch`（`common`/`sidecar` 是纯库，正确地没有） | ✅ |
+| README 里写明包名或 `dsh plugin add` 命令 | `README.md:73` 逐字为 `dsh plugin --profile <profile> add dsh-ros2` | ✅ |
+
+**但它给的条目文案有两处错**，两处都能用本仓库自己的数字否掉：
+
+1. **"83 tools"是默认安装拿不到的数字**。活进程 `ros2_env_check` 的 `totalTools` 是 **81**
+   （core 61 + moveit 4 + profile 4 + safety 5 + vision 7）。83 = 81 + `dsh-ros2-state` 的
+   `state_get`/`state_snapshot` 两个工具，而 state **故意不在聚合包的 patch 里**（issue #68 的决定，
+   `README_CN.md:76` 自己写着"使工具总数从 81 达到 83"）。照抄这条文案，等于对外宣称一个
+   **装完不会有**的数字。
+2. **`<!-- platform: standalone -->` 是错的平台标记**。CONTRIBUTING 把这个标记留给
+   "native applications and standalone CLIs"，而本包是 DSH cordis bundle（`dsh.bundle` + `apply(ctx)`），
+   应进 **DeepSeek Harness Plugins** 子区并带 `install_url`。打上 standalone 会把安装入口一起丢掉。
+
+⇒ **判据**：合理（DSH 有专区、三条准入客观且全部满足）；**不必要**（纯外部收录，对代码零影响，
+不是缺陷）；**不可照抄**（数字要写 81 / 或明写"81 + 可选 state 2 个"，平台标记要去掉）。
+**本轮动作**：把复核结论与更正后的条目文案贴回 issue #101；**对第三方仓库开 PR 属对外动作，
+留给运维决定**（本仓库不改一行代码去"实现"一个外部收录）。
+
+### 35.3 第二十九轮交接闭环（§34.11 逐条，含**能力边界**）
+
+| # | §34.11 判据 | 本轮实测 | 结论 |
+| --- | --- | --- | --- |
+| 1 | 新 PID + journal `loaded (graceful restart …)` | journal 逐字：`Nov 06 04:15:47 restart requested (gen 34)` → `04:20:47 soft defer deadline reached` → `04:23:05 agent idle; executing deferred restart (gen 34)` → `04:23:17 loaded`，PID **1506303** | ✅ **gen-36 已落地**（另有 Nov 09 的三次 `loaded`：19:13/19:20/19:25，其中 19:20 是 `systemd` 的 `Scheduled restart job`；本轮开工活进程为 PID **2019**） |
+| 2 | F1：小错误保持完整、不出现 `ingress:` 告警 | `ros2_lifecycle get /nonexistent_node_for_round30` → `error.message` 逐字 `Node not found`、**无** `ingress:` 告警 | ✅ |
+| 3 | F2：`chmod 0775` 后下一条命令收紧回 `0700` 且 note 只报一次 | **本轮无法在活进程上复测**：本会话的 bash 跑在 `bwrap --unshare-pid --tmpfs /tmp` 里（`/` 只读、`/tmp` 是私有 tmpfs）⇒ 既 `chmod` 不到宿主 `/tmp/dsh-ros2-log`，也看不到宿主 `/tmp` 的内容 | 未在活进程复测；判据由 `ros-log-dir-rerun.spec.ts`（3 例）覆盖，**如实登记**而不是写成"已验" |
+| 4 | F3：换成符号链接 ⇒ 下一条命令 `已拒绝…` 且变量被移除 | 同 #3 的边界 | 同上 |
+
+> 这条边界值得写进 §6：**"验收判据能不能在本会话执行"本身要先判一次**。前几轮 bash 没有 PID/`tmpfs`
+> 隔离，`ls -ld /tmp/dsh-ros2-log` 是可见的；本轮它不可见——同一句"实测"换了一个沙箱就变成假话。
+
+### 35.4 在途 PR #102：先逐条复算，再合入
+
+#102（内容指纹）来自一个被中断的会话：远端 5/5 绿、本地未验。本轮**不因为 CI 绿就合**：
+
+```text
+$ pnpm run typecheck            → 10/10 ✅
+$ pnpm -r test                  → 485 passed + 1 pty-skip ✅（PR 自称 485，逐字相符）
+$ 撤门实测（faithful 还原成"只比版本"）：bundles.spec.ts → 3 failed | 23 passed
+```
+
+⇒ PR 描述里的可证伪声明（"3 条变红"）**独立复现成功**，合入：`main 1221a1a → b5583fc`。
+
+合入后立刻做了一次**活进程对照**（同一份编译产物，只改一个字节）：
+
+| 动作 | `ros2_env_check` 结果 |
+| --- | --- |
+| 干净 `pnpm build`（同字节重建） | 六个 bundle `contentDrifted: false` ⇒ "同字节重建不算陈旧"**成立** |
+| 往 `packages/core/lib/tools.js` 追加一个字节 | `dsh-ros2-core` → `contentDrifted: true`、`stale: true` + 告警 ⇒ 机制**成立** |
+| 往 **`packages/common/lib/toolkit.js`** 追加一个字节 | 六个 bundle **全部 `contentDrifted: false`** ⇒ **F1：机制对它自己要修的形态是瞎的** |
+
+### 35.5 F1【已修·真实·实测】内容指纹没盖它加载的共享库
+
+**为什么瞎**：指纹 = `<bundle>/lib/**` + 该包两个根清单。而第二十八、二十九轮的三处活进程修复
+**全部落在 `packages/common/lib/*.js`**，且 `dsh-ros2-common` 是纯库、**从不挂载** ⇒ 它永远不出现在
+`loaded`/`drift` 里，任何"自己的字节"哈希都不可能因它而动。**#102 只闭了问题的小半边，
+而它的文档示例恰好把不能出现的那一行（`dsh-ros2-common`）当成了 drift 条目。**
+
+**修法（PR #103）**：指纹额外覆盖**声明为依赖的共享运行库**（`dsh-ros2-common` 的 `lib/**` +
+`package.json`），于是"改共享库"会报在**加载它的每个 bundle** 上。解析走**手写
+`<祖先>/node_modules/<name>/package.json` 向上查找**，不用 `require.resolve`，三条理由都在代码注释里：
+`exports` 映射、`NODE_PATH`/全局目录、**以及测试运行器会替换它**——本轮实测一个"故意装不上"的
+夹具在 vitest 下**解析成功**了（被替换成工作区副本），正是这个函数必须报的那一种情形。
+声明了却解析不到 ⇒ 指纹 `null`（无法判断），**不**降级成"没变"。
+
+**验收**（合入前，本地）：`pnpm -r test` **485 → 490**（+5）；把共享库那半边撤掉 ⇒ **3 红**（实测）。
+`docs/versioning.md` 的示例一并改正（那行本来不可能出现）。
+
+### 35.6 F2【已修·真实】入口闭合点漏了**住在 `common` 里的** L1 适配器
+
+第二十九轮把判据挪进工厂（`defineRos2Tool`）并写下"六个包的 52 个调用点全部经它构建 ⇒ 新工具
+**结构上**不可能绕过"。那句不变量由 `finalize.spec.ts` 的一个**静态扫描**守着，而它 `continue` 掉了
+`common` 包——`ros2Tool`（L1 适配器）恰好住在 `common` 里，用 `defineTool` 自建结果，
+**失败分支从不经过 finalizer**：
+
+```ts
+message: res.error   // 被 kill 或超 buffer 的子进程 stderr，上界 MAX_BUFFER = 16 MiB，无字符判据
+```
+
+`ros2Tool(` 的调用点是 **32** 个（约占 81 个工具的四成）。**修法（PR #104 的一半）**：适配器改经
+`defineRos2Tool` 构建；新增行为用例（1 MiB 错误 ⇒ 收窄到 8 KiB 级 + `ingress:` 告警 + `\x1b`/`U+202E` 被移除）。
+**撤门**：把适配器改回 `defineTool` ⇒ **1 红**（实测）。
+
+### 35.7 F3【已修·真实】`envNote` 是一条只有失败才亮的通道
+
+`runCommand()` 一直产出 `envNote`（配置的 `ROS_LOG_DIR` 被收紧/被拒绝、`rosSetup` 没 source 上），
+但**只有失败结果**把它带给模型（折进 `error.message`）。成功调用上**零消费者**：L1 适配器成功分支
+只带 `tail(stderr)`，手写工具从不读 `res.envNote`。于是第二十八轮的验收判据"工具结果里出现收紧说明"
+在成功调用上**不可观测**，第二十九轮为此不得不**故意制造一次失败**。
+
+**修法（PR #104 的另一半）**：新增 `packages/common/src/env-notes.ts`——`runCommand()` 在成功路径把说明
+**报告给当前工具调用**（`AsyncLocalStorage` sink；模块级数组会把 A 调用的环境算到 B 的结果上），
+`defineRos2Tool` 收集后折进 `warnings`；L1 适配器另外直接把 `res.envNote` 附在成功结果上，
+两条通路按同一字符串去重。**没有改一个调用点**——判据落在工厂，而不是"记得读它的每个工具"。
+
+**边界（写进 `docs/safety.md` §3.3）**：后台任务 / 启动探针不在工具调用上下文里，那里的说明仍然丢失；
+持久性配置错误（如 `rosSetup` 未设）会**每次**成功调用都报一次——那是状态，不是一次性事件。
+
+**验收**：`env-notes.spec.ts` **+9**，其中一条**真的跑 `runCommand`**（fresh 0775 目录 ⇒ 调用成功
+**且**结果里说"已收紧"）。撤门：去掉工厂里的收集 ⇒ **4 红**；适配器绕过工厂 ⇒ **1 红**（均实测）。
+
+### 35.8 F4【已修·真实·本轮最有价值的发现】后台任务输出是唯一不经过工具结果的入口面
+
+前八轮的"执行面 × 审批面"都在问"能不能执行/写/外发"，第九轮问"进模型的字节谁看过"，
+本轮把那张表换成**通道清单**：**把每一条"字节进模型"的路径列出来，逐条问它过没过判据。**
+工具结果过了（工厂）；**任务输出没有**——`spawnJob()` 的 `readOutput()` 直接交给 harness 的 jobs 通道。
+
+**实测（就在这台机器上，用本会话自己的后台 job）**：
+
+```text
+$ 后台 job: python3 -c "print('\x1b[31mRED\x1b[0m \u202eEVIL ' * 4000)"
+$ job_output → 约 70 KiB，ESC 与 U+202E **逐字**到达对话，**无任何告警**
+                （体积被 harness 的 spill 机制切了一刀：14354 字节转存文件）
+```
+
+⇒ 即"字符类判据"在这条通道上**完全缺席**；体积也不是本仓库的 256 KiB/结果，而是 harness 的 spill。
+从本插件可达的入口：`ros2_colcon_build` / `ros2_launch` / `ros2_run --background` / `ros2_bag_record`
+——colcon 与节点日志正是这种流。
+
+**修法（PR #105）**：`readOutput()` 交付前套用**字符判据**（`sanitizeText`），被改动时附一条 `ingress:`
+说明（删减过的日志不能看起来像原文）。**体积刻意不动**（仍 `outputLimitBytes` = 8 MiB）：构建日志本来就长，
+且 harness 有自己的 spill 上限；这一处**只补"字符"这半边**，并把这条边界写进 `docs/safety.md`。
+**判据落在产出侧**，因为下游怎么消费 jobs 通道不归本仓库管。
+
+**验收**：`job-output.spec.ts` **+3**（剥掉 ESC/方向字符并给出说明、干净输出不改变、stdout/stderr 分隔保留）；
+把 `readOutput()` 还原成未加工形态 ⇒ **1 红**（实测）。
+
+### 35.9 安全扫描（同口径）
+
+| 面 | 结果 | 与上一轮 |
+| --- | --- | --- |
+| 供应链审计（`pnpm run audit` / `audit:dev-high` / `audit:all`） | `No known vulnerabilities found` ×3（脚本钉权威 `registry.npmjs.org`） | 不变 |
+| 密钥（tracked 文件） | **0 条真密钥**；命中仍只有**本维护文档自己**引用的 `-----BEGIN OPENSSH PRIVATE KEY-----` 字面量（第二十二轮测试用例的引用） | 不变 |
+| 发布面（9 包 `pnpm pack` + 解包检查） | **9/9 CLEAN**：`lib/index.js`（或 `scripts/`）在、**0 个 `.pyc`/`__pycache__`**；本轮新增的三个测试文件不进包 | 不变 |
+| **CodeQL open** | **0**（`gh api …/code-scanning/alerts?state=open` 读到） | 不变 |
+| **Dependabot open** | **0**（open PR 同为 0） | 不变 |
+| 远端分支 | `origin` **1 条**（`main`）；本轮三个 PR 均 `--delete-branch` 合入 | 不变 |
+| `~/.dsh-ros2` 权限 | `0700`（目录）/`0700`（`robots/`）/`0600`（`lite.yaml`、`zero-pose.yaml`、`secrets.json`） | 不变 |
+| 直接 `defineTool` 的调用点 | **1 处**（`toolkit.ts` 的工厂自身）——F2 修好后，"绕过闭合点"的构建路径在代码里只剩这一个入口 | **改进**（本轮之前是 2 处：工厂 + L1 适配器） |
+| `/tmp` 残留、配置 `ROS_LOG_DIR` 的实际权限 | **本轮测不到**（bash 在 `--unshare-pid` + `--tmpfs /tmp` 的沙箱里，宿主 `/tmp` 不可见） | **能力边界**，如实登记 |
+| 后台任务输出（新面） | 修复前言：字符类**零判据**（实测 70 KiB 原始 ESC/U+202E）；修复后：判据在 `readOutput()` | **本轮修复项** |
+
+### 35.10 开发管理（分支 + 规范提交 + 真 PR + CI 绿）
+
+| 项 | 值 |
+| --- | --- |
+| 接手 | `feat/round-30-content-fingerprint` → 复算后 **PR #102** 合入（`1221a1a → b5583fc`） |
+| 分支 1 | `fix/round-30-shared-lib-fingerprint` → **PR #103**（`307a345` `fix(common): fingerprint the shared library a bundle loads, not just its own lib`） |
+| 分支 2 | `fix/round-30-envnote-success` → **PR #104**（`f3b208d` `fix(common): close the L1 adapter's failure branch, and report env notes on success`；CHANGELOG 与 #103 冲突，`merge main` 后手工合并） |
+| 分支 3 | `fix/round-30-job-output-ingress` → **PR #105**（`e54a0ff` `fix(common): the jobs channel is an entry surface too — strip control characters from job output`；从堆叠分支 `rebase --onto main` 独立） |
+| 本地门（CI 同口径） | 每个 PR 各自 `typecheck` 10/10 ✅ · `pnpm -r test` ✅（490 / 494 / 502） · `build` ✅ · 发布面 9 包 ✅ |
+| **PR CI** | #103 **5/5 绿** · #104 **5/5 绿**（首跑 `CodeQL` skipping、`analyze` pending，等齐后 5/5） · #105 **5/5 绿** |
+| 合入 | 均 `--merge --delete-branch`；`main` `1221a1a → b5583fc → d496a95 → 3b16bb6 → 093139a` |
+
+> 与第二十九轮同样的提醒：**PR 绿不包含供应链审计**（`audit.yml` 只在 `push: main` / `schedule` / `dispatch` 触发）。
+
+### 35.11 step 4：dsh-phoenix 循环与 **gen-37**
+
+**要不要重载：要。** 三个修复全部落在活进程的必经之路：`toolkit.js`（每个工具结果）、
+`runner.js`（每条命令 + 任务输出）、`bundles.js`（每次报告）。而活进程的 `node_modules/dsh-ros2-*`
+是指向本仓库 `packages/*` 的符号链接 ⇒ build 完磁盘是新代码，**PID 2019 内存里仍是旧代码**。
+
+**实际执行**（与第二十八/二十九轮同一路径：经动态 Host 插件取 `dsh.phoenix`，journal 逐字）：
+
+```text
+[cordis:phnx-1] [r30] phoenix mounted; typeof canRestart = function
+[dsh-phoenix]    restart requested (gen 35): round 30: make the shared-lib fingerprint, the L1 finalizer
+                 + env-note channel and the job-output character rule live (gen-37)
+[cordis:phnx-1] [r30] requestRestart returned undefined
+[dsh-phoenix]    restart already in-flight; coalesced plugin-change
+```
+
+⇒ 请求已发出、按 idle-aware 策略在**空闲边界**执行（本轮收工时活进程仍是 PID 2019；
+`journalctl … | grep -c "executing deferred restart"` = 0）。与第二十八/二十九轮一致：返回值为
+`undefined`，受理凭据只能从 journal 读；`canRestart` 仍是**函数**不是布尔。
+
+**验收判据（重载后逐条复测，写给下一轮）**：
+
+1. `journalctl --user -u dsh-web --since "-15 min" | grep "loaded (graceful"` → 新的一行，PID 不是 2019。
+2. `ros2_env_check` → 六个 bundle `contentDrifted: false`（新算法下**干净基线**）。
+3. **F1（关键）**：往 `packages/common/lib/*.js` 追加一个字节（`lib/` 是构建产物，不入库，重跑 build 即可复原）
+   → 六个 bundle **全部** `contentDrifted: true` + `stale: true` + 内容漂移告警。
+   **本轮修复前该动作的结果是六个全 `false`**（§35.4 表格最后一行）。
+4. **F4**：起一个后台任务打印 `ESC` + `U+202E`（`ros2_run --background` 或本会话的 bash job），
+   读回输出 → 不再含 `\x1b`/`U+202E`，且带一行 `ingress:` 说明。
+5. **F3**：一次**成功**的 `ros2_*` 调用若触发了环境收紧，结果里应出现 `[env] … 已收紧`（一次性）。
+
+### 35.12 用例与自检基线
+
+| 面 | 上一轮 | 本轮 |
+| --- | --- | --- |
+| vitest（全量） | 479（478 + 1 pty-skip） | **502（501 + 1 pty-skip）**，**+23** = #102 +6（合入前已存在）· #103 +5（`bundles.spec.ts` 共享库）· #104 +9（`env-notes.spec.ts`）· #105 +3（`job-output.spec.ts`） |
+| 逐包（收工） | core 166 / vision 64 / common 156 / dsh-ros2 29 / moveit 21 / state 19 / profile 14 / safety 10 | core **166**（+1 skip）/ vision **64** / common **179** / dsh-ros2 **29** / moveit **21** / state **19** / profile **14** / safety **10** |
+| Python 自检 | 101 项 | **101 项**（不变） |
+| sidecar 自检 | 19 场景 | **19 场景**（不变） |
+| 撤门实测（可证伪） | 3 / 2 / 1 | #102 **3** · #103 **3** · #104 **4**（收集）/ **1**（适配器绕过） · #105 **1** |
+
+### 35.13 结论与教训
+
+- **step 2 的值不在"同意/不同意"，而在"把准入判据逐条量一遍"**：#101 的三条要求全部满足，
+  但它给的文案有两处能被本仓库自己的数字否掉（83 → 81；standalone 标记用错）——照抄就是对外错报。
+- **四个真实缺陷全部来自"通道清单"，没有一个来自扫描器**：把"字节进模型"的路径一条条写出来
+  （工具结果 / 任务输出 / 告警 / 错误），逐条问"它过没过判据"，比再扫一遍依赖图产出高。
+- 值得记住的形状四条：
+  1. **不变量要问"它扫的是哪个目录"**（F2：静态断言 `continue` 掉了 `common`，而适配器就住在那儿）；
+  2. **闭点要问"它闭的是哪一半"**（F1：指纹闭了 bundle 自己的字节，没闭它加载的共享库——
+     而后者才是本仓库的修复热点；文档示例还把不可能出现的那一行写成了正常输出）；
+  3. **判据落在产出侧还是消费侧，要先问"消费侧归不归你管"**（F4：jobs 通道的消费在 harness 里，
+     所以判据放进 `readOutput()`，体积只标边界、不假装收口）；
+  4. **"实测"要先判"本会话能不能测"**（§35.3 #3/#4：bash 沙箱换成 `--unshare-pid` + `--tmpfs /tmp` 之后，
+     宿主的 `/tmp` 与 PID 都不可见——同一句话换一个沙箱就变成假话，必须如实降级成"未复测"）。
+- **测试夹具会被运行器"帮倒忙"**：`require.resolve` 在 vitest 下把"故意装不上"的共享库
+  解析成了工作区副本，差点让"解析不到"这条判据**永远绿**。判据要用**自己控制的原语**（`existsSync` 走
+  `node_modules` 链），不要用运行时/工具链的解析器。
+- 遗留（写进 §5/§6，不私藏）：gen-37 重载在**空闲边界**执行，落地情况由下一轮按 §35.11 复测 ·
+  `envNote` 在任务/启动探针上下文里仍丢失 · jobs 通道的体积判据仍未做（有意）·
+  #101 的对外 PR 留给运维。
