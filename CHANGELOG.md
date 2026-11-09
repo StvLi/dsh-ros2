@@ -185,6 +185,26 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 
 ### Fixed
 
+- **闭合点漏了 L1 适配器，环境诊断只在失败路径可见**（第三十轮；§5 登记了这条"一行小改"，
+  量下去发现是两处）。两处同源，都是**"不变量扫的是哪个目录"**没问：
+  1. 第二十九轮把入口判据挪到工厂（`defineRos2Tool`）并断言"六个包的 52 个调用点全部改成经它构建，
+     于是某个新工具忘了调用判据在结构上不可能发生"——而那条不变量测试**跳过 `common` 包**，
+     L1 适配器 `ros2Tool` 恰好住在 `common` 里：它用 `defineTool` 自建结果，**失败分支**
+     `error.message = res.error`（被 kill / 超 buffer 的子进程 stderr，上界 `MAX_BUFFER` = 16 MiB）
+     **不过 finalizer**。受影响的是 **32 个** L1 工具（`ros2Tool(` 调用点计数）。
+     现在适配器经 `defineRos2Tool` 构建，并有一条行为用例：1 MiB 错误 ⇒ 收窄到 8 KiB 级 +
+     `ingress:` 告警 + `\x1b`/`U+202E` 被移除；把适配器改回 `defineTool`，该用例当场变红。
+  2. `runCommand()` 一直产出 `envNote`（配置的 `ROS_LOG_DIR` 被收紧/被拒绝、`rosSetup` 没 source 上），
+     但**只有失败结果**会把它带给模型（折进 `error.message`）。成功调用上零消费者：L1 适配器成功分支
+     只带 `tail(stderr)`，手写工具从不读 `res.envNote` —— 于是第二十八轮的验收判据"工具结果的
+     `envNote` 里出现收紧说明"在成功调用上**不可观测**，第二十九轮为此不得不故意制造一次失败。
+     现在新增 `packages/common/src/env-notes.ts`：`runCommand()` 在成功路径把说明报告给**当前工具调用**
+     （async-local sink），`defineRos2Tool` 收集后折进 `warnings`；L1 适配器另外把 `res.envNote`
+     直接附在成功结果上，两条通路按同一字符串去重。**边界**：后台任务 / 启动探针不在工具调用上下文里，
+     那里的说明仍然丢失（如实写进 `docs/safety.md` §3.3）；持久性配置错误（如 `rosSetup` 未设）会每次
+     成功调用都报一次——那是状态，不是一次性事件。
+  用例 **485 → 494**（`env-notes.spec.ts` +9）；撤掉工厂里的收集 ⇒ **4 红**，把适配器改回
+  `defineTool` ⇒ **1 红**（均为实测）。
 - **内容指纹只盖了 bundle 自己的 `lib/`，没盖它加载的共享库**（第三十轮；上一条落地后当场量出来的
   另一半）。改动 `packages/common/lib/*.js` 时六个 bundle 一律 `contentDrifted: false` ——而这正是
   第二十八、二十九轮三处修复落地的位置：`dsh-ros2-common` 是纯库、**从不挂载**，不会出现在

@@ -5,6 +5,7 @@ import { accessSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync,
 import { tmpdir } from 'node:os'
 import { expandShellWord, parseSourceWord, resolveSourcePath } from './shellword.js'
 import { ensurePrivateRuntimeDir, isUnderTempRoot } from './runtime-dir.js'
+import { noteEnvObservation } from './env-notes.js'
 
 export interface RosResult {
   ok: boolean
@@ -309,6 +310,14 @@ export async function runCommand(bin: string, args: string[], opts: RunOptions =
     const { stdout, stderr } = setup.prefix
       ? await execFileP('bash', ['-lc', cmd], baseOptions)
       : await execFileP(bin, args, baseOptions)
+    // Report the observation to the running tool, not only to the failure path.
+    // Before round 30 a rewritten/refused ROS_LOG_DIR was invisible on every
+    // SUCCESSFUL call: nothing read `res.envNote` (the L1 adapter dropped it and
+    // the hand-written tools never looked). The tool factory folds whatever is
+    // reported here into `warnings`, so the sentence lands next to a result that
+    // worked — which is exactly when an operator needs to know the environment
+    // was rewritten underneath it.
+    if (envNote) noteEnvObservation(`[env] ${envNote}`)
     return {
       ok: true, command, stdout, stderr, exitCode: 0, timedOut: false, durationMs: Date.now() - startedAt,
       sourceOk: true,
