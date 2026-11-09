@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import {
   type LoadedBundle,
   bundleDriftReport,
@@ -50,6 +50,45 @@ function tempBuiltPackage(
 
 function bundle(name: string, version: string, packageJsonPath: string): LoadedBundle {
   return { name, version, packageJsonPath }
+}
+
+/**
+ * A bundle-shaped temp package that DEPENDS on the shared runtime library, with
+ * a real `node_modules/dsh-ros2-common` next to it — the install shape Node
+ * resolves, without needing pnpm.
+ *
+ * `sharedLibFile` is the file nothing in the bundle's own directory shares: it
+ * is where this repo's live-process fixes actually land (rounds 28/29), so it is
+ * the byte a fingerprint has to notice.
+ */
+function tempBundleWithSharedLib(
+  name: string,
+  version: string,
+  options: { declareDependency?: boolean; materialiseShared?: boolean } = {},
+): {
+  dir: string
+  packageJsonPath: string
+  libFile: string
+  sharedLibFile: string
+} {
+  const { dir, packageJsonPath } = tempPackage(name, version)
+  const manifest = options.declareDependency === false
+    ? { name, version }
+    : { name, version, dependencies: { 'dsh-ros2-common': 'workspace:^0.1.0' } }
+  writeFileSync(packageJsonPath, JSON.stringify(manifest))
+  const lib = path.join(dir, 'lib')
+  mkdirSync(lib, { recursive: true })
+  const libFile = path.join(lib, 'index.js')
+  writeFileSync(libFile, 'export const build = 1\n')
+
+  const sharedRoot = path.join(dir, 'node_modules', 'dsh-ros2-common')
+  const sharedLibFile = path.join(sharedRoot, 'lib', 'toolkit.js')
+  if (options.materialiseShared !== false) {
+    mkdirSync(path.join(sharedRoot, 'lib'), { recursive: true })
+    writeFileSync(path.join(sharedRoot, 'package.json'), JSON.stringify({ name: 'dsh-ros2-common', version: '0.1.1' }))
+    writeFileSync(sharedLibFile, 'export const finalize = 1\n')
+  }
+  return { dir, packageJsonPath, libFile, sharedLibFile }
 }
 
 afterEach(() => {
@@ -181,6 +220,69 @@ describe('content fingerprint (round 30)', () => {
     const unreadableLib: LoadedBundle = { name: 'dsh-ros2-gone', version: '0.1.0', packageJsonPath: '/x/gone/package.json', fingerprint: 'sha256:0000000000000000' }
     const compared = compareBundles([noFingerprint, unreadableLib], () => '0.1.0', () => null)
     expect(compared.map((d) => 'contentDrifted' in d)).toEqual([false, false])
+  })
+})
+
+/**
+ * The shared library half (round 30, after the first pass landed).
+ *
+ * Hashing a bundle's own `lib/` answers "did THIS package's build change". Every
+ * round-28 and round-29 live-process fix changed `packages/common/lib/*.js`
+ * instead, and `dsh-ros2-common` is a pure library — it never mounts, so it never
+ * appears in `loaded`/`drift` and no own-bytes hash could ever move. Measured on
+ * the live process before this was fixed: one extra byte in
+ * `packages/common/lib/toolkit.js` left all six bundles at
+ * `contentDrifted: false` / `stale: false`.
+ */
+describe('content fingerprint covers the shared library a bundle loads', () => {
+  it('moves when dsh-ros2-common changes, with the bundle\'s own lib untouched', () => {
+    const pkg = tempBundleWithSharedLib('dsh-ros2-core', '0.1.5')
+    const first = contentFingerprint(pkg.packageJsonPath)
+    expect(first).toMatch(/^sha256:[0-9a-f]{16}$/)
+    expect(contentFingerprint(pkg.packageJsonPath)).toBe(first)
+
+    // The bundle's own bytes are identical; only the library it imports changed.
+    writeFileSync(pkg.sharedLibFile, 'export const finalize = 2\n')
+    const afterShared = contentFingerprint(pkg.packageJsonPath)
+    expect(afterShared).not.toBe(first)
+  })
+
+  it('reports content drift for a shared-library-only change (the round-28/29 shape)', () => {
+    const pkg = tempBundleWithSharedLib('dsh-ros2-core', '0.1.5')
+    const asLoaded: LoadedBundle = { name: 'dsh-ros2-core', ...readOwnVersion(pathToFileURL(pkg.libFile).href) }
+    expect(compareBundles([asLoaded]).map((d) => d.contentDrifted)).toEqual([false])
+
+    writeFileSync(pkg.sharedLibFile, 'export const finalize = 3\n')
+    expect(compareBundles([asLoaded])).toEqual([
+      { name: 'dsh-ros2-core', loaded: '0.1.5', installed: '0.1.5', drifted: false, contentDrifted: true },
+    ])
+  })
+
+  it('answers null, never "unchanged", when a declared shared library cannot be resolved', () => {
+    // Declared but not installed: the fingerprint cannot judge the bytes that
+    // would actually run, so it must not claim they are the ones it recorded.
+    const pkg = tempBundleWithSharedLib('dsh-ros2-core', '0.1.5', { materialiseShared: false })
+    expect(contentFingerprint(pkg.packageJsonPath)).toBeNull()
+    const compared = compareBundles([
+      { name: 'dsh-ros2-core', version: '0.1.5', packageJsonPath: pkg.packageJsonPath },
+    ])
+    expect('contentDrifted' in compared[0]!).toBe(false)
+  })
+
+  it('resolves the shared library from the real workspace layout', () => {
+    // dsh-ros2-core depends on dsh-ros2-common, and the workspace ships the link
+    // (`packages/core/node_modules/dsh-ros2-common`). If that walk breaks, this
+    // returns null ("cannot judge") instead of a fingerprint — red here first.
+    const coreManifest = fileURLToPath(new URL('../../core/package.json', import.meta.url))
+    expect(contentFingerprint(coreManifest)).toMatch(/^sha256:[0-9a-f]{16}$/)
+  })
+
+  it('leaves a package that declares no shared library judged by its own bytes', () => {
+    const pkg = tempBundleWithSharedLib('dsh-ros2-libonly', '0.1.0', { declareDependency: false })
+    const first = contentFingerprint(pkg.packageJsonPath)
+    expect(first).toMatch(/^sha256:/)
+    writeFileSync(pkg.libFile, 'export const build = 2\n')
+    expect(contentFingerprint(pkg.packageJsonPath)).not.toBe(first)
   })
 })
 

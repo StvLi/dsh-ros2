@@ -161,7 +161,7 @@ ros2_doctor                         # system health report
 | `ros2_topic_info` | `ros2 topic info <topic> [-v]` | Topic metadata / QoS |
 | `ros2_topic_echo` | `ros2 topic echo <topic> --once` | One message sample (JSON when possible); `--qos-reliability` / `--qos-durability` overrides reach TRANSIENT_LOCAL latched topics |
 | `ros2_topic_hz` | `ros2 topic hz <topic> [--window N]` | Measure publish frequency (average/min/max/std dev over the window); natural termination = measurement timeout |
-| `ros2_env_check` | resolved-setup probe | Self-check the environment: which setup is sourced, path existence, visible packages/nodes. Also reports loaded-vs-disk bundle drift **by version and by content fingerprint** (`stale` no longer trusts the version string) |
+| `ros2_env_check` | resolved-setup probe | Self-check the environment: which setup is sourced, path existence, visible packages/nodes. Also reports loaded-vs-disk bundle drift **by version and by content fingerprint** — a bundle's own `lib/**` *plus the shared `dsh-ros2-common` library it loads*, so a rebuild that changes no version number is still visible |
 | `ros2_workspace` | `source <ws>/install/setup.bash &&` | Switch/show the workspace in-session (use/show/reset) — no config edit, no restart. `use` **requires approval**: sourcing the file *executes* it, and the override then applies to every later command |
 | `ros2_topic_bw` / `ros2_topic_delay` | `ros2 topic bw|delay <topic>` | Measure topic bandwidth / end-to-end delay; timeout-terminated |
 | `ros2_service_list` | `ros2 service list -t` | Services with types |

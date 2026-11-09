@@ -37,6 +37,17 @@
  * now also records a *content* fingerprint of what it loaded, and the report
  * recomputes it from disk: identical bytes cannot be "old code", different
  * bytes cannot be "current code", whatever the version string says.
+ *
+ * The fingerprint covers the bundle's own `lib/` **and the shared library it
+ * loads** (`dsh-ros2-common`). Hashing only the bundle's own directory closed
+ * the smaller half and left the shape this repo actually produces: every
+ * round-28 and round-29 live-process fix landed in `packages/common/lib/*.js`,
+ * and `dsh-ros2-common` is not a mountable bundle — it never appears in
+ * `loaded`/`drift`, so no bundle's own-bytes hash could move when it changed.
+ * Measured before that was fixed: appending a byte to
+ * `packages/common/lib/toolkit.js` left all six bundles `contentDrifted: false`,
+ * while appending the same byte to `packages/core/lib/tools.js` turned
+ * `dsh-ros2-core` true.
  */
 import { createHash } from 'node:crypto'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
@@ -153,6 +164,23 @@ export function readOwnVersion(moduleUrl: string): { version: string; packageJso
 /** Root manifests that decide what a package mounts, alongside its `lib/`. */
 const ROOT_MANIFESTS = ['package.json', 'cordis.patch.yml'] as const
 
+/**
+ * Pure libraries a bundle imports at runtime: their bytes decide the bundle's
+ * behaviour, so they belong in the bundle's fingerprint.
+ *
+ * `dsh-ros2-sidecar` is deliberately absent — it is a Python daemon reached
+ * over IPC, not a module a bundle loads, and no `lib/` of it decides what the
+ * mounted code does.
+ */
+const SHARED_RUNTIME_PACKAGES = ['dsh-ros2-common'] as const
+
+/** One file that participates in a fingerprint. */
+interface FingerprintFile {
+  /** Stable, collision-free label — the first thing hashed. */
+  readonly label: string
+  readonly absolute: string
+}
+
 /** Every regular file under `dir`, depth-first, as paths relative to `root`. */
 function walkFiles(root: string, dir: string): string[] {
   const out: string[] = []
@@ -164,33 +192,107 @@ function walkFiles(root: string, dir: string): string[] {
   return out
 }
 
-/**
- * Content fingerprint of a package's runtime surface: every file under `lib/`
- * plus the root manifests, sorted so the value depends on the bytes and not on
- * `readdir` order. `null` when there is no `lib/` to judge (a source-only
- * checkout, or a fixture that only writes a package.json) — an answer of
- * "unknown", never "unchanged".
- */
-export function contentFingerprint(packageJsonPath: string): string | null {
-  const root = dirname(packageJsonPath)
+/** Runtime files of one package root (`lib/**` + its root manifests), or null. */
+function packageFiles(root: string, labelPrefix: string): FingerprintFile[] | null {
   const lib = join(root, 'lib')
   if (!existsSync(lib)) return null
-  let files: string[]
   try {
-    files = [
+    const files = [
       ...ROOT_MANIFESTS.filter((name) => existsSync(join(root, name))),
       ...walkFiles(root, lib),
     ].sort()
+    return files.map((file) => ({ label: `${labelPrefix}${file}`, absolute: join(root, file) }))
   } catch {
     return null
   }
+}
+
+/**
+ * Resolve a declared shared runtime package to its `package.json`.
+ *
+ * A plain `node_modules` walk, not `require.resolve`: the resolver follows the
+ * `exports` map (a library that stops exporting `./package.json` would turn
+ * "cannot judge" on for every bundle at once), it consults `NODE_PATH` and the
+ * global folders (a stray `~/.node_modules/dsh-ros2-common` must not stand in
+ * for the installed one), and it is what test runners patch — an unresolved
+ * package looked resolved under vitest because the runner substituted the
+ * workspace copy, which is exactly the case this function has to report.
+ *
+ * Walking `<ancestor>/node_modules/<name>/package.json` is what Node itself
+ * does, and it covers every layout this repo ships in: the pnpm workspace
+ * (`packages/core/node_modules/dsh-ros2-common`), the symlinked live install
+ * (`<profile>/node_modules/…`), npm/flat and pnpm's isolated store
+ * (`…/.pnpm/<pkg>/node_modules/<name>`).
+ */
+function resolveSharedPackageJson(name: string, fromPackageJson: string): string | null {
+  if (!isSafePackageName(name)) return null
+  let dir = dirname(fromPackageJson)
+  for (;;) {
+    const candidate = join(dir, 'node_modules', name, 'package.json')
+    if (existsSync(candidate)) return candidate
+    const parent = dirname(dir)
+    if (parent === dir) return null
+    dir = parent
+  }
+}
+
+/** Package names come from a manifest; keep the path join from being steered. */
+function isSafePackageName(name: string): boolean {
+  return /^[a-z0-9][a-z0-9._-]*$/.test(name)
+}
+
+/**
+ * Files of the shared runtime packages this package declares.
+ *
+ * Three answers, kept distinct on purpose (round 29's F3 lesson — "no answer"
+ * must not look like "nothing changed"):
+ *   - `undefined`: the package declares no shared runtime library, so there is
+ *     nothing to add (a fixture, or a pure library like this one);
+ *   - `null`: it declares one that cannot be resolved or read now, so the whole
+ *     fingerprint is unknown;
+ *   - files: what to hash.
+ */
+function sharedRuntimeFiles(packageJsonPath: string): FingerprintFile[] | null | undefined {
+  const deps = readPackageAt(packageJsonPath)?.dependencies
+  const declared = typeof deps === 'object' && deps !== null
+    ? SHARED_RUNTIME_PACKAGES.filter((name) => (deps as Record<string, unknown>)[name] !== undefined)
+    : []
+  if (declared.length === 0) return undefined
+  const files: FingerprintFile[] = []
+  for (const name of declared) {
+    const sharedPackageJson = resolveSharedPackageJson(name, packageJsonPath)
+    if (sharedPackageJson === null) return null
+    const own = packageFiles(dirname(sharedPackageJson), `${name}/`)
+    if (own === null) return null
+    files.push(...own)
+  }
+  return files
+}
+
+/**
+ * Content fingerprint of a package's runtime surface: every file under its
+ * `lib/` plus its root manifests, and the same two for any shared runtime
+ * library it declares (`dsh-ros2-common`), sorted so the value depends on the
+ * bytes and not on `readdir` order.
+ *
+ * `null` when there is nothing to judge — no `lib/` (a source-only checkout, or
+ * a fixture that only writes a package.json), or a declared shared library that
+ * cannot be read. An answer of "unknown", never "unchanged".
+ */
+export function contentFingerprint(packageJsonPath: string): string | null {
+  const root = dirname(packageJsonPath)
+  const own = packageFiles(root, '')
+  if (own === null) return null
+  const shared = sharedRuntimeFiles(packageJsonPath)
+  if (shared === null) return null
+  const files = [...own, ...(shared ?? [])].sort((a, b) => (a.label < b.label ? -1 : a.label > b.label ? 1 : 0))
   if (files.length === 0) return null
   const hash = createHash('sha256')
   for (const file of files) {
-    hash.update(file)
+    hash.update(file.label)
     hash.update('\0')
     try {
-      hash.update(readFileSync(join(root, file)))
+      hash.update(readFileSync(file.absolute))
     } catch {
       return null
     }
