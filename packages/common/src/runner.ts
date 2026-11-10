@@ -5,7 +5,7 @@ import { accessSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync,
 import { tmpdir } from 'node:os'
 import { expandShellWord, parseSourceWord, resolveSourcePath } from './shellword.js'
 import { ensurePrivateRuntimeDir, isUnderTempRoot } from './runtime-dir.js'
-import { ingressWarning, sanitizeText, type IngressReport } from './ingress.js'
+import { ingressWarning, newIngressReport, sanitizeText, type IngressReport } from './ingress.js'
 import { noteEnvObservation } from './env-notes.js'
 
 export interface RosResult {
@@ -626,7 +626,7 @@ export function spawnJob(bin: string, args: string[], opts: SpawnJobOptions = {}
 
 /** Strip the refused characters from captured job output, and say when it did. */
 function sanitizeJobOutput(text: string): string {
-  const report: IngressReport = { dropped: 0, droppedBidi: 0, truncated: 0, droppedBytes: 0, budgetHit: false }
+  const report: IngressReport = newIngressReport()
   const clean = sanitizeText(text, report)
   if (clean === text) return text
   const warning = ingressWarning(report)

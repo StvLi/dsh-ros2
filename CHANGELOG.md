@@ -185,6 +185,22 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 
 ### Fixed
 
+- **入口判据少了一整类字符：不渲染任何字形的"不可见载体"**（第三十一轮）。入口判据此前判两类：
+  控制字节（ESC/BEL/NUL/DEL/C1）与 bidi 覆盖（让文本按字节里没有的顺序渲染）。第三类同样在撒谎、
+  却**一个字都不渲染**：Unicode TAG 块（`U+E0000–U+E007F`）能把任意 ASCII 拼成一段显示为空白的文本
+  （"ASCII smuggling"），变体选择符补充（`U+E0100–U+E01EF`）可以把它藏在 emoji 后面，
+  `U+200B`/`U+2060`/`U+FEFF` 是同一类的日常变体。**实测**（判据上线前，用已构建的 lib）：把
+  `IGNORE ALL PREVIOUS` 逐字符映射进 TAG 码位后，整段**原样进入 `result.data`，且没有任何告警**
+  —— 阅读者看不出那里有字节，而模型仍然逐 token 读到它；同一批字节走 jobs 通道时也一样。
+  现在 `isDroppedChar()` 认这一类，报告新增 `droppedInvisible` 单独计数，告警里逐项写明
+  （`…其中 N 个不可见字符（Unicode 标签/变体选择符/零宽）`）。**故意保留** `U+200C`/`U+200D`
+  （波斯/印度文字的正字法、emoji 序列的结构）：判据保持窄，不做"看见就删"。
+  顺带把报告字面量收成一个导出工厂 `newIngressReport()`——两处手写零值字面量正是"新增计数项时
+  另一处悄悄不再计数"的形状。
+  用例 **+4**（`ingress.spec.ts` 3 例：TAG 块整段剥除且告警、零宽/变体选择符剥除且 ZWNJ/ZWJ 保留、
+  bidi 与不可见分开计数；`job-output.spec.ts` 1 例：后台输出里的 TAG 字符同样剥除并给说明）；
+  把新字符类撤掉，**4 条**当场变红。
+
 - **后台任务的输出是唯一不经过工具结果的入口面：控制在、方向字符也在**（第三十轮）。工具结果都过
   工厂的入口判据，而 `spawnJob()` 的 `readOutput()` 直接交给 harness 的 jobs 通道——那批字节
   **从不经过任何工具结果**。**本轮实测**（就在这台机器上，跑一个后台 job 打印 ESC + `U+202E`）：

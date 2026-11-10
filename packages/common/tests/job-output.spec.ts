@@ -37,6 +37,15 @@ describe('job output passes the character rule before it reaches the model', () 
     expect(output).toContain('方向覆盖字符')
   })
 
+  it('strips invisible carriers too — a tag character hides text, not bytes', async () => {
+    // U+E0049 (TAG LATIN CAPITAL LETTER I): UTF-8 f3 a0 80 89, renders as nothing.
+    const output = await capture(`printf 'visible\\363\\240\\200\\211 text\\n'`)
+
+    expect(output).not.toContain('\u{E0049}')
+    expect(output).toContain('visible')
+    expect(output).toContain('不可见字符')
+  })
+
   it('leaves clean output alone, with no marker', async () => {
     const output = await capture(`printf 'all good\\nsecond line\\n'`)
     expect(output).toContain('all good')
