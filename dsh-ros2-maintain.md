@@ -8368,7 +8368,7 @@ F1 修好后，`spawn` 一定成功（`bash` 存在），但**命令仍可能在
 | 发布面（9 包 `pnpm pack` + 解包检查） | **9/9 CLEAN**：`lib/index.js`（或 `scripts/`、`sidecar/`）在，**0 个 `.pyc` / `__pycache__`** | 不变 |
 | `~/.dsh-ros2` 权限 | `0700` 目录 / `0700 robots/` / `0600 robots/lite.yaml`、`0600 zero-pose.yaml` | 不变（第 27 轮收紧后未被放宽） |
 | **CodeQL open / Dependabot open** | **读不到**：匿名 `…/code-scanning/alerts`、`…/dependabot/alerts` 均 **HTTP 401**（token 失效） | **退化**（第 29 轮曾读到 0/0）。**注意：CI 里两个 `analyze` job 绿只证明"分析跑成功"，不是"0 告警"** |
-| 远端分支 | 收工 3 条（`main` + 2 条本轮分支），见 §36.9 | 第 30 轮是 1 条（main）：本轮多 2 条**待合入**分支 |
+| 远端分支 | **收工 1 条（`main`）**——三条工作分支全部合入后**逐条删除**（`git push origin --delete`，无需 token） | 不变（第 30 轮也是 1 条） |
 | 直接 `defineTool` 调用点 | **1 处**（工厂自身），与第 30 轮同 | 不变 |
 | 后台子进程（本轮新面） | 修复前：**5 个** spawnJob 点 + 1 个 GUI spawn 点全在 seam 外；修复后：`spawnJob` 不再导出，工具层只剩 `spawnRosJob` / `spawnRosShellJob` | **本轮修复项** |
 | 宿主 `/tmp/dsh-ros2-log` 的实际权限 | **测不到**（bash 在 `--unshare-pid` + `--tmpfs /tmp` 沙箱里；宿主 `/tmp` 不可见） | 能力边界（第 30 轮同） |
@@ -8485,7 +8485,7 @@ F1 修好后，`spawn` 一定成功（`bash` 存在），但**命令仍可能在
    否则第 30 轮 §35.11 的第 2/3 条永远测不成。
 3. **第 30 轮 §35.11 的第 4/5 条**（jobs 通道字符判据、成功路径的 `envNote`）本轮未在活进程复测——
    下一轮有了 `pid` 与 `settleJobStart` 之后更容易做（`ros2_run --background` 一次即可）。
-4. **`gh` token**：恢复后补两件事——① 读 CodeQL/Dependabot 的**真实**告警数（本轮只有 401）；
-   ② 顺手清掉远端 3 条已合入的分支（`git push origin --delete …` 无需 token，也可以现在就做）。
-   **PR #107 已自动 merged，无需人工 close**（§36.4）。
+4. **`gh` token**：恢复后补一件事——读 CodeQL/Dependabot 的**真实**告警数（本轮只有 401）。
+   远端分支本轮已清到只剩 `main`（`git push origin --delete` 无需 token）；**PR #107 已自动 merged**，
+   无需人工 close（§36.4）。
 5. **GUI 子进程的 setup 链**（F3 的边界）：需要"捕获 source 之后的 env"，属新设计。
