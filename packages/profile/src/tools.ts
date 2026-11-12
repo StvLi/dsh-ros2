@@ -41,7 +41,15 @@ import {
   jsonOf,
   defineRos2Tool,
 } from 'dsh-ros2-common'
-import { spawnJob, buildSafetyMonitorCommand, isSafeProfileName } from 'dsh-ros2-common'
+import {
+  spawnRosShellJob,
+  settleJobStart,
+  childEnvFor,
+  seamOptionsFor,
+  buildSafetyMonitorCommand,
+  isSafeProfileName,
+  type JobHooks,
+} from 'dsh-ros2-common'
 
 /** Path to a helper script shipped with THIS package (scripts/). */
 function scriptPath(name: string): string {
@@ -167,19 +175,40 @@ function makeRobotRegisterTool(deps: ToolDeps) {
       // guard -> lock chain). Best effort: if jobs are unavailable or the
       // safety section is disabled, skip with a note.
       let jobId = ''
+      let monitor: JsonValue | undefined
       if (data?.ok && params.startSafety !== false && data.robot?.safety?.enabled !== false) {
         if (deps.jobs) {
           const profilePath = data.written ?? ''
           if (profilePath) {
             try {
+              const childEnv = await childEnvFor(deps)
+              let hooks: JobHooks | undefined
               jobId = deps.jobs.start({
                 owner: exec.agent,
                 kind: 'safety-monitor',
                 label: `safety_monitor/${name}`,
                 outputLimitBytes: 8 * 1024 * 1024,
-                run: () => spawnJob('bash', ['-lc', buildSafetyMonitorCommand(profilePath)],
-                  { outputLimitBytes: 8 * 1024 * 1024 }),
+                run: () => (hooks = spawnRosShellJob(buildSafetyMonitorCommand(profilePath), {
+                  childEnv,
+                  ...seamOptionsFor(deps),
+                  outputLimitBytes: 8 * 1024 * 1024,
+                })),
               })
+              // Round 31: this job used to be spawned as `bash -lc "ros2 run …"`
+              // with no setup chain — measured exit 127 (`ros2: command not
+              // found`) on this host, while the registration result still said
+              // `status: 'started'`. A safety layer that is absent must not be
+              // reported as up.
+              const start = await settleJobStart(hooks)
+              monitor = start.status === 'started'
+                ? { jobId, status: start.status, ...(start.pid !== undefined ? { pid: start.pid } : {}) }
+                : {
+                    jobId,
+                    status: start.status,
+                    detail: start.detail ?? start.status,
+                    ...(start.outputTail !== undefined ? { outputTail: start.outputTail } : {}),
+                    note: 'safety_monitor 未能在启动窗口内存活——按 robot_safety_procedure 手动启动并核对 /safety/state',
+                  }
             } catch {
               jobId = ''
             }
@@ -189,7 +218,8 @@ function makeRobotRegisterTool(deps: ToolDeps) {
       const out = data ?? parseJsonOrRaw(res.stdout)
       return withProfileWarnings(okResult('robot_register', command, {
         ...(out as Record<string, unknown>),
-        ...(jobId ? { safety_monitor: { jobId, status: 'started' } }
+        ...(monitor !== undefined ? { safety_monitor: jsonOf(monitor) }
+          : jobId ? { safety_monitor: { jobId, status: 'started' } }
           : params.startSafety === false ? { safety_monitor: { status: 'skipped' } }
           : { safety_monitor: { status: 'not_started', note: 'jobs 服务不可用或 safety 未启用——用 robot_safety_start 手动启动' } }),
       }))

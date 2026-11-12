@@ -35,6 +35,17 @@ export interface RunOptions {
   env?: Record<string, string>
 }
 
+/**
+ * The environment one child process is about to receive, after the ROS_LOG_DIR
+ * judgement. Produced by `prepareChildEnv()` and required by the job seam, so a
+ * caller cannot hand a child the raw configured value.
+ */
+export interface PreparedChildEnv {
+  env: Record<string, string>
+  /** One-shot note (tightened / refused / fallback used), if the judgement spoke. */
+  note?: string
+}
+
 const DEFAULT_TIMEOUT_MS = 15000
 const MAX_BUFFER = 16 * 1024 * 1024
 
@@ -271,6 +282,52 @@ export function resolveSetup(opts: RunOptions): SetupResolution {
   }
 }
 
+/** Display form of a command: the binary plus its single-quoted arguments. */
+export function renderCommand(bin: string, args: string[]): string {
+  return `${bin} ${args.map(shq).join(' ')}`
+}
+
+/**
+ * Join a resolved `source … && ` prefix with a command.
+ *
+ * A configured prefix may end at `&&` with no trailing space — the live
+ * deployment's did. The shell reads `&&ros2` exactly like `&& ros2`, but the
+ * command echoed by every failure message did not: it read as a malformed
+ * command (`… &&ros2 'node' 'list'`) and cost a reader time while diagnosing an
+ * unrelated breakage. Separating them where the shell string is built keeps the
+ * reported prefix faithful to the configuration; one helper for the foreground
+ * and background seams keeps them from disagreeing.
+ */
+function joinSetupPrefix(prefix: string, command: string): string {
+  if (!prefix) return command
+  return /\s$/.test(prefix) ? `${prefix}${command}` : `${prefix} ${command}`
+}
+
+/**
+ * Build the environment for one child process, judging a configured
+ * `ROS_LOG_DIR` on the way (round 28/29: a fixed name inside a 1777 temp root
+ * can be pre-created by another local user, who then owns the logs written
+ * there and can pre-plant the names those processes create).
+ *
+ * Every surface that spawns a child uses this — the foreground run seam and the
+ * background job seam — because the alternative is one function carrying the
+ * criterion while another hands over the raw configured value. That is exactly
+ * what happened: `runCommand` judged it, `spawnJob` (colcon build, `ros2
+ * launch`, `ros2 run --background`, the safety monitor) passed only
+ * `process.env`, and the GUI spawner passed `config.rosLogDir` verbatim.
+ */
+export async function prepareChildEnv(
+  opts: { rosLogDir?: string; env?: Record<string, string> } = {},
+): Promise<PreparedChildEnv> {
+  const env = {
+    ...process.env,
+    ...(opts.rosLogDir ? { ROS_LOG_DIR: opts.rosLogDir } : {}),
+    ...opts.env,
+  } as Record<string, string>
+  const note = await ensureWritableRosLogDir(env)
+  return note === undefined ? { env } : { env, note }
+}
+
 /**
  * Run a CLI command (default binary `ros2`) and normalize the outcome.
  * Non-zero exits and timeouts are reported as `ok: false` — the caller decides
@@ -280,13 +337,11 @@ export async function runCommand(bin: string, args: string[], opts: RunOptions =
   const startedAt = Date.now()
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
   const cwd = opts.cwd
-  const command = `${bin} ${args.map(shq).join(' ')}`
-  const env = {
-    ...process.env,
-    ...(opts.rosLogDir ? { ROS_LOG_DIR: opts.rosLogDir } : {}),
-    ...opts.env,
-  }
-  const logDirNote = await ensureWritableRosLogDir(env)
+  const command = renderCommand(bin, args)
+  const { env, note: logDirNote } = await prepareChildEnv({
+    ...(opts.rosLogDir !== undefined ? { rosLogDir: opts.rosLogDir } : {}),
+    ...(opts.env !== undefined ? { env: opts.env } : {}),
+  })
   const baseOptions: ExecFileOptions = {
     timeout: timeoutMs,
     killSignal: 'SIGKILL',
@@ -295,14 +350,7 @@ export async function runCommand(bin: string, args: string[], opts: RunOptions =
     env,
   }
   const setup = resolveSetup(opts)
-  // A configured prefix may end at `&&` with no trailing space — the live
-  // deployment's did. The shell reads `&&ros2` exactly like `&& ros2`, but the
-  // command echoed by every failure message did not: it read as a malformed
-  // command (`… &&ros2 'node' 'list'`) and cost a reader time while diagnosing
-  // an unrelated breakage. Separate them where the shell string is built, so
-  // the reported prefix stays faithful to the configuration.
-  const joined = setup.prefix && !/\s$/.test(setup.prefix) ? `${setup.prefix} ` : setup.prefix
-  const cmd = joined ? `${joined}${command}` : command
+  const cmd = joinSetupPrefix(setup.prefix, command)
   // A judged/rewritten ROS_LOG_DIR is a diagnostic about the environment, so it
   // rides the same `envNote` channel a missing source does — visible in the
   // result instead of silently replacing what the operator configured.
@@ -564,6 +612,14 @@ export interface JobHooks {
   cancel(): void
   readOutput?(): string
   done: Promise<JobOutcome>
+  /**
+   * The child's pid, or `undefined` when `spawn` failed (ENOENT and friends).
+   * Exposed so a tool can say "started" only about a process that exists —
+   * a job that died at spawn used to be reported as `status: 'started'`.
+   */
+  pid?: number
+  /** The shell string actually handed to `bash -lc` (job seam only). */
+  command?: string
 }
 
 export interface SpawnJobOptions {
@@ -575,6 +631,13 @@ export interface SpawnJobOptions {
 /**
  * Spawn a long-running CLI process for a background job: bounded captured
  * output, cancel via SIGTERM, settled outcome on close/error.
+ *
+ * This is the RAW primitive (used by the output-sanitising tests and by the job
+ * seam below). Tool code must not call it directly: it takes the binary on the
+ * inherited PATH and whatever environment it is handed, which is how every
+ * background job ended up outside the run seam (`ros2` absent from PATH, so the
+ * child died with ENOENT while the tool said "started"). Use `spawnRosJob()` /
+ * `spawnRosShellJob()`.
  */
 export function spawnJob(bin: string, args: string[], opts: SpawnJobOptions = {}): JobHooks {
   const child = spawn(bin, args, {
@@ -607,8 +670,7 @@ export function spawnJob(bin: string, args: string[], opts: SpawnJobOptions = {}
   return {
     cancel: () => {
       if (!child.killed) child.kill('SIGTERM')
-    },
-    // Job output is the one stream in this plugin that reaches the model WITHOUT
+    },    // Job output is the one stream in this plugin that reaches the model WITHOUT
     // passing a tool result: the harness jobs channel shows it directly, so the
     // ingress character rule (which rides the tool factory) never saw it. Round 30
     // measured this on this very host: a background job printing ESC + U+202E put
@@ -621,6 +683,110 @@ export function spawnJob(bin: string, args: string[], opts: SpawnJobOptions = {}
     // this channel, and that a stripped reading says so.
     readOutput: () => sanitizeJobOutput(`[stdout]\n${out}\n[stderr]\n${err}`.trim()),
     done,
+    // `undefined` here is the one synchronous proof that the child was never
+    // created (ENOENT/EACCES are reported on the async 'error' event, but the
+    // pid is only assigned on a successful spawn).
+    ...(child.pid !== undefined ? { pid: child.pid } : {}),
+  }
+}
+
+/** Options for the background job seam (`spawnRosJob` / `spawnRosShellJob`). */
+export interface RosJobOptions {
+  /** REQUIRED: the judged child environment from `prepareChildEnv()`. */
+  childEnv: PreparedChildEnv
+  rosSetup?: string
+  workspaceRoot?: string
+  cwd?: string
+  outputLimitBytes?: number
+}
+
+/**
+ * Spawn a background job through the SAME seam a foreground command goes
+ * through: the resolved `source … && ` prefix, the judged child environment, and
+ * a shell that is replaced by the command.
+ *
+ * Why this exists (round 31, measured on the maintenance host): only
+ * `runCommand` carried the two environment criteria. `ros2 launch`, `ros2 run
+ * --background`, `colcon build` and the safety monitor were spawned as bare
+ * binaries on the inherited PATH — where `ros2` is not present at all — so
+ * `spawnJob('ros2', ['pkg','list'])` settled as `spawn ros2 ENOENT` while
+ * `runCommand('ros2', ['pkg','list'])` in the same process listed 451 packages,
+ * and the safety monitor exited 127 with `ros2: command not found` while the
+ * tool reported `status: 'started'`.
+ *
+ * `exec` is not decoration: without it the job's SIGTERM kills the shell and
+ * leaves the ROS node it started running, so `cancel()` would stop reporting on
+ * a process it did not stop.
+ */
+function spawnSeamed(command: string, opts: RosJobOptions): JobHooks {
+  const setup = resolveSetup({
+    ...(opts.rosSetup !== undefined ? { rosSetup: opts.rosSetup } : {}),
+    ...(opts.workspaceRoot !== undefined ? { workspaceRoot: opts.workspaceRoot } : {}),
+  })
+  const cmd = joinSetupPrefix(setup.prefix, `exec ${command}`)
+  const hooks = spawnJob('bash', ['-lc', cmd], {
+    ...(opts.cwd !== undefined ? { cwd: opts.cwd } : {}),
+    env: opts.childEnv.env,
+    ...(opts.outputLimitBytes !== undefined ? { outputLimitBytes: opts.outputLimitBytes } : {}),
+  })
+  return { ...hooks, command: cmd }
+}
+
+/** Spawn a background job for `bin args` through the run seam. */
+export function spawnRosJob(bin: string, args: string[], opts: RosJobOptions): JobHooks {
+  return spawnSeamed(renderCommand(bin, args), opts)
+}
+
+/**
+ * Spawn a background job for a command that is ALREADY a shell string (e.g.
+ * `buildSafetyMonitorCommand()`), still through the run seam.
+ */
+export function spawnRosShellJob(command: string, opts: RosJobOptions): JobHooks {
+  return spawnSeamed(command, opts)
+}
+
+/** What a tool may say about a job it just asked the registry to start. */
+export interface JobStartOutcome {
+  /**
+   * `started` — alive after the grace window (or unknowable, e.g. a mock
+   * registry that never ran the factory); `failed` / `exited` — it settled
+   * inside the window, which for a long-running command means it never ran.
+   */
+  status: 'started' | 'failed' | 'exited'
+  pid?: number
+  detail?: string
+  /** Sanitised tail of what the job already printed (why it failed). */
+  outputTail?: string
+}
+
+/**
+ * Report honestly on a job that was just registered.
+ *
+ * The old contract was `status: 'started'` for every call, including the ones
+ * whose child never existed. Two cheap facts fix that: a missing pid (spawn
+ * failed outright) and a settled outcome inside `graceMs` (the classic
+ * "source … && command" failure — exit 127 in ~40 ms, measured). Reading the
+ * output tail is what makes the failure diagnosable instead of mysterious.
+ */
+export async function settleJobStart(hooks: JobHooks | undefined, graceMs = 300): Promise<JobStartOutcome> {
+  if (hooks === undefined) return { status: 'started' }
+  if (hooks.pid === undefined) return { status: 'failed', detail: 'spawn failed: the child process was never created' }
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const settled = await Promise.race([
+    hooks.done,
+    new Promise<undefined>((resolve) => { timer = setTimeout(() => resolve(undefined), graceMs) }),
+  ])
+  if (timer !== undefined) clearTimeout(timer)
+  const tail = hooks.readOutput?.().trim()
+  const outputTail = tail !== undefined && tail.length > 0 ? tail.slice(-600) : undefined
+  if (settled === undefined) {
+    return { status: 'started', pid: hooks.pid, ...(outputTail !== undefined ? { outputTail } : {}) }
+  }
+  return {
+    status: settled.status === 'completed' ? 'exited' : 'failed',
+    pid: hooks.pid,
+    ...(settled.detail !== undefined ? { detail: settled.detail } : {}),
+    ...(outputTail !== undefined ? { outputTail } : {}),
   }
 }
 

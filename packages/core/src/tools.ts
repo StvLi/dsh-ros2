@@ -50,12 +50,29 @@ import {
   bundleDriftReport,
   formatBundleStartupReport,
   defineRos2Tool,
+  spawnRosJob,
+  settleJobStart,
+  prepareChildEnv,
+  type JobHooks,
+  type PreparedChildEnv,
+  childEnvFor,
+  seamOptionsFor,
 } from 'dsh-ros2-common'
-import { spawnJob } from 'dsh-ros2-common'
 
 /** Path to a helper script shipped with THIS package (scripts/). */
 function scriptPath(name: string): string {
   return fileURLToPath(new URL(`../scripts/${name}`, import.meta.url))
+}
+
+/**
+ * The only variable a GUI child needs from the judged child environment: the
+ * (possibly tightened, possibly refused) ROS log directory. `undefined` means
+ * "add nothing" — the GUI manager must not hold a raw copy of the configured
+ * value, which is what round 31 found it was handing to rviz2.
+ */
+function guiLogDirEnv(childEnv: PreparedChildEnv): { ROS_LOG_DIR: string } | undefined {
+  const dir = childEnv.env.ROS_LOG_DIR
+  return dir !== undefined && dir.length > 0 ? { ROS_LOG_DIR: dir } : undefined
 }
 
 import type { GuiManager } from './gui.js'
@@ -317,23 +334,43 @@ function makeBuildTool(deps: CoreToolDeps) {
       if (!approval.allowed) return deniedResult('ros2_colcon_build', command, approval.outcome)
       if (!deps.jobs) return toolError('ros2_colcon_build', command, 'JOBS_UNAVAILABLE', '后台任务服务不可用（需要 DSH jobs 支持）')
       const label = `colcon build${packages ? ` (${packages})` : ''}`
+      const childEnv = await childEnvFor(deps)
       let jobId: string
+      let hooks: JobHooks | undefined
       try {
         jobId = deps.jobs.start({
           owner: exec.agent,
           kind: 'colcon-build',
           label,
           outputLimitBytes: 16 * 1024 * 1024,
-          run: () => spawnJob('colcon', buildArgs, { cwd, outputLimitBytes: 16 * 1024 * 1024 }),
+          run: () => (hooks = spawnRosJob('colcon', buildArgs, {
+            childEnv,
+            ...seamOptionsFor(deps),
+            ...(cwd !== undefined ? { cwd } : {}),
+            outputLimitBytes: 16 * 1024 * 1024,
+          })),
         })
       } catch (error) {
         return toolError('ros2_colcon_build', command, 'JOB_START_FAILED', error instanceof Error ? error.message : String(error))
+      }
+      const start = await settleJobStart(hooks)
+      if (start.status !== 'started') {
+        return toolError('ros2_colcon_build', command, 'JOB_EXITED_EARLY',
+          `后台任务在启动窗口内已结束（${start.detail ?? start.status}）` +
+          (start.outputTail !== undefined ? `；已捕获输出（已净化控制/方向字符）：\n${start.outputTail}` : ''))
       }
       const value: ToolResult = {
         ok: true,
         tool: 'ros2_colcon_build',
         command,
-        data: { jobId, kind: 'colcon-build', label, status: 'started', note: '查询进度用 ros2_job_status' },
+        data: {
+          jobId,
+          kind: 'colcon-build',
+          label,
+          status: start.status,
+          ...(start.pid !== undefined ? { pid: start.pid } : {}),
+          note: '查询进度用 ros2_job_status',
+        },
       }
       return value
     },
@@ -838,19 +875,40 @@ function makeLaunchTool(deps: CoreToolDeps) {
         `将以后台任务启动 launch：${command}（持续运行，用 DSH job 控制停止）`)
       if (!approval.allowed) return deniedResult('ros2_launch', command, approval.outcome)
       if (!deps.jobs) return toolError('ros2_launch', command, 'JOBS_UNAVAILABLE', '后台任务服务不可用（需要 DSH jobs 支持）')
+      const childEnv = await childEnvFor(deps)
+      const cwd = strOrUndefined(params.cwd)
       let jobId: string
+      let hooks: JobHooks | undefined
       try {
         jobId = deps.jobs.start({
           owner: exec.agent,
           kind: 'ros2-launch',
           label: `${pkg}/${launch}`,
           outputLimitBytes: 16 * 1024 * 1024,
-          run: () => spawnJob('ros2', launchArgs, { cwd: strOrUndefined(params.cwd), outputLimitBytes: 16 * 1024 * 1024 }),
+          run: () => (hooks = spawnRosJob('ros2', launchArgs, {
+            childEnv,
+            ...seamOptionsFor(deps),
+            ...(cwd !== undefined ? { cwd } : {}),
+            outputLimitBytes: 16 * 1024 * 1024,
+          })),
         })
       } catch (error) {
         return toolError('ros2_launch', command, 'JOB_START_FAILED', error instanceof Error ? error.message : String(error))
       }
-      return okResult('ros2_launch', command, { jobId, kind: 'ros2-launch', label: `${pkg}/${launch}`, status: 'started', note: '查询用 ros2_job_status，停止用 DSH job 控制' })
+      const start = await settleJobStart(hooks)
+      if (start.status !== 'started') {
+        return toolError('ros2_launch', command, 'JOB_EXITED_EARLY',
+          `launch 在启动窗口内已结束（${start.detail ?? start.status}）——通常意味着 setup 链在子进程里没生效或包不可见` +
+          (start.outputTail !== undefined ? `；已捕获输出（已净化控制/方向字符）：\n${start.outputTail}` : ''))
+      }
+      return okResult('ros2_launch', command, {
+        jobId,
+        kind: 'ros2-launch',
+        label: `${pkg}/${launch}`,
+        status: start.status,
+        ...(start.pid !== undefined ? { pid: start.pid } : {}),
+        note: '查询用 ros2_job_status，停止用 DSH job 控制',
+      })
     },
   })
 }
@@ -876,7 +934,17 @@ function makeGuiStartTool(deps: CoreToolDeps) {
       const configFile = strOrUndefined(params.configFile)
       const extra = strOrUndefined(params.args)?.split(/\s+/).filter(Boolean) ?? []
       const label = strOrUndefined(params.label) ?? app
-      const result = deps.gui.start({ label, bin: preset.bin, args: preset.args(configFile, extra), windowTitle: preset.windowTitle })
+      // A GUI child is a child like any other: its ROS_LOG_DIR is judged here
+      // (round 31 — the manager used to receive `config.rosLogDir` verbatim, so
+      // rviz2 was handed exactly the 0775 path `runCommand` refuses).
+      const guiEnv = guiLogDirEnv(await childEnvFor(deps))
+      const result = deps.gui.start({
+        label,
+        bin: preset.bin,
+        args: preset.args(configFile, extra),
+        windowTitle: preset.windowTitle,
+        ...(guiEnv !== undefined ? { env: guiEnv } : {}),
+      })
       if (!result.ok) return toolError('ros2_gui_start', command, 'START_FAILED', result.error)
       const value: ToolResult = {
         ok: true,
@@ -1017,7 +1085,14 @@ function makeGuiObserveTool(deps: CoreToolDeps) {
       )
       if (!gate.ok) return gate.result
       if (deps.gui.list().every((s) => s.label !== label)) {
-        const started = deps.gui.start({ label, bin: preset.bin, args: preset.args(undefined, []), windowTitle: preset.windowTitle })
+        const guiEnv = guiLogDirEnv(await childEnvFor(deps))
+        const started = deps.gui.start({
+          label,
+          bin: preset.bin,
+          args: preset.args(undefined, []),
+          windowTitle: preset.windowTitle,
+          ...(guiEnv !== undefined ? { env: guiEnv } : {}),
+        })
         if (!started.ok) return toolError('ros2_gui_observe', command, 'START_FAILED', started.error)
       }
       // Wait briefly for the window to map, then capture.
@@ -2329,19 +2404,38 @@ function makeRunTool(deps: ToolDeps) {
       if (!approval.allowed) return deniedResult('ros2_run', command, approval.outcome)
       if (params.background === true) {
         if (!deps.jobs) return toolError('ros2_run', command, 'JOBS_UNAVAILABLE', '后台任务服务不可用（需要 DSH jobs 支持）')
+        const childEnv = await childEnvFor(deps)
         let jobId: string
+        let hooks: JobHooks | undefined
         try {
           jobId = deps.jobs.start({
             owner: exec.agent,
             kind: 'ros2-run',
             label: `${pkg}/${exe}`,
             outputLimitBytes: 16 * 1024 * 1024,
-            run: () => spawnJob('ros2', runArgs, { outputLimitBytes: 16 * 1024 * 1024 }),
+            run: () => (hooks = spawnRosJob('ros2', runArgs, {
+              childEnv,
+              ...seamOptionsFor(deps),
+              outputLimitBytes: 16 * 1024 * 1024,
+            })),
           })
         } catch (error) {
           return toolError('ros2_run', command, 'JOB_START_FAILED', error instanceof Error ? error.message : String(error))
         }
-        return okResult('ros2_run', command, { jobId, kind: 'ros2-run', label: `${pkg}/${exe}`, status: 'started', note: '查询用 ros2_job_status，停止用 DSH job 控制' })
+        const start = await settleJobStart(hooks)
+        if (start.status !== 'started') {
+          return toolError('ros2_run', command, 'JOB_EXITED_EARLY',
+            `后台任务在启动窗口内已结束（${start.detail ?? start.status}）` +
+            (start.outputTail !== undefined ? `；已捕获输出（已净化控制/方向字符）：\n${start.outputTail}` : ''))
+        }
+        return okResult('ros2_run', command, {
+          jobId,
+          kind: 'ros2-run',
+          label: `${pkg}/${exe}`,
+          status: start.status,
+          ...(start.pid !== undefined ? { pid: start.pid } : {}),
+          note: '查询用 ros2_job_status，停止用 DSH job 控制',
+        })
       }
       const timeoutMs = Math.max(2000, numOrUndefined(params.timeoutMs) ?? 15000)
       const res = await deps.run('ros2', runArgs, { timeoutMs })

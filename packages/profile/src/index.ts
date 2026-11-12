@@ -39,7 +39,18 @@ export function apply(ctx: Context, config: ProfilePackageConfig): void {
   const approval = (req: ApprovalRequest): Promise<string> => approvalService.request(req)
   const jobs = (ctx as unknown as { jobs: JobsApi }).jobs
 
-  const tools = createRos2Tools({ run, includeStderr: config.includeStderr, approval, jobs, workspaceRoot: config.workspaceRoot })
+  // `rosSetup` / `rosLogDir` are passed for the same reason `makeRun` gets them:
+  // the safety monitor is a background child, and round 31 measured that a child
+  // spawned without the setup chain cannot find `ros2` at all.
+  const tools = createRos2Tools({
+    run,
+    includeStderr: config.includeStderr,
+    approval,
+    jobs,
+    workspaceRoot: config.workspaceRoot,
+    rosSetup: config.rosSetup,
+    rosLogDir: config.rosLogDir,
+  })
 
   ctx.effect(() => {
     const disposers = tools.map((tool) => ctx.tools.register(tool))

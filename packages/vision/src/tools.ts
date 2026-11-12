@@ -47,7 +47,6 @@ import {
   jsonOf,
   defineRos2Tool,
 } from 'dsh-ros2-common'
-import { spawnJob } from 'dsh-ros2-common'
 import { createVisionProvider } from './vision.js'
 import { classifyVisionTransport } from './transport.js'
 import {

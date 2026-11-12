@@ -99,12 +99,18 @@ export function apply(ctx: Context, config: CoreConfig): void {
   const jobs = (ctx as unknown as { jobs: JobsApi }).jobs
 
   // L3: GUI lifecycle manager (local).
+  //
+  // No `env` here on purpose (round 31): the manager used to receive
+  // `{ ROS_LOG_DIR: config.rosLogDir }` and merge it into every GUI child
+  // verbatim, so rviz2 was handed the raw configured path while `runCommand`
+  // judged (and possibly tightened or refused) the very same value. The
+  // judgement now happens per spawn, in the tool that spawns — see
+  // `guiLogDirEnv()` / `childEnvFor()`.
   const gui = new GuiManager({
     display: config.display,
     screenshotDir: config.screenshotDir,
     screenshotCommand: config.screenshotCommand,
     allowedApplications: config.guiAllowedApplications,
-    env: config.rosLogDir.length > 0 ? { ROS_LOG_DIR: config.rosLogDir } : undefined,
   })
 
   // Optional vision service (provided by dsh-ros2-vision) — soft dependency.
@@ -117,6 +123,7 @@ export function apply(ctx: Context, config: CoreConfig): void {
     jobs,
     workspaceRoot: config.workspaceRoot,
     rosSetup: config.rosSetup,
+    rosLogDir: config.rosLogDir,
     gui,
     vision,
     skillCatalogue: makeSkillCatalogueProbe(ctx),

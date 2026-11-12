@@ -44,7 +44,6 @@ import {
   ensurePrivateRuntimeDir,
   defineRos2Tool,
 } from 'dsh-ros2-common'
-import { spawnJob } from 'dsh-ros2-common'
 
 /** Path to a helper script shipped with THIS package (scripts/). */
 function scriptPath(name: string): string {

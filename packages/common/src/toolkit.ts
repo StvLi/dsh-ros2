@@ -16,7 +16,14 @@ import {
   type ToolDefinition,
   type ValueSchemaSpec,
 } from '@deepseek-ai/dsh-tools'
-import { runCommand, type JobHooks, type RunOptions, type RosResult } from './runner.js'
+import {
+  runCommand,
+  prepareChildEnv,
+  type JobHooks,
+  type PreparedChildEnv,
+  type RunOptions,
+  type RosResult,
+} from './runner.js'
 import { type JsonValue, parseJsonOrRaw } from './parse.js'
 import { isWhitespace, isWordChar } from './chars.js'
 import { isSafeProfileName } from './names.js'
@@ -97,6 +104,13 @@ export interface ToolDeps {
    * one, and makes a failing config look like a healthy environment.
    */
   rosSetup?: string
+  /**
+   * The configured ROS log directory. Exposed for the same reason as
+   * `rosSetup`: the job seam and the GUI spawner must feed a child through the
+   * same judgement `runCommand` applies, and a tool that cannot see the
+   * configured value would silently skip it (round 31).
+   */
+  rosLogDir?: string
   /** L3 GUI lifecycle manager (ros2_gui_* / ros2_screenshot) — concrete type lives in dsh-ros2-core. */
   gui?: unknown
   /** L3 pluggable multimodal vision (ros2_vision_describe / ros2_gui_observe). */
@@ -140,8 +154,32 @@ export const resultSchema = {
 export const renderResult = (_args: unknown, value: JsonValue) => [{ type: 'text' as const, text: JSON.stringify(value) }]
 
 export { type JsonValue, parseJsonOrRaw }
-export { runCommand, spawnJob, setSessionRosSetup, getSessionRosSetup, resolveSetup } from './runner.js'
-export type { RosResult, RunOptions, JobHooks, SetupResolution } from './runner.js'
+// `spawnJob` is deliberately NOT re-exported: it is the raw primitive that runs
+// a binary from the inherited PATH with no setup chain and no judged
+// environment. Tools spawn through `spawnRosJob` / `spawnRosShellJob`, which
+// apply the same seam `runCommand` applies (round 31: `ros2 launch`,
+// `colcon build`, `ros2 run --background` and the safety monitor were all
+// outside it, so `ros2` was not on the child's PATH at all).
+export {
+  runCommand,
+  spawnRosJob,
+  spawnRosShellJob,
+  settleJobStart,
+  prepareChildEnv,
+  renderCommand,
+  setSessionRosSetup,
+  getSessionRosSetup,
+  resolveSetup,
+} from './runner.js'
+export type {
+  RosResult,
+  RunOptions,
+  JobHooks,
+  SetupResolution,
+  PreparedChildEnv,
+  RosJobOptions,
+  JobStartOutcome,
+} from './runner.js'
 export { foldGraph, parseLines, parseNodeInfo, parseTopicList, parseTransforms } from './parse.js'
 
 /** Run-seam config (each domain package carries its own copy via Config). */
@@ -168,6 +206,25 @@ export function makeRun(config: RunConfig): RunFn {
 /** Path to a script shipped with dsh-ros2-common (e.g. robot_profile.py). */
 export function commonScriptPath(name: string): string {
   return fileURLToPath(new URL(`../scripts/${name}`, import.meta.url))
+}
+
+/**
+ * The judged child environment for a spawn that does NOT go through `run`
+ * (a background job, a GUI child). Every such spawn must use it: round 31
+ * measured that `colcon build`, `ros2 launch`, `ros2 run --background` and the
+ * safety monitor received only `process.env`, and the GUI spawner received the
+ * raw `rosLogDir` — the very value `runCommand` judges.
+ */
+export function childEnvFor(deps: ToolDeps): Promise<PreparedChildEnv> {
+  return prepareChildEnv(deps.rosLogDir !== undefined ? { rosLogDir: deps.rosLogDir } : {})
+}
+
+/** The run-seam options (setup chain) a background job must inherit. */
+export function seamOptionsFor(deps: ToolDeps): { rosSetup?: string; workspaceRoot?: string } {
+  return {
+    ...(deps.rosSetup !== undefined ? { rosSetup: deps.rosSetup } : {}),
+    ...(deps.workspaceRoot !== undefined ? { workspaceRoot: deps.workspaceRoot } : {}),
+  }
 }
 
 /** Optional value helpers (legacy ToolDeps params are loose). */

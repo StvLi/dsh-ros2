@@ -41,7 +41,14 @@ import {
   jsonOf,
   defineRos2Tool,
 } from 'dsh-ros2-common'
-import { spawnJob, buildSafetyMonitorCommand } from 'dsh-ros2-common'
+import {
+  spawnRosShellJob,
+  settleJobStart,
+  childEnvFor,
+  seamOptionsFor,
+  buildSafetyMonitorCommand,
+  type JobHooks,
+} from 'dsh-ros2-common'
 
 /** Path to a helper script shipped with THIS package (scripts/). */
 function scriptPath(name: string): string {
@@ -108,20 +115,42 @@ function makeRobotSafetyStartTool(deps: ToolDeps) {
         `将以后台任务启动 safety_monitor（profile=${profilePath}，持续运行监视机器人安全状态）。`)
       if (!approval.allowed) return deniedResult('robot_safety_start', command, approval.outcome)
       if (!deps.jobs) return toolError('robot_safety_start', command, 'JOBS_UNAVAILABLE', '后台任务服务不可用（需要 DSH jobs 支持）')
+      const childEnv = await childEnvFor(deps)
       let jobId: string
+      let hooks: JobHooks | undefined
       try {
         jobId = deps.jobs.start({
           owner: exec.agent,
           kind: 'safety-monitor',
           label: `safety_monitor/${robot}`,
           outputLimitBytes: 8 * 1024 * 1024,
-          run: () => spawnJob('bash', ['-lc', buildSafetyMonitorCommand(profilePath)],
-            { outputLimitBytes: 8 * 1024 * 1024 }),
+          run: () => (hooks = spawnRosShellJob(buildSafetyMonitorCommand(profilePath), {
+            childEnv,
+            ...seamOptionsFor(deps),
+            outputLimitBytes: 8 * 1024 * 1024,
+          })),
         })
       } catch (error) {
         return toolError('robot_safety_start', command, 'JOB_START_FAILED', error instanceof Error ? error.message : String(error))
       }
-      return okResult('robot_safety_start', command, { jobId, kind: 'safety-monitor', label: `safety_monitor/${robot}`, status: 'started', note: '查询用 robot_safety_state，停止用 DSH job 控制' })
+      // Round 31: without the setup chain this child exited 127 with
+      // `ros2: command not found` (measured) while the result said `started`.
+      // Report a monitor that did not survive the start window as such.
+      const start = await settleJobStart(hooks)
+      if (start.status !== 'started') {
+        return toolError('robot_safety_start', command, 'MONITOR_EXITED_EARLY',
+          `safety_monitor 在启动窗口内已结束（${start.detail ?? start.status}）⇒ 机器人在此状态下**没有**安全闸；` +
+          `先按 robot_safety_procedure 排查（ros2 是否可见 / dsh_ros2_safety 是否已构建）` +
+          (start.outputTail !== undefined ? `；已捕获输出（已净化控制/方向字符）：\n${start.outputTail}` : ''))
+      }
+      return okResult('robot_safety_start', command, {
+        jobId,
+        kind: 'safety-monitor',
+        label: `safety_monitor/${robot}`,
+        status: start.status,
+        ...(start.pid !== undefined ? { pid: start.pid } : {}),
+        note: '查询用 robot_safety_state，停止用 DSH job 控制',
+      })
     },
   })
 }
