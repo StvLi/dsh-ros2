@@ -122,7 +122,12 @@ describe('a job that never ran is not reported as started', () => {
     // shell's own message in the tail instead of an unexplained death.
     const seamed = spawnRosJob(missing, [], { childEnv })
     expect(seamed.pid).toBeDefined()
-    const start = await settleJobStart(seamed)
+    // A generous window on purpose: these cases assert WHAT the outcome is, not
+    // that it arrives inside 300 ms. `bash -lc` is a LOGIN shell, and on a CI
+    // runner `~/.profile` (nvm/sdkman/conda) can take longer than the default
+    // grace to even start — which is how a window-dependent assertion turns
+    // "local green" into "CI red" (round 31, §36.9).
+    const start = await settleJobStart(seamed, 10_000)
     expect(start.status).toBe('failed')
     expect(start.detail).toContain('exit code')
     expect(start.outputTail ?? '').toContain(missing)
@@ -130,18 +135,22 @@ describe('a job that never ran is not reported as started', () => {
 
   it('reports a job that is still running as started, with its pid', async () => {
     const childEnv = await prepareChildEnv()
-    const job = spawnRosJob('sh', ['-c', 'sleep 5'], { childEnv })
+    // Sleeps far longer than the grace (so "still running" cannot depend on how
+    // fast a login shell starts) but is short enough that a cancel which does
+    // not land still cannot hang the suite.
+    const job = spawnRosJob('sh', ['-c', 'sleep 1'], { childEnv })
     const start = await settleJobStart(job, 200)
     expect(start.status).toBe('started')
     expect(start.pid).toBeGreaterThan(0)
     job.cancel()
-    await job.done
+    await Promise.race([job.done, new Promise((resolve) => setTimeout(resolve, 5000))])
   })
 
   it('an exited-fast job is its own status, not a success story', async () => {
     const childEnv = await prepareChildEnv()
-    const start = await settleJobStart(spawnRosJob('sh', ['-c', 'exit 0'], { childEnv }))
+    const start = await settleJobStart(spawnRosJob('sh', ['-c', 'exit 0'], { childEnv }), 10_000)
     expect(start.status).toBe('exited')
+    expect(start.pid).toBeGreaterThan(0)
   })
 
   it('says nothing it cannot know when the registry never ran the factory', async () => {
