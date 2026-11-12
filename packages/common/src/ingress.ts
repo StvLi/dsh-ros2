@@ -28,10 +28,12 @@
  *      budget. A truncation is always VISIBLE (a marker in place of the bytes
  *      plus one warning), never silent: a quietly shortened reading looks like
  *      a complete one.
- *   2. CHARACTER CLASS — C0 (except tab/newline), DEL, C1 and the bidi
- *      formatting characters are removed. A control byte has no meaning inside
- *      a value, and the bidi overrides are the Trojan-Source class: they make
- *      text render in an order its bytes do not have.
+ *   2. CHARACTER CLASS — C0 (except tab/newline), DEL, C1, the bidi formatting
+ *      characters and the invisibility carriers (Unicode TAG block, variation
+ *      selectors, zero-width spacers) are removed. A control byte has no meaning
+ *      inside a value; the bidi overrides are the Trojan-Source class (text
+ *      renders in an order its bytes do not have); the invisibility carriers
+ *      render as NOTHING while the model still tokenizes them (round 31).
  *
  * Numbers, booleans and null are never rewritten — the policy judges text, not
  * structures, so a truncated payload still parses and every numeric field a
@@ -69,6 +71,33 @@ const BIDI_AND_FORMAT = new Set([
   '\u2069', // POP DIRECTIONAL ISOLATE
 ])
 
+/**
+ * Invisible carriers: code points that print as nothing while the bytes stay in
+ * the token stream (round 31).
+ *
+ * The bidi set above makes text render in an order its bytes do not have. This
+ * one makes the bytes render as *no text at all*, which is the same lie about a
+ * value in a worse form: a reader (human or model) cannot tell anything was
+ * there. Unicode TAG characters (U+E0000–U+E007F) spell out arbitrary ASCII in a
+ * run that displays as an empty string — the "ASCII smuggling" class, used to
+ * hide instructions or exfiltrated data in text a reviewer sees as clean — and
+ * VARIATION SELECTOR-17..256 (U+E0100–U+E01EF) does the same behind an emoji.
+ * ZWSP / WORD JOINER / BOM are the everyday carriers.
+ *
+ * Measured on the built lib before this rule existed (round 31): a topic string
+ * carrying `IGNORE ALL PREVIOUS` as tag characters reached `result.data`
+ * byte-for-byte with **no** warning.
+ *
+ * Deliberately NOT dropped: ZWNJ / ZWJ (U+200C / U+200D). They are orthographic
+ * in Persian and Indic text and structural inside emoji sequences, so removing
+ * them would corrupt legitimate readings — the rule stays narrow on purpose.
+ */
+const INVISIBLE_FORMAT = new Set([
+  '\u200b', // ZERO WIDTH SPACE
+  '\u2060', // WORD JOINER
+  '\ufeff', // ZERO WIDTH NO-BREAK SPACE / BOM
+])
+
 /** True for code points this policy removes from a value. */
 export function isDroppedChar(ch: string): boolean {
   const code = ch.codePointAt(0) ?? 0
@@ -77,7 +106,17 @@ export function isDroppedChar(ch: string): boolean {
   if (code < 0x20) return true // C0, including NUL, BEL, ESC, CR
   if (code === 0x7f) return true // DEL
   if (code >= 0x80 && code <= 0x9f) return true // C1 (e.g. 0x9b = CSI)
-  return BIDI_AND_FORMAT.has(ch)
+  if (code >= 0xe0000 && code <= 0xe007f) return true // TAG characters (ASCII smuggling)
+  if (code >= 0xe0100 && code <= 0xe01ef) return true // VARIATION SELECTOR-17..256
+  return BIDI_AND_FORMAT.has(ch) || INVISIBLE_FORMAT.has(ch)
+}
+
+/** True for the invisible carriers (counted separately from controls and bidi). */
+function isInvisibleCarrier(ch: string): boolean {
+  const code = ch.codePointAt(0) ?? 0
+  if (code >= 0xe0000 && code <= 0xe007f) return true
+  if (code >= 0xe0100 && code <= 0xe01ef) return true
+  return INVISIBLE_FORMAT.has(ch)
 }
 
 /** What one policy application removed or shortened. */
@@ -86,6 +125,8 @@ export interface IngressReport {
   dropped: number
   /** Of those, the bidi/format characters (a separate count: a different risk). */
   droppedBidi: number
+  /** Of those, the invisible carriers (a third risk: the bytes render as nothing). */
+  droppedInvisible: number
   /** String fields (or keys) whose bytes were capped. */
   truncated: number
   /** Bytes removed in total, so the warning can be quantitative. */
@@ -100,8 +141,13 @@ interface Budget {
   report: IngressReport
 }
 
-function newReport(): IngressReport {
-  return { dropped: 0, droppedBidi: 0, truncated: 0, droppedBytes: 0, budgetHit: false }
+/**
+ * A fresh report. Exported because every producer of a policy application needs
+ * the same zeroed shape — a hand-written literal in another file is how a new
+ * counter silently stops being counted there.
+ */
+export function newIngressReport(): IngressReport {
+  return { dropped: 0, droppedBidi: 0, droppedInvisible: 0, truncated: 0, droppedBytes: 0, budgetHit: false }
 }
 
 function bytesOf(text: string): number {
@@ -116,6 +162,7 @@ export function sanitizeText(text: string, report: IngressReport): string {
     if (isDroppedChar(ch)) {
       report.dropped += 1
       if (BIDI_AND_FORMAT.has(ch)) report.droppedBidi += 1
+      if (isInvisibleCarrier(ch)) report.droppedInvisible += 1
       clean = false
       continue
     }
@@ -208,7 +255,7 @@ export function boundToolData(
   opts: { stringLimit?: number; totalLimit?: number } = {},
 ): IngressResult {
   const limit = opts.stringLimit ?? INGRESS_STRING_BYTES
-  const report = newReport()
+  const report = newIngressReport()
   const budget: Budget = { used: 0, report }
   const bounded = walk(value, budget, limit, 0)
   if (report.budgetHit) report.truncated = Math.max(report.truncated, 1)
@@ -232,8 +279,11 @@ export function ingressWarning(report: IngressReport): string | undefined {
     parts.push(`截断 ${report.truncated} 处（共 ${report.droppedBytes} 字节）`)
   }
   if (report.dropped > 0) {
-    const bidi = report.droppedBidi > 0 ? `，其中 ${report.droppedBidi} 个方向覆盖字符` : ''
-    parts.push(`移除 ${report.dropped} 个控制字符${bidi}`)
+    const detail: string[] = []
+    if (report.droppedBidi > 0) detail.push(`${report.droppedBidi} 个方向覆盖字符`)
+    if (report.droppedInvisible > 0) detail.push(`${report.droppedInvisible} 个不可见字符（Unicode 标签/变体选择符/零宽）`)
+    const extra = detail.length > 0 ? `，其中 ${detail.join('、')}` : ''
+    parts.push(`移除 ${report.dropped} 个控制字符${extra}`)
   }
   return `ingress: ${parts.join('；')} —— 工具结果按入口预算/字符判定收窄（外部数据，未经判据不得直入上下文）`
 }
