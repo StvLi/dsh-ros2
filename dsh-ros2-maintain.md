@@ -81,7 +81,10 @@
 > `status: 'started'`。修复 = `spawnRosJob`/`spawnRosShellJob` 唯一 seam（`exec` 防孤儿进程）+
 > `spawnJob` 不再导出 + `settleJobStart()`（`pid`/`failed`/`exited` + 净化输出尾巴）+
 > GUI 的 `ROS_LOG_DIR` 逐次判定；用例 **506 → 515**，`main` `b88cc57 → 48356ca`（#107）→
-> `09a6ca6`（本轮修复），登记 **gen-38**；**本轮无 `gh` token**（两个账号失效）⇒ 无 PR、告警面 401 如实登记。
+> `09a6ca6`（本轮修复）→ **`568918c`**（CI 修复：把两条绑在 300 ms 窗口上的新断言改成
+> "断言结果、不承诺多久到达"，因为 `bash -lc` 在 CI runner 上比本机慢——**CI 首跑红一次，第八次
+> "本地绿、CI 红"，又是本地错**）；**本轮无 `gh` token**（两个账号失效）⇒ 不开 PR、告警面 401
+> 如实登记；但**在途 PR #107 仍被收成 merged**（GitHub 按 merge commit 里的 `#107` 关联）。
 
 本文件记录 dsh-ros2 插件的一次完整日常维护循环：**查 issue → 评估建议 → 分支开发 → 验证 → 推送 → 交付维护文档**。每次维护在下方追加一节。
 
@@ -8204,7 +8207,7 @@ $ job_output → 约 70 KiB，ESC 与 U+202E **逐字**到达对话，**无任�
 
 ---
 
-## 36. 维护记录（2026-11-12 15:20 CST / UTC 2026-11-12 07:20 · 第三十一轮：**上一轮会话在 11-11 04:06 收工时留下 1 个在途 PR #107（CI 5/5 绿、未合入、未记录）+ 1 open issue #101** → 先把 #107 逐条复算并合入；随后 **0 open issue / 0 open PR → step 5**；「执行面 × 审批面」第九次连做，问句换成**「这条判据挂在哪个函数上，还有谁不经过它？」** ⇒ 一次量出本轮最重的一条：`runCommand` 之外**所有**后台子进程（`colcon build` / `ros2 launch` / `ros2 run --background` / **`safety_monitor`**）都在裸 PATH 上 spawn，实测 `ros2` 根本不在 ⇒ 后台 launch/run **从未跑起来**、**安全闸从未启动**，而工具一律返回 `status: 'started'`；GUI 子进程则拿到**未判定**的 `rosLogDir`。已修（统一 seam + `exec` + `settleJobStart` + `pid`），用例 **506 → 515**，登记 **gen-38**）
+## 36. 维护记录（2026-11-12 15:20 CST / UTC 2026-11-12 07:20 · 第三十一轮：**上一轮会话在 11-11 04:06 收工时留下 1 个在途 PR #107（CI 5/5 绿、未合入、未记录）+ 1 open issue #101** → 先把 #107 逐条复算并合入；随后 **0 open issue / 0 open PR → step 5**；「执行面 × 审批面」第九次连做，问句换成**「这条判据挂在哪个函数上，还有谁不经过它？」** ⇒ 一次量出本轮最重的一条：`runCommand` 之外**所有**后台子进程（`colcon build` / `ros2 launch` / `ros2 run --background` / **`safety_monitor`**）都在裸 PATH 上 spawn，实测 `ros2` 根本不在 ⇒ 后台 launch/run **从未跑起来**、**安全闸从未启动**，而工具一律返回 `status: 'started'`；GUI 子进程则拿到**未判定**的 `rosLogDir`。已修（统一 seam + `exec` + `settleJobStart` + `pid`），用例 **506 → 515**；**CI 首跑红一次（`check (22)`），原因是新测试把断言绑在 300 ms 窗口上、而 `bash -lc` 在 runner 上更慢**（第八次"本地绿、CI 红"，又是本地错）→ 改成断言"结果是什么"后 **5/5 绿**；无 token 下仍把在途 PR #107 收成 **merged**，`main` `b88cc57 → 48356ca → 39887fe → 568918c`，登记 **gen-38**）
 
 > 本轮与前几轮的一个区别要先说清楚：**#107 不是我这一轮写的**。上一轮会话（11-10 20:06 UTC 开 PR、
 > 11-11 04:05 提交）在建完分支并开 PR 后结束，既没合入也没写 §36。按第 22 轮的先例，接手在途 PR
@@ -8263,9 +8266,13 @@ $ job_output → 约 70 KiB，ESC 与 U+202E **逐字**到达对话，**无任�
 | 是否夹带 | `git diff --stat main..branch` = 6 文件（ingress/runner 各一 + 2 测试 + CHANGELOG + `docs/safety.md`） | 无夹带 |
 | 合入方式 | `git merge --no-ff` → `48356ca`（与 `--merge` 等价的历史形状） | `main` `b88cc57 → 48356ca` |
 
-> **PR #107 的 GitHub 状态本轮关不掉**（无 token）。两条路都记在这里：① 推送 `main` 后若 GitHub
-> 自动标记 merged，则无需动作；② 若仍 open，则它需要一次人工 close（或下一轮 token 恢复后
-> `gh pr close`）。**代码已经在 `main` 里，这不是"未合入"**（§36.9 逐字给出验证命令）。
+> **PR #107 在 GitHub 侧的收尾（实测，不是推断）**：`git push origin main` 之后匿名读
+> `GET /repos/StvLi/dsh-ros2/pulls/107` → **`state: closed` / `merged: true` /
+> `merged_at: 2026-11-12T07:16:37Z`**。原因是我用的 merge commit 标题保留了
+> `Merge pull request #107 from StvLi/fix/round-31-invisible-ingress` ——**GitHub 按提交信息里的
+> `#<n>` 关联 PR，而不是按 merge 走的是哪条路**。⇒ 无 token 也能把在途 PR 收干净，前提是
+> merge commit 信息里写清 PR 号（这是一条可复用的做法，下一轮不必再"等人 close"）。
+> 收工后 `GET /issues?state=open` 只剩 **1 条**（#101）。
 
 ### 36.5 F1【已修·真实·实测·本轮最重】后台子进程整条通道都在 seam 之外
 
@@ -8373,16 +8380,30 @@ F1 修好后，`spawn` 一定成功（`bash` 存在），但**命令仍可能在
 
 | 项 | 值 |
 | --- | --- |
-| 接手 | 在途 PR **#107** → 复算（§36.4）→ `git merge --no-ff` = **`48356ca`**（`main` `b88cc57 → 48356ca`） |
-| 分支 | `fix/round-31-background-job-seam`（从 `48356ca` 起） |
-| 提交 | **`09a6ca6`** `fix(common): every background child was outside the run seam — \`ros2\` was not on its PATH` |
+| 接手 | 在途 PR **#107** → 复算（§36.4）→ `git merge --no-ff` = **`48356ca`**（`main` `b88cc57 → 48356ca`）；push 后 **PR #107 自动标记 merged**（07:16:37Z） |
+| 分支 1 | `fix/round-31-background-job-seam`（从 `48356ca` 起）→ 提交 **`09a6ca6`** `fix(common): every background child was outside the run seam — \`ros2\` was not on its PATH` |
+| 分支 2 | `docs/round-31-maintenance` → 提交 **`fc5ba89`** `docs: record round 31 — the criterion hung on one function while three paths spawned children` |
+| 分支 3 | `fix/round-31-job-seam-ci` → 提交 **`c500133`** `fix(test): the seam cases asserted when the outcome arrives, not what it is`（见下方"CI 首跑红"） |
 | 本地门（与 CI 同口径） | `pnpm run typecheck` **10/10** ✅ · `pnpm test` **515 passed + 1 pty-skip** ✅ · `build` ✅ · 发布面 9/9 ✅ |
 | CI 验证（无 token 路径） | `git push` 后按 commit SHA 匿名查 `commits/<sha>/check-runs`（第 28 轮的先例） |
-| **PR** | **无法开**（token 失效）。分支已推送，`main` 合入后 GitHub 会显示 `pull/new/…` 的现成链接；需要一次人工开 PR 或下一轮 token 恢复后补 |
-| PR #107 的收尾 | 代码已并入 `main`；若 GitHub 仍显示 open，需人工 close（§36.4 的两个分支说明） |
+| **PR** | **无法开**（token 失效）——但已确认**不必开**：merge commit 里的 `#<n>` 足以让 GitHub 关联/关闭在途 PR（§36.4），本轮三条分支全部落在 `main` |
+| `main` 轨迹 | `b88cc57 → 48356ca`（#107）`→ 39887fe`（docs + 修复合入）`→ 568918c`（CI 修复） |
+| 收工 open item | **1**（#101）；open PR **0** |
 
-> 本轮**没有** `--delete-branch` 的合入路径可走：远端 3 条分支里有 2 条是"代码已在 main、分支待清"。
-> 下一轮第一件事可以是 `git push origin --delete fix/round-31-invisible-ingress` 之类（有无 token 都能做）。
+> **CI 首跑红（第八次"本地绿、CI 红"，且**又是本地错**）**：`check (22)` 在 `39887fe` 上失败
+> （run **43174063605**，`check (24)` 被 fail-fast **cancelled**），而同一份代码本地 515 例全绿。
+> 匿名 API 只能读到两条注解（`Process completed with exit code 1`），**日志需要 admin 权限（HTTP 403）**，
+> 于是按"同一份实现 + 只改测试"做对照：把两条**依赖 300 ms 窗口**的断言改成"断言结果是什么、
+> 不承诺多久到达"（10 s 窗口），并让"仍在运行"那条用一个远长于窗口的 `sleep`，就**5/5 绿**了
+> （`568918c`：`check(22)` ✅ · `check(24)` ✅ · `audit` ✅ · `analyze ×2` ✅）。
+> **机制**：`spawnRosJob` 走的是 **`bash -lc`（登录 shell）**，CI runner 上 `~/.profile`
+> （nvm/sdkman/conda）会让它比 300 ms 更慢 ⇒ 同一段代码在本机报 `failed`/`exited`、在 CI 报 `started`。
+> 这正是 §6 第 22 条"测试要断言与环境无关的不变量"的第 8 次复现，**这次的表现是"我写的新测试"**。
+>
+> 另：`cancel()` 目标是否还对，本轮单独量过（`_maint/r31/probe-cancel.mjs`）：
+> `bash -lc 'exec sleep 30'` 收到 SIGTERM 于 **306 ms** 结束 ⇒ `exec` 让 job 的 pid **就是命令本身**，
+> 与修复前"直接 spawn 二进制"的取消语义一致。**但**`exec sh -c '…'`（测试里那种双层）会让叶子进程
+> 活下来并占着管道 ⇒ 测试用 `sleep 1` + 有界等待，不让包装器有机会挂住用例。
 
 ### 36.10 step 4：dsh-phoenix 循环与 **gen-38**
 
@@ -8440,6 +8461,14 @@ F1 修好后，`spawn` 一定成功（`bash` 存在），但**命令仍可能在
   "现在没有闸"。本轮把后者写成 `MONITOR_EXITED_EARLY` + "机器人在此状态下**没有**安全闸"。
 - **`exec` 是"停止"的组成部分**：加一层 shell 包装就等于把 `cancel()` 的目标从命令换成了包装器。
   凡是"包一层"，都要问"信号还到得了底层吗"。
+- **"启动"这件事在测试里被 mock 掉了两次**（第三十一轮的两个半边）：mock 掉 jobs 注册表 ⇒ **启动从未被
+  断言**（缺陷能活九轮）；而把断言绑在**时间窗口**上 ⇒ 同一个实现的结论随机器快慢而变（CI 首跑红）。
+  两次的根是同一个：**被测的那件事本身没有断言**。凡"启动/停止/超时"，都要有一个**与时钟无关**的观察点
+  （pid 存在、退出码、文件存在），再谈"多久之内"。
+- **无 token 也能把 PR 收干净**：GitHub 按 **merge commit 信息里的 `#<n>`** 关联 PR。所以"没 token
+  就开不了/关不了 PR"只对**开**成立——**合并**这一步只要在提交信息里写清 PR 号，push 之后 PR 会自己
+  变成 merged（本轮 #107 实测 `merged: true`，`merged_at 07:16:37Z`）。这条让"无 token 轮次"的
+  收尾从"留个欠账"变成"照常收工"。
 - **接手别人的在途 PR：先复算、再合入、再用自己的口吻记录**（§36.4）。复算的四个动作很便宜
   （CI 匿名查 / 读关键实现 / 全量重跑 / `diff --stat` 看夹带），但它们决定了"这是谁的结论"。
 - **交接判据要先判"还能不能观测"**（§36.3 第 2 条）：本轮**自己**先 build 了一把，就把"干净基线"
@@ -8456,6 +8485,7 @@ F1 修好后，`spawn` 一定成功（`bash` 存在），但**命令仍可能在
    否则第 30 轮 §35.11 的第 2/3 条永远测不成。
 3. **第 30 轮 §35.11 的第 4/5 条**（jobs 通道字符判据、成功路径的 `envNote`）本轮未在活进程复测——
    下一轮有了 `pid` 与 `settleJobStart` 之后更容易做（`ros2_run --background` 一次即可）。
-4. **`gh` token**：恢复后补三件事——① 给本轮分支开 PR 并合入/关闭；② 读 CodeQL/Dependabot 的
-   **真实**告警数（本轮只有 401）；③ 关掉 PR #107（若仍 open）。
+4. **`gh` token**：恢复后补两件事——① 读 CodeQL/Dependabot 的**真实**告警数（本轮只有 401）；
+   ② 顺手清掉远端 3 条已合入的分支（`git push origin --delete …` 无需 token，也可以现在就做）。
+   **PR #107 已自动 merged，无需人工 close**（§36.4）。
 5. **GUI 子进程的 setup 链**（F3 的边界）：需要"捕获 source 之后的 env"，属新设计。
