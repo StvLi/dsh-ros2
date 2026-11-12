@@ -185,6 +185,37 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 
 ### Fixed
 
+- **后台子进程整条通道都在 run seam 之外：`ros2` 根本不在它的 PATH 上，而工具报 `started`**（第三十一轮）。
+  `runCommand` 身上挂着两条环境判据——解析后的 `source … && ` setup 链、被判定过的 `ROS_LOG_DIR`。
+  所有走 `spawnJob()` 的子进程**一条都没有**：`colcon build`、`ros2 launch`、
+  `ros2 run --background`、`safety_monitor` 都是按继承来的 PATH 直接 spawn，环境只用 `process.env`；
+  GUI 管理器更直接——把 `config.rosLogDir` **原样**写进 `env`，交给 rviz2。
+  **本轮实测**（部署自己的配置，同一个进程、同一份 `lib/`）：
+
+  | 调用 | 结果 |
+  | --- | --- |
+  | `spawnJob('ros2', ['pkg','list'])` | `failed: spawn ros2 ENOENT` |
+  | `runCommand('ros2', ['pkg','list'])` | `ok`，**451** 个包 |
+  | `spawnJob('bash', ['-lc','ros2 run dsh_ros2_safety …'])` | **exit 127**，`ros2: command not found` |
+
+  也就是说：后台 launch/run 从来没跑起来过，**safety_monitor 也从来没起来过**——而
+  `robot_register` / `robot_safety_start` / `ros2_launch` 一律返回 `status: 'started'`
+  （安全闸缺席被报成"已启动"，这是本轮最重的一条）。现在：
+  - `spawnRosJob()` / `spawnRosShellJob()` 成为**唯一的后台 spawn 入口**：用与 `runCommand`
+    同一个 `resolveSetup()` 前缀、同一个 `joinSetupPrefix()` 拼接、同一个 `prepareChildEnv()`
+    判据，并把 `exec` 写进 shell 串（否则 `cancel()` 只杀掉外层 shell，把 ROS 节点留在后台）；
+  - `spawnJob()` 不再从 `dsh-ros2-common` 导出（只留给单测），新的 spawn 点**结构上**拿不到裸原语；
+  - `settleJobStart()`：注册完 job 后在 300 ms 窗口内看它是否已经结束——没有 pid（spawn 失败）
+    → `failed`，窗口内 exit 0 → `exited`，窗口内非零 → `failed` 并附**已净化**的输出尾巴；
+    工具结果新增 `pid` 字段。`safety_monitor` 提前退出时 `robot_safety_start` 直接报
+    `MONITOR_EXITED_EARLY` 并写明"机器人在此状态下**没有**安全闸"；
+  - `GuiManager` 不再持有裸 `rosLogDir`，GUI 子进程的 `ROS_LOG_DIR` 改由工具侧逐次判定后传入。
+  用例 **+9**（`job-spawn-seam.spec.ts`：判定后入环境、setup 链确实生效且裸原语看不到、
+  预渲染 shell 串仍在 seam 内、缺二进制报 127 而不是沉默、仍存活报 `started`+pid、
+  秒退报 `exited`、registry 未跑工厂时不臆断）。
+  边界：GUI 子进程**仍没有** setup 链（rviz2 走裸 PATH），需要"捕获 source 之后的 env"这一新设计，
+  已登记在维护文档 §5。
+
 - **入口判据少了一整类字符：不渲染任何字形的"不可见载体"**（第三十一轮）。入口判据此前判两类：
   控制字节（ESC/BEL/NUL/DEL/C1）与 bidi 覆盖（让文本按字节里没有的顺序渲染）。第三类同样在撒谎、
   却**一个字都不渲染**：Unicode TAG 块（`U+E0000–U+E007F`）能把任意 ASCII 拼成一段显示为空白的文本

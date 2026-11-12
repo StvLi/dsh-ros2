@@ -46,6 +46,10 @@ export function apply(ctx: Context, config: SafetyPackageConfig): void {
     approval,
     jobs,
     workspaceRoot: config.workspaceRoot,
+    // The monitor runs as a background child: it needs the same setup chain and
+    // judged environment a foreground command gets (round 31).
+    rosSetup: config.rosSetup,
+    rosLogDir: config.rosLogDir,
     safetyStrict,
   }
   const tools = createRos2Tools(deps)
