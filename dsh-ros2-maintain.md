@@ -1,7 +1,7 @@
 # dsh-ros2 日常维护文档（Maintenance Log）
 
 > 仓库：`StvLi/dsh-ros2` · 本地代码：`/home/stvli/Desktop/embody_agent_ws/dsh-ros2`（git remote `git@github.com:StvLi/dsh-ros2.git`）
-> 维护日期：2026-11-12（最近一轮：第三十一轮，§36；第三十轮见 §35） · 维护者：DSH scheduled-run agent（StvLi 仓）
+> 维护日期：2026-11-16（最近一轮：第三十二轮，§37；第三十一轮见 §36） · 维护者：DSH scheduled-run agent（StvLi 仓）
 > 维护轮次：第一轮 2026-09-03（§0–§7）；第二轮 2026-09-04（§8）；第三轮 2026-09-05（§9，安全修复）；第四轮 2026-09-05（§10，无 open issue → 安全检查 → 两项维护卫生修复）；第五轮 2026-09-06（§11，无 open issue → 安全检查 → 落地 `ros2_install` 注入修复）；第六轮 2026-09-11（§12，无 open issue → 安全检查 → 落地 `safety_monitor` / `zero_pose_semantics` 注入修复 + vitest 4 升级 + CI 最小权限）；第七轮 2026-09-13（§13，open issue #19 → journey skills + 组合不变量）；第八轮 2026-09-14（§14，3 个 open issue → #21 修复并真机复核、#22 落地但保留 open、#19 完成验收测量）；第九轮 2026-09-21（§15）：open issue #22 → 补齐"会话技能目录对账"（其唯一未实现项）+ 修复 `ros2_env_check` 的"报告 ≠ 执行"缺陷（第八轮存疑项的真因）+ 安全复测；**第十轮 2026-09-22（§16，本轮）：补齐第九轮"在途无 PR"的缺口（PR #27，CI 首跑即抓出"本地绿、CI 红"）→ 在运行中进程里验收并关闭 issue #22 → 定位并修复线上故障真因（`rosSetup` 只校验第一段）→ 3 个 PR 全部合入 main**；第十二轮 2026-09-24（§17，收尾超时遗留的在途 PR #32 → 实测第十轮的重启请求已按硬期限落地 → 修复"配置没送到 doctor"的接线缺口 + API Key 来源语义）；第十三轮 2026-09-25（§18，0 open issue / 0 open PR → 安全扫描发现并落地 3 处真实缺陷 = PTY 会话 id 路径穿越 · 发布物携带 `__pycache__` 字节码 · 安装器选项注入，并开启 Dependabot 告警）；**第十四轮 2026-09-26（§19）：0/0 → 先闭环第十三轮唯一的未闭环观测（gen-21 重启逐字命中），再落地 3 个 PR = 明文传输的 VLM API Key 可见化 · 插件自建 IPC 对象权限收紧（PTY 会话文件 / sidecar UDS / 安装器脚本）· Dependabot 版本更新；并把跨五轮未处理的部署配置项升级为 issue #40；**第十五轮 2026-09-29（§20）：open issue #40 → step 2 评估（合理、必要，但配置在仓库外且需运维决定）→ **承接上一轮时间窗被截断留下的在途分支** `fix/workspace-path-hygiene` 并落地 `fix(common)`：自愈探针用**原始文本**比对存在性，把**存活但写成 `~/…`** 的工作区判为缺失、剔除该段、并在只剩它时**静默切换到 `/opt/ros/<distro>`** —— 恰是本轮文档新推荐的路径形式；闭环第十四轮的 gen-22 观测（逐字命中）；实测线上 **6 处**死链（issue #40 少算 1 处）；本轮**无 GitHub API token**，改用一次性 `ci/probe-*` 分支取得 CI（Node 22/24 双绿）后删除**；**第十六轮 2026-09-30（§21，本轮）：open issue #40 → step 2 复核（逐字确认**仍然准确**、更正为**实测 6 处**死链、结论仍交运维）→ **上一轮唯一的运维缺口已消失：`gh` 有了 token**，于是第一个动作就是把第十五轮卡住的在途分支**开成 PR #48、CI 双绿后合入 main**（第一次拿到**真实** PR CI，不再需要 `ci/probe-*` 代跑）；随后落地 3 个 PR = `fix(packaging)` 发布面 `__pycache__` 守卫（**此前只有"碰巧出现过"的那 3 个包有守卫**，实测 moveit 可复现泄漏 `.pyc`）+ `ci(security)` **CodeQL 代码扫描基线**（第十四/十五轮连续两次建议、本轮首次落地）+ `fix(security)` 首个基线 **29 条告警**中的**2 处真实缺陷**（`ros2_interface_create` 的 TOCTOU 可被符号链接穿出 · 自愈探针的自动探测路径未加引号）；Dependabot 积压 6 → 4（#47 合入并替掉失败的 #44）**；**第十七轮 2026-10-01（§22，本轮）：open issue #40 → step 2 第三次复核（事实逐字不变、结论仍交运维、故不再重复评论）→ 把第十六轮**有意不修**的 3 条 ReDoS 告警**先测量再修**：走真实入口实测后只有 **1 条真实可达**（`parseTopicList`，n=4000 阻塞 **14.8 s**，k=2.11；并发现**第二种**形状 `[`×n+` ]x]` 在 n=20000 阻塞 **697 ms**）、1 条被调用方的 `trim()`/`split('\n')` **消掉而不可达**、1 条**不可复现**（贪婪 `.*` 一步到 `$`，不回溯）→ 三条全部改为**可证明线性**的扫描 + `chars.ts` 逐码点字符类 + **差分等价测试**（穷举 + 10 万条随机/解析器，**0 分歧**），PR #55 CI/CodeQL **5/5 绿**后合入；**闭环第十六轮唯一的遗留观测**（gen-24：`lifecycleState: running`、无残留 `deferDeadline`、`pendingResume: false`）；Dependabot 积压 4 → 3（#43 vitest 4→5 dev-only 合入；#42/#45/#46 抬的是 **type-only peer 下界**，而 CI 装的是**该 PR 自己抬上去的 devDependency** ⇒ **结构上无法评估下界**，升级为 **issue #56**）；CodeQL open **13 → 10**；发布面用**预先种入 `.pyc` + 摘守卫正向对照**复测 9/9 CLEAN；并更正第十六轮快照表里与 §21.8 矛盾的"main 344"（实测 **347**）**。；**第十九轮 2026-10-11（§24，本轮）：open issue #40 → step 2 第五次复核（事实逐字不变、结论仍交运维）→ **把 §5「已知限制」里从第一轮躺到现在的 PTY 幻影会话修掉**：实测旧行为比原文更严重（无 pty 时 `start` 退出 0 并打印 `started session … (pid N)`，`status` **永远**报 `STATE running`，**连不存在的会话 id 也报 running**）⇒ 在父进程 fork 前探测 pty、失败写 `state=failed` 并退出 3、工具返回明确的 `PTY_UNAVAILABLE`；顺带查出**同一个 REMAINDER 解析缺陷**把 `--dir` 当参数投喂给下载来的 sudo 安装脚本（安装器 argv 实测 `["--dir", <dir>]`，修后为 `[]`），且 `--all` 名义存在却不可达 ⇒ 改为"flag 必须在 action 之前"并对 `status`/`stop` 的多余参数**报错而非静默忽略**；**安全扫描发现本地审计门禁在这台机器上根本跑不起来**（`~/.npmrc` 指向的镜像没有 advisory 端点⇒ 前几轮"本地复算供应链"实际无法复现）⇒ 把权威 registry 钉进 `pnpm run audit` / `audit:all` 并让 CI 调用同一条命令；文档计数全面漂移的修正**其中一次被仓库自己的组合不变量测试当场打回**（README 的 83 是"全家族六包"、聚合包只挂 81 ⇒ 改回 83，并在安装步骤把两个数分别说清）→ 并把它升格为 **issue #68**；2 个 PR（#66/#67）CI/CodeQL **5/5 绿**后合入，`main 66a139a → 7dc553f`**。**第二十轮 2026-10-12（§25，本轮）：2 open issue（#40 + #68）→ **issue #68 落地**（`fix(metadata)`：聚合包按"它实际挂的东西"宣称 81、家族 83 仍是家族的数）→ 顺带扫出**同一类缺陷的更大缺口**：三个**已发布**的 per-package `README.md` 从未被任何不变量读过（core 33 对 61、vision 5 对 7、聚合 51+4 对 81+9），已修并把"每个包 README 的第一个工具计数必须等于实测"写进组合不变量（**可证伪**：换回修复前文件即报 `expected 33 to be 61`）→ **issue #40 第六次复核后经运维确认、本轮真正落地**（备份 + 删 5 条死段尾 + 删第 63 行整条 `rosSetup`，YAML 校验通过，行为与自愈后的实际链逐字等价，等 gen-27 重启生效）→ 安全扫描审计/密钥/发布面/CodeQL 全不变（10 条 open 同规则同数量）、**远程已合并分支 16 → 1**（15 条全部是 main 的祖先）→ 1 个 PR（#70）CI/CodeQL **5/5 绿**后合入，`main 7dc553f → 316c142`，**open issue 归零**。**
 >
 > **第二十一轮 2026-10-13（§26，本轮）：0 open issue / 0 open PR → 走 step 5；先闭环上一轮唯一的未闭环观测（gen-27 逐字落地于 10-12 12:40:48，且 `ros2_env_check` 不再报 `missingSources` = issue #40 的最终判据达成）→ 安全扫描沿用同口径全绿（audit prod/含 dev 干净、CodeQL 10 不变、密钥 0、发布面 9/9 CLEAN、Python/TS 执行面与既有防线逐条回归）→ **但真正的高价值发现不是扫描器给的**：把"每个能执行/输入的接口"与"审批面"对照后，发现 `ros2_gui_interact` 可以在**无审批、无目标限制**下把任意按键/文本送进**任意窗口**（选中终端即宿主机命令执行），而更窄的 `ros2_run`/`ros2_service_call` 反而都要审批；且这本是仓库**自己**在 `docs/safety-todo.md` §17 / 验收 #11 决定过、却一直未落地的事（README 还反过来写着"no approval, same as other L3 tools"）→ 落地 `fix(security)`：默认应用白名单（rviz2/rqt/rqt_graph，可配 `guiAllowedApplications`）+ 按**解析后**窗口标题判定 + 白名单外（含不传 `windowTitle`）**先审批**且 fail-closed；用例 **362 → 371**（+9，且删掉 gate 块会让 3 条断言当场变红）；PR #73 CI/CodeQL **5/5 绿**后合入，`main 845f04f → 4ab647c`，并登记 gen-28 让这**真实的运行时变更**（`lib/` 变了）在跑着的 dsh 里生效。**
@@ -85,6 +85,9 @@
 > "断言结果、不承诺多久到达"，因为 `bash -lc` 在 CI runner 上比本机慢——**CI 首跑红一次，第八次
 > "本地绿、CI 红"，又是本地错**）；**本轮无 `gh` token**（两个账号失效）⇒ 不开 PR、告警面 401
 > 如实登记；但**在途 PR #107 仍被收成 merged**（GitHub 按 merge commit 里的 `#107` 关联）。
+
+> **第三十二轮 2026-11-16（§37，本轮）：0 open issue / 1 open PR（#108 dependabot）→ 走 step 5；开工先闭环第三十一轮留下的观测，得到一条否定结论：`ros2_env_check` 报六个 bundle `contentDrifted: true`、`stale: true` ⇒ **gen-38 的效果没有进到活进程**（第三十一轮的后台 job seam 修复不在服务本轮的进程里；本会话沙箱 `--unshare-pid` 读不到 journal，故只能说"没生效"，说不出"为何没生效"）。→ `gh` token 恢复，**告警面第一次读到真实数字**：CodeQL **2**（上一轮 401 读不到）、Dependabot **0**，而 `git blame` 把两条都钉在**第三十一轮自己的提交 `09a6ca6`** 上（`runner.ts:303/726`，`js/shell-command-constructed-from-input`，medium）→ 按 §6 第 8 条分类为**第一类真问题**：上一轮删掉了裸 `spawnJob` 原语，却新建了裸 `spawnRosShellJob(command: string)`，它把**未加引号的字符串**直接拼进 `bash -lc`，唯一调用方靠"自己记得 `shq()`"才安全 ⇒ **判据又回到了调用方**。本轮问句换成最朴素的一句「**这个字符串是数据，还是语法？**」，一次问出两处：**F1-a** 删除"预制 shell 串"入口（`buildSafetyMonitorCommand` → **`buildSafetyMonitorArgv(): string[]`**，两个 spawn 点改走 `spawnRosJob`）· **F1-b** 命令名由"原样插入"改为**校验**（`assertCommandName`，`[A-Za-z0-9_./:@+,-]`，越界抛 `INVALID_COMMAND_NAME`；**不加引号**是因为那会把每条上报命令变成全引号形式，可读性下降而安全零收益）→ 用例 **515 → 519 通过 + 1 pty-skip**（common 192 → 196），**撤门实测：撤守卫+引号 8 红、只撤守卫 1 红**；PR **#108 以 `--no-ff` 合入**（`aad7f85 → 80efd09`）、修复提交 `ea136d6` 推到 `fix/round-32-shell-string-ingress`；**api.github.com 本轮间歇不可达**（`gh pr create` HTTP 499、`check-runs` 超时），故 CodeQL 是否真的归零**留给下一轮读**，本轮**不写成 0**；并登记两个**验证装置自己踩的坑**：`pnpm run build` 会**自动先跑 `pnpm install`**，而 store 在工作区外 ⇒ `ERR_SQLITE_ERROR`（改用 `--config.verify-deps-before-run=false`，代价是本地跑的是 vitest **5.0.5** 而非 #108 的 5.1.0）；以及 `pnpm install … | tail` **退出码 0** 掩盖了失败、撤门时把备份放 `/tmp` 结果**跨调用就丢了**（`--tmpfs /tmp`）。**本轮登记 gen-39**。
+
 
 本文件记录 dsh-ros2 插件的一次完整日常维护循环：**查 issue → 评估建议 → 分支开发 → 验证 → 推送 → 交付维护文档**。每次维护在下方追加一节。
 
@@ -8489,3 +8492,288 @@ F1 修好后，`spawn` 一定成功（`bash` 存在），但**命令仍可能在
    远端分支本轮已清到只剩 `main`（`git push origin --delete` 无需 token）；**PR #107 已自动 merged**，
    无需人工 close（§36.4）。
 5. **GUI 子进程的 setup 链**（F3 的边界）：需要"捕获 source 之后的 env"，属新设计。
+
+## 37. 第三十二轮维护（2026-11-16，本轮）
+
+### 37.1 起点与接手
+
+| 项 | 值 |
+| --- | --- |
+| open issue | **0**（`gh issue list --state open` 空）⇒ 按流程跳过 step 2/3 的 issue 部分，走 step 5 |
+| open PR | **1** = **#108**（`chore(deps): bump vitest from 5.0.5 to 5.1.0`，dependabot） |
+| 远端分支 | `main` + `dependabot/npm_and_yarn/vitest-5.1.0`（两轮清理后仍只有两条） |
+| 工作区 | 干净（`## main...origin/main`，0/0） |
+| `main` 起点 | `aad7f85`（第三十一轮的收尾提交） |
+| `gh` 认证 | **已恢复**（`StvLi` 账号，scopes 含 `repo`/`workflow`）⇒ 第三十一轮 §36.13 第 4 条的第一个动作可以做了 |
+
+### 37.2 第 2 步之外：本轮唯一的"反馈"是扫描器给的，而且指向上一轮自己
+
+本轮 0 issue，但**告警面这次读得到**（第三十一轮只拿到 401）。实测：
+
+| 面 | 结果 | 与上一轮 |
+| --- | --- | --- |
+| **CodeQL open** | **2** | 上一轮**读不到**（401），第二十七轮是 0 ⇒ **0 → 2** |
+| Dependabot open | **0** | 同上一轮 |
+| 两条告警的规则 | `js/shell-command-constructed-from-input`（**medium**）×2 | 新增规则类型 |
+| 位置 | `packages/common/src/runner.ts` **line 303**（`joinSetupPrefix`）与 **line 726**（`spawnSeamed`） | — |
+| 创建时间 | `2026-11-12T07:17:50Z` | — |
+
+`git blame` 把两条都钉在 **`09a6ca6`（第三十一轮自己的修复提交）** 上：
+
+```text
+09a6ca69 2026-11-12 301) function joinSetupPrefix(prefix: string, command: string): string {
+09a6ca69 2026-11-12 303)   return /\s$/.test(prefix) ? `${prefix}${command}` : `${prefix} ${command}`
+09a6ca69 2026-11-12 726)   const cmd = joinSetupPrefix(setup.prefix, `exec ${command}`)
+```
+
+⇒ **这两条不是新问题，是上一轮修复自带的**。按 §6 第 8 条先分三类（真新问题 / 新代码触发的误报 / 行号漂移），
+结论是**第一类：真实的结构性缺陷**——理由见 37.4。
+
+### 37.3 先闭环第三十一轮 §36.13 的遗留观测（结论：一条成立、一条不成立）
+
+| 遗留项 | 本轮实测 | 判定 |
+| --- | --- | --- |
+| 1. gen-38 是否落地 | 开工即读 `ros2_env_check`：**六个 bundle 全部 `contentDrifted: true`**、`stale: true` | ❌ **没落地**。第三十一轮的后台 job seam 修复**不在**服务本轮的进程里 |
+| 2. 干净基线（先读再 build） | 本轮**顺序做对了**：`ros2_env_check` 是本次会话的第一个 ros2 调用，`pnpm build` 在其后 | ✅ 判据成立（见 37.3.1 的边界） |
+| 3. 第 30 轮 §35.11 第 4/5 条 | 未复测 | ⏳ 仍欠（本轮无 `lib/` 之前的活进程，测了也不是 `pid` 那版的语义） |
+| 4. `gh` token 恢复后读真实告警数 | **读到 2 / 0**（见 37.2） | ✅ 但结果**不是** 0，第三十一轮"读不到"的欠账现在已经能回答 |
+| 5. GUI 子进程 setup 链 | 未做 | ⏳ 新设计 |
+
+#### 37.3.1 "没落地"这条判断的证据强度，以及它的边界
+
+`contentDrifted: true` 是第三十轮 F1 设计的判据（比对**进程内已加载代码**与**磁盘 `lib/` + 根清单 +
+`SHARED_RUNTIME_PACKAGES`** 的内容指纹）。本轮磁盘 `packages/common/lib/runner.js` 的 mtime 是
+`2026-11-12 15:19:53`（第三十一轮 build 的产物），而进程报"内存 ≠ 磁盘" ⇒ **进程加载的代码早于该时刻**
+⇒ 第三十一轮的 build 没有被任何重启带进活进程。
+
+**边界（不能写过头）**：本会话的 bash 在 `bwrap --unshare-pid --tmpfs /tmp` 下，`journalctl --user -u dsh-web`
+**返回空**、`pgrep -f dsh-web` 只看得到命名空间里的自己 ⇒ 我**读不到** `[dsh-phoenix] restart requested (gen 37)` /
+`loaded (graceful …)` 这两行，也就**说不出 gen-38 是"没执行"还是"在最终 build 之前就执行了"**。
+能确定的只有一件事：**它的效果没有出现在进程里**。
+
+### 37.4 本轮问句：「这个字符串是**数据**，还是**语法**？」
+
+前八轮的问句依次是"谁能执行 / 谁能写 / 谁能发出去 / 谁没过判据 / 这条判据挂在哪个函数上"。
+本轮换成最朴素的一句：**同一个值，在这一处是数据，在另一处是不是被当成语法解释了？**
+
+这个问题直接从 37.2 的两条告警落到了代码上。被标记的路径里**没有任何一步加过引号**：
+
+```text
+spawnRosShellJob(command: string)            ← 导出的库 API，参数就是"一条 shell 命令"
+  -> spawnSeamed(command)
+  -> joinSetupPrefix(prefix, `exec ${command}`)
+  -> spawnJob('bash', ['-lc', cmd])          ← 到这里 command 仍然是原样字符串
+```
+
+对照 `runCommand`（**没有被报**）：它也走 `joinSetupPrefix` → `bash -lc`，但它前面必然经过
+`renderCommand(bin, args)`，而 `renderCommand` 把每个 **参数** 都 `shq()` 过：
+
+```ts
+export function shq(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`
+}
+export function renderCommand(bin: string, args: string[]): string {
+  return `${bin} ${args.map(shq).join(' ')}`     // ← bin 没有引号（见 F1-b）
+}
+```
+
+⇒ 扫描器分得清"过了 `shq()` 的"和"没过的"，它报的是**没过的那条路**，不是这个库"本质上要拼 shell"。
+**所以这是真问题（第一类），不是误报。**
+
+**为什么它现在还是安全的**：唯一调用方 `buildSafetyMonitorCommand()` 自己记着调 `shq()`：
+
+```ts
+export function buildSafetyMonitorCommand(profilePath: string): string {
+  return `ros2 run dsh_ros2_safety safety_monitor --profile ${shq(profilePath)}`
+}
+```
+
+⇒ 判据挂在**调用方**。这正是第三十一轮自己起名的形状（"判据挂在哪个函数上"），也正是它把 `spawnJob`
+从包导出面删掉时的理由（"新的 spawn 点**结构上**拿不到裸原语"）——**同一个原则，上一轮只做了一半**：
+删掉了"裸 spawn 原语"，却新建了一个"裸 shell 字符串"入口。
+
+**同一条问句的第二处产出（F1-b）**：`renderCommand` 给每个参数加了引号，**却把命令名原样插进第一词位置**。
+所有调用点传的都是字面量（`ros2` 25 处 / `python3` 18 / `bash` 3 / `rosdep` 1），所以今天没有可达的注入；
+但 `spawnRosJob` 是**导出**的，一个 `bin` 参数就是一条命令注入路径。这是"数据 vs 语法"在**同一行代码里**的双重标准。
+
+### 37.5 F1：把判据移进工厂（两处）
+
+**F1-a 删除"预制 shell 串"这个入口本身。**
+
+- `buildSafetyMonitorCommand(): string` → **`buildSafetyMonitorArgv(): string[]`**
+  ```ts
+  export function buildSafetyMonitorArgv(profilePath: string): string[] {
+    return ['run', 'dsh_ros2_safety', 'safety_monitor', '--profile', profilePath]
+  }
+  ```
+  profile 路径作为**一个 argv 元素**流动，引号化只在 `renderCommand()` 里做一次。
+- 两个调用点（`packages/profile/src/tools.ts:191`、`packages/safety/src/tools.ts:127`）改为
+  `spawnRosJob('ros2', buildSafetyMonitorArgv(profilePath), {…})`，与其他后台任务同一条路。
+- **删除 `spawnRosShellJob`**（`runner.ts` 函数 + `dsh-ros2-common` 的导出）。此后**不存在**能把裸字符串
+  交给 shell 的导出 API；`spawnSeamed` 的参数改名为 `rendered`，注释写明"永远是 `renderCommand()` 的结果"。
+
+**F1-b 命令名改为校验，而不是加引号。**
+
+```ts
+const COMMAND_NAME = /^[A-Za-z0-9_./:@+,-]+$/
+export function assertCommandName(bin: string): string {
+  if (!COMMAND_NAME.test(bin)) throw new Error(`INVALID_COMMAND_NAME: …`)
+  return bin
+}
+export function renderCommand(bin, args) {
+  return `${assertCommandName(bin)} ${args.map(shq).join(' ')}`
+}
+```
+
+**为什么不是加引号**：加了引号之后每条上报给运维的命令会变成 `'ros2' 'topic' 'echo'` ——
+**可读性下降、安全上零收益**，而且 `command` 字段是 32 个 adapter 工具的对外表述（`management.spec.ts`
+等处 15+ 条断言按可读形式写）。校验则相反：命令名本来就不该含 shell 语法，越界**立即抛错**，
+正常用法的输出一字不变。
+
+### 37.6 可证伪实测（撤门必须变红，且红在"对"的地方）
+
+| 撤掉什么 | 结果 | 说明 |
+| --- | --- | --- |
+| 守卫 **和** 参数引号（`args.map(shq)` → `args.join(' ')`） | **8 条红**（两个 spec 合计 38 例） | 其中 `quotes every argument, so a hostile argv element stays data` 的失败信息是 shell 把 `a; touch PWNED; b` **拆成了多个词**——这正是那条用例存在的理由 |
+| **只**撤守卫（保留参数引号） | **1 条红** | `assertCommandName > refuses a binary name carrying shell syntax, before anything is spawned` |
+| 还原 | 38/38 绿 | — |
+
+新增/改写的用例（+4，common 192 → 196）：
+
+- `buildSafetyMonitorArgv > returns the profile path as ONE argv element, and renders it quoted`
+- `buildSafetyMonitorArgv > neutralises shell metacharacters …`（**保留**原安全性质，改为断言
+  "argv 里是原始数据 + `renderCommand` 后是一个带引号的词"）
+- `assertCommandName > refuses a binary name …` / `accepts the command names every call site actually passes`
+- `job-spawn-seam > quotes every argument, so a hostile argv element stays data`（**行为断言**：真跑一次
+  `sh -c 'printf %s "$1"'`，断言 `;` 没变成语法、`PWNED` 文件不存在）
+- `job-spawn-seam > starts the safety monitor from argv, through the same seam`（迁移后的路径仍拿到 setup 链）
+- `job-spawn-seam > no longer exposes an API that accepts a pre-joined shell string`（结构断言）
+
+### 37.7 安全扫描（同口径）
+
+| 面 | 结果 | 与上一轮 |
+| --- | --- | --- |
+| 供应链审计 `pnpm run audit` / `audit:dev-high` / `audit:all` | `No known vulnerabilities found` ×3（脚本钉 `registry.npmjs.org`） | 不变 |
+| **CodeQL open** | **2**（均 `js/shell-command-constructed-from-input`，medium，**均为上一轮提交引入**，本轮按原因修，见 37.5） | **0（读不到）→ 2（读到）→ 修后待 CI 复核** |
+| Dependabot open | **0** | 不变（#108 合入） |
+| 密钥（tracked 文件，排除本文档） | 0 条 | 不变 |
+| Python 执行面 | `shell=True` / `os.system` / `create_subprocess_shell`：**0 处**（全 `subprocess` argv） | 不变 |
+| TS 执行面 | 无 `execSync` / `shell: true` / `eval(`；`bash -lc` 站点逐条核对，见 37.4 | 本轮收敛 1 条路 |
+| 直接 `defineTool` 调用点 | 1 处（工厂自身） | 不变 |
+| 远端分支 | 收工 `main` + 本轮工作分支（合入后删除） | — |
+
+**三层扫描器本轮依然只有 CodeQL 给了产出，而它给的恰好是"上一轮自己写的代码"**——
+这比前九轮的"扫描器全绿、缺陷靠人工问句"更进一步：扫描器**在能看见的时候是有效的**，
+上一轮之所以漏，是因为**当时它的告警面不可读**（token 失效，401）。
+
+### 37.8 开发管理（分支 + 规范提交）
+
+| 项 | 值 |
+| --- | --- |
+| 分支 | **`fix/round-32-shell-string-ingress`**（从 `80efd09` 起） |
+| 提交 | **`ea136d6`** `fix(common): an exported API handed bash an unquoted string — quote in the factory, not in the caller` |
+| 先落地的前置 | **PR #108** 以 `--no-ff` 合入 → `80efd09`（`chore(deps): bump vitest from 5.0.5 to 5.1.0 (#108)`），commit 信息里带 `#108` |
+| 本地门 | `typecheck` **10/10** ✅ · `test` **519 通过 + 1 pty-skip** ✅ · `build` ✅ |
+| PR | 见 37.8.2（本轮 api.github.com 间歇不可达） |
+| `main` 轨迹 | `aad7f85 → 80efd09`（#108） |
+
+#### 37.8.1 环境边界：`pnpm` 的依赖自检在沙箱里跑不了（本轮新增的"实测前提"）
+
+第一次跑 `pnpm run build` 直接失败，原因不是代码：
+
+```text
+[ERR_SQLITE_ERROR] unable to open database file
+pnpm: unable to open database file
+    at StoreIndex.openDatabase (…pnpm.mjs…)
+```
+
+- pnpm 的 content-addressable store 在 **`/home/stvli/.local/share/pnpm/store/v11`（工作区之外）**，
+  而本会话只能写工作区 ⇒ store 打不开；
+- 更关键的是 pnpm 11 会在 `pnpm run <script>` **之前自动跑一次 `pnpm install`**（`runDepsStatusCheck`），
+  于是 build / test 一起被卡住。
+
+绕法：`pnpm --config.verify-deps-before-run=false run build|test`（依赖已安装，跳过自检）。
+**代价必须写明**：因此本地门跑的是**已安装的 vitest 5.0.5**，不是 #108 抬到的 5.1.0；
+5.1.0 的可信度来自 **#108 自己的 CI**（它按合并后的 lockfile 安装，`check (22)`/`check (24)` 绿）。
+
+另：第一次 `pnpm install … | tail -15` **退出码是 0**，而里面明明是 `ERR_SQLITE_ERROR` ——
+`| tail` 把失败吞了。这是本仓库第 30/31 轮反复记的"绿会骗人"在**工具调用本身**的一次复现。
+
+#### 37.8.2 PR 与 CI（api.github.com 本轮间歇不可达，如实登记）
+
+- `gh pr create` → `HTTP 499`（`api.github.com/graphql`），重试仍失败；
+- `gh api …/commits/<sha>/check-runs` → `dial tcp 198.19.0.97:443: i/o timeout`；
+- 但 **`git push`（SSH）成功**：`fix/round-32-shell-string-ingress` 已在 origin，**CI 会在该分支上跑**。
+
+⇒ 与第三十一轮"无 token"是**不同**的故障面（那次是鉴权，这次是到 `api.github.com` 的连通性），
+处理方式也不同：分支已推送，**下一轮**应先补两件事——① 若 PR 未自动建立则补开；② 读 `check (22|24)` 与
+**两条 CodeQL 是否真的关闭**。**不得**在这两条读回来之前把 CodeQL 写成 0。
+
+### 37.9 step 4：dsh-phoenix 与 gen-39
+
+**要不要重载：要，而且本轮有两条理由（第三十一轮的没生效 + 本轮的改动同样在 `lib/`）。**
+
+本轮改的是 `packages/common/lib/runner.js`（每条命令、每个后台任务必经）与
+`packages/{profile,safety}/lib/tools.js`（两个 spawn 点），活进程的 `node_modules/dsh-ros2-*` 是指向
+本仓库的符号链接 ⇒ **磁盘新、内存旧**（开工时 6/6 `contentDrifted: true` 就是证据）。
+
+**经动态 Host 插件（`phnx-2`）取 `ctx.get('dsh.phoenix')` 实测**：
+
+```json
+{"mounted":true,"canRestartType":"function","requestRestartType":"function",
+ "lifecycleType":"undefined","generationType":"undefined","canRestartResult":true}
+```
+
+⇒ 与第二十九/三十一轮一致：`canRestart` 是**函数**且返回 `true`（**调用它**才是正确用法），
+`lifecycle` / `generation` **读不到**（`undefined`）——§5 那条记录本轮**第二次**证实。
+
+**验收判据（重载后逐条复测，写给下一轮）**：
+
+1. `ros2_env_check` → 六个 bundle **`contentDrifted: false`**、`stale: false`（这是 37.3 那条"没落地"的关闭条件）。
+2. **F1-a 的指纹**：`robot_safety_start` 的失败措辞应为
+   `Package 'dsh_ros2_safety' not found`（上一轮 seam 修好的标志），而**不是** `ros2: command not found`。
+3. **F1-b 的指纹**：任何工具结果里的 `command` 字段**不应**出现 `'ros2' 'param' 'set'` 这种全引号形式
+   （命令名保持裸写、参数单引号不变）。
+4. 后台任务结果里应出现 **`pid`**（第三十一轮 F2 的判据，本轮仍未在活进程见过）。
+
+### 37.10 用例与自检基线
+
+| 面 | 上一轮（第三十一轮） | 本轮 |
+| --- | --- | --- |
+| vitest（全量） | 515（514 + 1 pty-skip） | **519 通过 + 1 pty-skip = 520 例**，**+4** |
+| 逐包 | core 166(+1 skip) / vision 64 / common 192 / dsh-ros2 29 / moveit 21 / state 19 / profile 14 / safety 10 | core **166**(+1 skip) / vision **64** / common **196** / dsh-ros2 **29** / moveit **21** / state **19** / profile **14** / safety **10** |
+| Python 自检 | 101 项 | **101 项**（robot_profile 38 / private_paths 16 / zero_pose 21 / image_snapshot 7 / vlm_node 19） |
+| sidecar 自检 | 19 场景 | **19 场景** |
+| 撤门实测（可证伪） | #102 3 / #103 3 / #104 4 / #105 1 | 本轮：**撤守卫+引号 → 8 红**；**只撤守卫 → 1 红** |
+
+> 计数口径：上一轮标题写 515（514+1skip），而逐包相加是 515 通过 +1 skip。本轮按**逐包相加**报
+> 519 通过 +1 skip，`+4` 与 common 192 → 196 精确对齐。
+
+### 37.11 结论与教训
+
+- **"修好一处"可以是"新开一处"**：上一轮删掉裸 `spawnJob` 原语（对），同时新建了裸
+  `spawnRosShellJob(command: string)`（错）——**同一轮里，同一个原则只贯彻了一半**。
+  教训不是"要更小心"，而是：**新增一个"接受字符串并交给解释器"的入口时，先问它是不是把判据又发回给了调用方**。
+- **扫描器在能看见的时候是有效的**。前九轮"扫描器全绿"里的那一轮（第三十一轮）**恰好是告警面不可读**（401）。
+  ⇒ §5 那句"CI 里 `analyze` 绿只证明分析跑成功，不等于 0 告警"本轮得到了**正面证据**：
+  它当时就是 2，而不是 0。
+- **"这个字符串是数据还是语法"是个可复用的问句**：它不依赖任何扫描器，一次问出 2 处（裸 shell 串入口、
+  命令名不加引号），而且能立刻判断"加引号"与"加校验"哪个更对（**可读性是这里的真实约束**）。
+- **验证装置本身也会踩同一批边界**：撤门时把备份放在 `/tmp`，两次 bash 调用之间**备份就不见了**
+  （`--tmpfs /tmp` 每次都是新的），导致第 2 次实测跑的是**没还原的**代码。§5 早就记着"沙箱里 `/tmp` 是私有的",
+  但它记的是"测不了宿主",没记"**连自己的中间产物都留不住**"。跨调用的中间产物必须放**工作区**。
+- **`| tail` 会吞退出码**（本轮 `pnpm install` 明明 `ERR_SQLITE_ERROR`，管道退出 0）。凡"用管道看结果"，
+  要么 `set -o pipefail`，要么别用管道判成败。
+
+### 37.12 未闭环观测（写给下一轮，别当"已修"引用）
+
+1. **两条 CodeQL 是否真的关闭**：本轮只做到"按原因改 + 推送"。要在能连上 `api.github.com` 时读
+   `code-scanning/alerts?state=open`，并核对**是不是 0**；若仍为 2，先按 §6 第 8 条分类（可能属于
+   "形状变了、查询不再建模"），**不得**直接写成已修。
+2. **gen-39 是否把 `contentDrifted` 归零**（37.9 判据 1–4）。
+3. **PR 是否建立/合入**：`HTTP 499` 导致本轮可能没有 PR 页面；分支已推送。合入时在提交信息里写
+   `(#<n>)` 可让 GitHub 自动关联（第三十一轮 #107 的先例）。
+4. **本地门与 #108 的一致性**：本轮本地跑的是 vitest 5.0.5。若下一轮仍进不了 store，就继续用
+   `--config.verify-deps-before-run=false` 并如实标注版本。
+5. **第三十轮 §35.11 第 4/5 条**（jobs 通道字符判据、成功路径的 `envNote`）**连续两轮未复测**，
+   已从"欠账"变成"陈账"，下一轮要么测要么删。
