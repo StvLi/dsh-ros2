@@ -614,6 +614,27 @@ All notable changes to **dsh-ros2** are documented here. Format follows
 - 修正工作区 vitest 用例计数：README/README_CN "166 例"→**182 例**（CI 环境下
   含 PTY 测试全量通过；本机无 pty 时那 1 例 skip）。
 
+### Fixed
+
+- **命令名不再原样插进 `bash -lc`，且唯一接受"预制 shell 串"的入口被删除**（第三十二轮）：
+  上一轮把后台子进程接回 run seam 时新增了 `spawnRosShellJob(command: string)`，它把一个
+  **未加引号的字符串**直接拼进 `bash -lc`；唯一调用方 `buildSafetyMonitorCommand()` 之所以安全，
+  只因为它自己记得调 `shq()`。CodeQL 因此报出 2 条 `js/shell-command-constructed-from-input`
+  （`packages/common/src/runner.ts`，medium）——判据挂在**调用方**而不是工厂，正是上一轮自己命名的形状。
+  - `buildSafetyMonitorCommand(): string` → **`buildSafetyMonitorArgv(): string[]`**：profile 路径
+    作为一个 argv 元素流动，引号化只在 `renderCommand()` 里做一次（`robot_register` /
+    `robot_safety_start` 两处调用点改为 `spawnRosJob('ros2', buildSafetyMonitorArgv(p), …)`）。
+  - **删除 `spawnRosShellJob`**（含 `dsh-ros2-common` 的导出面）：结构上不再存在"把裸字符串交给 shell"的 API。
+  - 新增 **`assertCommandName()`**：`renderCommand()` 过去给每个**参数**加引号、却把**命令名**原样插入，
+    于是 `spawnRosJob('payload; rm -rf ~', …)` 这种调用会把 shell 语法当命令名执行。现在命令名按
+    `[A-Za-z0-9_./:@+,-]` 校验、越界直接抛 `INVALID_COMMAND_NAME`（所有调用点传的都是字面量，
+    因此这拦的是契约违规，而不是正常用法）。没有改用加引号：那会让每条上报的命令变成
+    `'ros2' 'topic' 'echo'`，可读性下降而没有额外安全收益。
+- **`pnpm` 的依赖状态自检把 `pnpm run build` / `test` 卡在沙箱里**（本轮环境观察，非代码缺陷）：
+  本机 content-addressable store 在 `~/.local/share/pnpm/store`（工作区之外），只读沙箱里
+  `pnpm audit` / `pnpm install` 会以 `ERR_SQLITE_ERROR` 失败，且 `pnpm run` 会**自动**先跑 `pnpm install`。
+  本轮的验收线因此用 `pnpm --config.verify-deps-before-run=false run build|test` 跑（依赖已安装）。
+
 ## [dsh-ros2-vision 0.1.3] - 2026-09-02
 
 ### Fixed

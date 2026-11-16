@@ -77,15 +77,25 @@ export function shq(value: string): string {
 }
 
 /**
- * Build the `safety_monitor` launch command for a robot profile.
+ * The `safety_monitor` argv for a robot profile.
+ *
  * Shared by `robot_register` (auto-start) and `robot_safety_start`, so both
- * quote the profile path identically. `profilePath` derives from user/agent
- * input (explicit `--profile`, or the path written by `robot_register`), so it
- * is emitted as ONE `shq()` shell word: neither a shell metacharacter nor an
- * embedded single quote can break out of the `bash -lc` string.
+ * name the profile identically. `profilePath` derives from user/agent input
+ * (explicit `--profile`, or the path written by `robot_register`), and it is
+ * returned as ONE argv element — never as a pre-joined shell string.
+ *
+ * Round 32: this used to be `buildSafetyMonitorCommand(): string`, and the only
+ * thing between a hostile profile path and `bash -lc` was this function
+ * remembering to call `shq()`. CodeQL read the exported `spawnRosShellJob()`
+ * parameter straight into `bash -lc` and reported
+ * `js/shell-command-constructed-from-input` on `joinSetupPrefix` (medium): the
+ * quoting criterion lived in the CALLER, which is exactly the shape round 31
+ * named ("the criterion hangs on one function while three paths spawn
+ * children"). Returning argv moves the quoting into `renderCommand()`, where
+ * every caller — present and future — gets it without having to remember.
  */
-export function buildSafetyMonitorCommand(profilePath: string): string {
-  return `ros2 run dsh_ros2_safety safety_monitor --profile ${shq(profilePath)}`
+export function buildSafetyMonitorArgv(profilePath: string): string[] {
+  return ['run', 'dsh_ros2_safety', 'safety_monitor', '--profile', profilePath]
 }
 
 // ── session-scoped workspace override + ros setup fallback chain ──────────
@@ -282,9 +292,43 @@ export function resolveSetup(opts: RunOptions): SetupResolution {
   }
 }
 
+/**
+ * What a command NAME may consist of.
+ *
+ * `renderCommand` puts the name in the FIRST position of a `bash -lc` string,
+ * where no quoting is applied (quoting it would turn every reported command
+ * into `'ros2' 'topic' 'echo' '…'`, which is faithful but unreadable — and the
+ * reported command is operator-facing). The arguments are `shq()`-quoted; the
+ * name is validated instead, because a binary name is never supposed to contain
+ * shell syntax in the first place. Every call site passes a literal
+ * (`ros2` / `python3` / `bash` / `rosdep`), so this rejects a contract
+ * violation rather than a legitimate use.
+ */
+const COMMAND_NAME = /^[A-Za-z0-9_./:@+,-]+$/
+
+/**
+ * Validate a command name for the first position of a shell command.
+ *
+ * Round 32: `renderCommand` quoted every argument but interpolated `bin` raw,
+ * so `spawnRosJob('payload; rm -rf ~', …)` — an exported library API — would
+ * have reached `bash -lc` as syntax. No caller does that today; the guard is
+ * here so no future one can, and so the asymmetry is impossible to reintroduce
+ * silently.
+ */
+export function assertCommandName(bin: string): string {
+  if (!COMMAND_NAME.test(bin)) {
+    throw new Error(
+      `INVALID_COMMAND_NAME: ${JSON.stringify(bin)} — a command name may only contain ` +
+        `[A-Za-z0-9_./:@+,-]. It is interpolated unquoted into the first word of a ` +
+        `\`bash -lc\` string, so shell syntax here is command injection, not a path.`,
+    )
+  }
+  return bin
+}
+
 /** Display form of a command: the binary plus its single-quoted arguments. */
 export function renderCommand(bin: string, args: string[]): string {
-  return `${bin} ${args.map(shq).join(' ')}`
+  return `${assertCommandName(bin)} ${args.map(shq).join(' ')}`
 }
 
 /**
@@ -717,13 +761,18 @@ export interface RosJobOptions {
  * `exec` is not decoration: without it the job's SIGTERM kills the shell and
  * leaves the ROS node it started running, so `cancel()` would stop reporting on
  * a process it did not stop.
+ *
+ * `rendered` is ALWAYS a `renderCommand()` result — a validated name followed by
+ * `shq()`-quoted arguments. Round 32 removed the one caller that passed an
+ * arbitrary shell string (`spawnRosShellJob`), so this function cannot be handed
+ * unquoted library input any more; the parameter name says so.
  */
-function spawnSeamed(command: string, opts: RosJobOptions): JobHooks {
+function spawnSeamed(rendered: string, opts: RosJobOptions): JobHooks {
   const setup = resolveSetup({
     ...(opts.rosSetup !== undefined ? { rosSetup: opts.rosSetup } : {}),
     ...(opts.workspaceRoot !== undefined ? { workspaceRoot: opts.workspaceRoot } : {}),
   })
-  const cmd = joinSetupPrefix(setup.prefix, `exec ${command}`)
+  const cmd = joinSetupPrefix(setup.prefix, `exec ${rendered}`)
   const hooks = spawnJob('bash', ['-lc', cmd], {
     ...(opts.cwd !== undefined ? { cwd: opts.cwd } : {}),
     env: opts.childEnv.env,
@@ -732,17 +781,17 @@ function spawnSeamed(command: string, opts: RosJobOptions): JobHooks {
   return { ...hooks, command: cmd }
 }
 
-/** Spawn a background job for `bin args` through the run seam. */
+/**
+ * Spawn a background job for `bin args` through the run seam.
+ *
+ * This is the ONLY exported way to start a background ROS job (round 31 removed
+ * `spawnJob` from the package surface; round 32 removed `spawnRosShellJob`,
+ * which accepted a pre-joined shell string). Both removals are the same
+ * principle: a new spawn point should be structurally unable to hand the shell
+ * something unquoted, rather than being reminded to quote.
+ */
 export function spawnRosJob(bin: string, args: string[], opts: RosJobOptions): JobHooks {
   return spawnSeamed(renderCommand(bin, args), opts)
-}
-
-/**
- * Spawn a background job for a command that is ALREADY a shell string (e.g.
- * `buildSafetyMonitorCommand()`), still through the run seam.
- */
-export function spawnRosShellJob(command: string, opts: RosJobOptions): JobHooks {
-  return spawnSeamed(command, opts)
 }
 
 /** What a tool may say about a job it just asked the registry to start. */

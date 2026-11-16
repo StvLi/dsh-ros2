@@ -20,16 +20,16 @@
  * that died is reported as dead instead of started.
  */
 import { describe, expect, it } from 'vitest'
-import { chmodSync, lstatSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import {
+  buildSafetyMonitorArgv,
   prepareChildEnv,
   renderCommand,
   settleJobStart,
   spawnJob,
   spawnRosJob,
-  spawnRosShellJob,
   shq,
   type JobHooks,
 } from '../src/runner.js'
@@ -86,13 +86,40 @@ describe('background jobs go through the same environment seam as foreground com
     }
   })
 
-  it('keeps a pre-rendered shell command (the safety monitor form) inside the seam', async () => {
-    const dir = tempDir('r31-shell-')
+  it('quotes every argument, so a hostile argv element stays data (round 32)', async () => {
+    const dir = tempDir('r32-quote-')
     try {
-      writeFileSync(path.join(dir, 'setup.bash'), 'export DSH_R31_SAFETY=ready\n')
+      writeFileSync(path.join(dir, 'setup.bash'), 'export DSH_R32_Q=ok\n')
       const childEnv = await prepareChildEnv()
-      // Exactly the shape `buildSafetyMonitorCommand()` produces: a shell string.
-      const job = spawnRosShellJob('sh -c \'printf %s "$DSH_R31_SAFETY"\'', {
+      // The argument is DATA from the tool layer's point of view (a topic name, a
+      // path, a message). If any of it were interpolated unquoted, the `;` below
+      // would become shell syntax and create the PWNED file.
+      const hostile = 'a; touch PWNED; b'
+      const job = spawnRosJob('sh', ['-c', 'printf %s "$1"', '-', hostile], {
+        childEnv,
+        cwd: dir,
+        rosSetup: `source ${shq(path.join(dir, 'setup.bash'))} && `,
+      })
+      // …the shell saw one word, and the setup chain still applied.
+      expect(await outputOf(job)).toContain(hostile)
+      expect(existsSync(path.join(dir, 'PWNED'))).toBe(false)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('starts the safety monitor from argv, through the same seam', async () => {
+    const dir = tempDir('r32-safety-')
+    try {
+      writeFileSync(path.join(dir, 'setup.bash'), 'export DSH_R32_SAFETY=ready\n')
+      const childEnv = await prepareChildEnv()
+      // Round 32 deleted `spawnRosShellJob`, whose parameter went straight into
+      // `bash -lc`. The safety monitor — its only caller — now hands argv to
+      // `spawnRosJob` like every other job, and the seam is unchanged: the setup
+      // chain still reaches the child.
+      expect(buildSafetyMonitorArgv('/tmp/p.yaml'))
+        .toEqual(['run', 'dsh_ros2_safety', 'safety_monitor', '--profile', '/tmp/p.yaml'])
+      const job = spawnRosJob('sh', ['-c', 'printf %s "$DSH_R32_SAFETY"'], {
         childEnv,
         rosSetup: `source ${shq(path.join(dir, 'setup.bash'))} && `,
       })
@@ -100,6 +127,14 @@ describe('background jobs go through the same environment seam as foreground com
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
+  })
+
+  it('no longer exposes an API that accepts a pre-joined shell string', async () => {
+    const runner = await import('../src/runner.js')
+    // The structural guarantee: there is no exported way to hand `bash -lc` an
+    // unquoted string, so a future spawn point cannot forget to quote.
+    expect('spawnRosShellJob' in runner).toBe(false)
+    expect('buildSafetyMonitorCommand' in runner).toBe(false)
   })
 
   it('renders the reported command exactly once, quoted', () => {

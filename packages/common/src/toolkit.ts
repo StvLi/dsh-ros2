@@ -156,14 +156,18 @@ export const renderResult = (_args: unknown, value: JsonValue) => [{ type: 'text
 export { type JsonValue, parseJsonOrRaw }
 // `spawnJob` is deliberately NOT re-exported: it is the raw primitive that runs
 // a binary from the inherited PATH with no setup chain and no judged
-// environment. Tools spawn through `spawnRosJob` / `spawnRosShellJob`, which
-// apply the same seam `runCommand` applies (round 31: `ros2 launch`,
-// `colcon build`, `ros2 run --background` and the safety monitor were all
-// outside it, so `ros2` was not on the child's PATH at all).
+// environment. Tools spawn through `spawnRosJob`, which applies the same seam
+// `runCommand` applies (round 31: `ros2 launch`, `colcon build`,
+// `ros2 run --background` and the safety monitor were all outside it, so `ros2`
+// was not on the child's PATH at all).
+//
+// Round 32 removed `spawnRosShellJob` — the one entry point that accepted a
+// pre-joined shell string and handed it to `bash -lc` unquoted (CodeQL
+// `js/shell-command-constructed-from-input`); its only caller now passes argv
+// through `spawnRosJob` like everything else.
 export {
   runCommand,
   spawnRosJob,
-  spawnRosShellJob,
   settleJobStart,
   prepareChildEnv,
   renderCommand,
@@ -555,6 +559,14 @@ export function ros2Tool(deps: ToolDeps, spec: RosToolSpec) {
       const params = args as Record<string, unknown>
       const commandArgs = spec.buildArgs(params)
       const res = await deps.run(bin, commandArgs, spec.runOpts?.(params) ?? {})
+      // Display-only, and deliberately NOT `renderCommand()`: this field is
+      // reported to the operator and asserted by existing tests as readable
+      // `ros2 param set /n p 10` rather than the shell-faithful
+      // `ros2 'param' 'set' '/n' 'p' '10'`. It is never executed. The question
+      // "is this string data or syntax?" was asked in round 32: it is data
+      // here, but it does mean these 32 adapter tools report their command in a
+      // different quoting style from `runCommand`-based tools. Registered in
+      // §5 rather than silently changed (that would churn operator-facing text).
       const command = `${bin} ${commandArgs.join(' ')}`
       if (!res.ok) {
         if (spec.onNonZero && !res.timedOut) {

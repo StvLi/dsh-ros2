@@ -42,11 +42,11 @@ import {
   defineRos2Tool,
 } from 'dsh-ros2-common'
 import {
-  spawnRosShellJob,
+  spawnRosJob,
   settleJobStart,
   childEnvFor,
   seamOptionsFor,
-  buildSafetyMonitorCommand,
+  buildSafetyMonitorArgv,
   isSafeProfileName,
   type JobHooks,
 } from 'dsh-ros2-common'
@@ -188,7 +188,7 @@ function makeRobotRegisterTool(deps: ToolDeps) {
                 kind: 'safety-monitor',
                 label: `safety_monitor/${name}`,
                 outputLimitBytes: 8 * 1024 * 1024,
-                run: () => (hooks = spawnRosShellJob(buildSafetyMonitorCommand(profilePath), {
+                run: () => (hooks = spawnRosJob('ros2', buildSafetyMonitorArgv(profilePath), {
                   childEnv,
                   ...seamOptionsFor(deps),
                   outputLimitBytes: 8 * 1024 * 1024,

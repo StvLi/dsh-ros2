@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { ensureWritableRosLogDir, judgeConfiguredRosLogDir } from '../src/runner.js'
+import { ensureWritableRosLogDir, judgeConfiguredRosLogDir, renderCommand } from '../src/runner.js'
 
 describe('ensureWritableRosLogDir', () => {
   it('keeps an explicitly set ROS_LOG_DIR in the env', async () => {
@@ -324,21 +324,53 @@ describe('resolveSetup fallback chain + session override', () => {
   })
 })
 
-describe('buildSafetyMonitorCommand', () => {
-  it('emits the profile path as a single shq() shell word', async () => {
-    const { buildSafetyMonitorCommand } = await import('../src/runner.js')
-    expect(buildSafetyMonitorCommand('/tmp/testbot.yaml'))
-      .toBe("ros2 run dsh_ros2_safety safety_monitor --profile '/tmp/testbot.yaml'")
+describe('buildSafetyMonitorArgv', () => {
+  it('returns the profile path as ONE argv element, and renders it quoted', async () => {
+    const { buildSafetyMonitorArgv } = await import('../src/runner.js')
+    expect(buildSafetyMonitorArgv('/tmp/testbot.yaml'))
+      .toEqual(['run', 'dsh_ros2_safety', 'safety_monitor', '--profile', '/tmp/testbot.yaml'])
+    expect(renderCommand('ros2', buildSafetyMonitorArgv('/tmp/testbot.yaml')))
+      .toBe("ros2 'run' 'dsh_ros2_safety' 'safety_monitor' '--profile' '/tmp/testbot.yaml'")
   })
 
   it('neutralises shell metacharacters and embedded quotes in the profile path', async () => {
-    const { buildSafetyMonitorCommand } = await import('../src/runner.js')
+    const { buildSafetyMonitorArgv } = await import('../src/runner.js')
     const hostile = "/tmp/a'; touch /tmp/pwned; echo '"
-    const cmd = buildSafetyMonitorCommand(hostile)
+    // Round 32: the path travels as DATA in an argv array, untouched; the quoting
+    // happens once — in `renderCommand` — for every caller. Previously this
+    // function returned a finished shell string, so the quoting was this
+    // caller's private responsibility (CodeQL reported the exported
+    // `spawnRosShellJob()` parameter reaching `bash -lc` for exactly that gap).
+    const argv = buildSafetyMonitorArgv(hostile)
+    expect(argv).toHaveLength(5)
+    expect(argv[4]).toBe(hostile)
+    const cmd = renderCommand('ros2', argv)
     // The whole hostile value stays inside ONE single-quoted word; the embedded
     // quote is escaped as '\'' so `;` / `touch` can never become shell syntax.
-    expect(cmd).toBe(`ros2 run dsh_ros2_safety safety_monitor --profile '/tmp/a'\\''; touch /tmp/pwned; echo '\\'''`)
+    expect(cmd).toBe(`ros2 'run' 'dsh_ros2_safety' 'safety_monitor' '--profile' '/tmp/a'\\''; touch /tmp/pwned; echo '\\'''`)
     expect(cmd).not.toContain("--profile '/tmp/a'; touch")
+  })
+})
+
+describe('assertCommandName', () => {
+  // Round 32: `renderCommand` quoted every argument but interpolated the binary
+  // name raw, so an exported API (`spawnRosJob`) would have run shell syntax in
+  // the first word position. The name is validated instead of quoted, so
+  // operator-facing commands stay readable and the asymmetry cannot come back.
+  it('refuses a binary name carrying shell syntax, before anything is spawned', async () => {
+    const { assertCommandName, renderCommand, spawnRosJob, prepareChildEnv } = await import('../src/runner.js')
+    const hostile = 'ros2; touch /tmp/dsh-r32-pwned'
+    expect(() => assertCommandName(hostile)).toThrow(/INVALID_COMMAND_NAME/)
+    expect(() => renderCommand(hostile, [])).toThrow(/INVALID_COMMAND_NAME/)
+    const childEnv = await prepareChildEnv()
+    expect(() => spawnRosJob(hostile, [], { childEnv })).toThrow(/INVALID_COMMAND_NAME/)
+  })
+
+  it('accepts the command names every call site actually passes', async () => {
+    const { assertCommandName } = await import('../src/runner.js')
+    for (const name of ['ros2', 'python3', 'bash', 'rosdep', '/usr/bin/env', 'ros2_launch.py']) {
+      expect(assertCommandName(name)).toBe(name)
+    }
   })
 })
 
