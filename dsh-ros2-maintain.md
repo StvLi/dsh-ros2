@@ -110,9 +110,10 @@
 > 单项 8 KiB · 总量 128 KiB，判过的 `ROS_LOG_DIR` 压过捕获值，捕获失败降级但**写进 warnings**），
 > **撤门实测：接线 4 红 · 显示标识 1 红 · 体积 2 红**；用例 **519 → 534 通过 + 1 pty-skip**（common 196→206、
 > core 166→171）；安全扫描同口径（审计 3/3 干净、**CodeQL 0**、Dependabot 0、密钥 0、Python/TS 执行面 0、
-> 发布面以 CI 的 tarball 门为准）。**step 4** 仍按规矩发 phoenix 请求（gen 39，04:11:02，
-> `lifecycleState: deferred`），但**本轮不写"已生效"**：预期仍是 `exit=1`，并留下下一轮的**一行判据**
-> （`journalctl … | grep 'restart cmd exit'`）。顺带更正第三十二轮"读不到 journal"的说法——**本轮同一沙箱读得到**。
+> 发布面以 CI 的 tarball 门为准）。**step 4** 仍按规矩发 phoenix 请求（gen 39，04:11:02），并**在本轮等到了硬期限**：
+> 04:26:02 `HARD defer deadline reached; forcing restart` → `restart cmd exit=1` → `reverting to running`
+> ⇒ **第五次连续失败，端到端观测到的，不是推断**（38.7 逐字）。所以本轮**不写"已生效"**，
+> 留下的是一行判据（`journalctl … | grep 'restart cmd exit'`）与 38.3.4 的两个运维动作。顺带更正第三十二轮"读不到 journal"的说法——**本轮同一沙箱读得到**。
 > `main` `80efd09 → 4192eb8 → 94e36f4 → 83b880b`。
 
 本文件记录 dsh-ros2 插件的一次完整日常维护循环：**查 issue → 评估建议 → 分支开发 → 验证 → 推送 → 交付维护文档**。每次维护在下方追加一节。
@@ -300,7 +301,8 @@ dsh-phoenix 已在 web profile 安装并生效：
 ## 6. 下次维护建议动作
 
 0. **第三十三轮的结论改变了"落地"这件事的含义**（先读，再动手）：
-   **自更新循环的最后一步从 2026-11-10 04:20:20 起就没有成功过**（§38.3）。
+   **自更新循环的最后一步从 2026-11-10 04:20:20 起就没有成功过**（§38.3），本轮自己这一发（gen 39）
+   在 04:26:02 也是 `exit=1`（§38.7 逐字）。
    所以下一轮**第一件事不是写代码**，而是读一行：
 
    ```text
@@ -310,7 +312,7 @@ dsh-phoenix 已在 web profile 安装并生效：
    - 出现 `restart cmd exit=1` ⇒ 循环仍然坏着：**先做 §38.3.4 的运维动作**（一次性 `busctl … RestartUnit`
      或给 `dsh-web.service` 加 `DSH_PHOENIX_RESTART_CMD` drop-in），否则本轮任何"已落地"都是假的；
    - 出现新的 `loaded (graceful …)` + 新 PID ⇒ 按 §38.10 第 2 条逐条复测；**验收通过之前不要写"已生效"**。
-1. **§38.10 六条未闭环观测**：gen-39 的 exit 码 · `contentDrifted` 归零 + §37.9 四条判据（一条都没在活进程
+1. **§38.10 六条未闭环观测**：gen-39 已实测 `exit=1`（38.7）· `contentDrifted` 归零 + §37.9 四条判据（一条都没在活进程
    见过）· #111 的 `ros2_gui_start` 行为验收 · phoenix 工具面 `reason` = `[object Object]` ·
    第三十轮 §35.11 第 4/5 条（仍被重启阻塞）· 本地 vitest 5.0.5 与锁文件 5.1.0 的不一致。
 2. **"分支已推送"不等于"被验证过"**（§38.2.1）：`ci.yml` 只听 `push→main` 与 `pull_request`，所以
@@ -9045,10 +9047,24 @@ $ … | grep -c '^BASH_FUNC'                                               → 0
 - **journal 逐字**：`Nov 17 04:11:02 dsh[1831]: [dsh-phoenix] restart requested (gen 39): [object Object]`
   ——注意 `reason` 变成了 **`[object Object]`**：工具面把 `reason` 当对象传下去，日志里丢掉人话。
   这条会让"journal 逐字可引用"的老约定断掉（跨仓库问题，登记 38.10 第 4 条）。
-- **状态文件** `~/tmp/dsh-phoenix-state.json`：`generation: 39`、`lifecycleState: "deferred"`、
+- **状态文件** `~/tmp/dsh-phoenix-state.json`：请求瞬间 `generation: 39`、`lifecycleState: "deferred"`、
   `deferDeadline: 1794860762156`（= 04:26:02，硬期限 15 分钟）、`pendingResume: false`。
-- **本轮实测的预期**：到点执行时仍会 `restart cmd exit=1`（38.3.3 已把机制钉死），
-  所以**本轮不写"gen-39 生效"**，只写"已请求"。
+- **本轮不写"预期"，写实测**：本轮**等到了**那个硬期限，并把完整链路读完
+  （从 04:11 请求到 04:26 强推，全程在同一会话里）：
+
+  ```text
+  04:11:02  restart requested (gen 39): [object Object]
+  04:16:02  soft defer deadline reached; agent still busy — restart will be forced at the hard deadline (policy=auto)
+  04:26:02  HARD defer deadline reached; forcing restart (policy=auto): [object Object]
+  04:26:02  scheduling restart ([object Object], gen 39): /usr/bin/systemd-run --user --no-block --collect
+            /bin/sh -c "/usr/bin/systemctl --user stop dsh-web; /usr/bin/sleep 8; /usr/bin/systemctl --user start dsh-web"
+  04:26:02  restart cmd exit=1
+  04:26:02  restart command FAILED (exit 1) — dsh not restarted; reverting to running
+  ```
+
+  随后状态文件回到 `lifecycleState: "running"`、`deferDeadline: 0`、`generation` 仍为 **39**。
+  ⇒ **gen-39 是第五次连续失败，且这次是端到端观测到的，不是推断。** 注意 `reason` 在三处都成了
+  `[object Object]`（请求行、强推行、调度行），这条日志已经**不能被逐字引用**。
 - **下一轮的第一条动作**（一行）：
 
   ```text
@@ -9086,7 +9102,8 @@ $ … | grep -c '^BASH_FUNC'                                               → 0
 
 ### 38.10 未闭环观测（写给下一轮，别当"已落地"引用）
 
-1. **gen-39 是否执行、exit 码是多少**（38.7 那一行命令）。若仍 `exit=1`：先做 38.3.4 的运维动作。
+1. **gen-39 已实测为 `exit=1`**（04:26:02，38.7 逐字），**这不是"待观察"，而是"已验证失败"**：
+   下一轮的 phoenix 请求只会在同一个地方再失败一次，所以**先做 38.3.4 的运维动作**再谈落地。
 2. **`contentDrifted` 是否归零**：上一轮登记的 §37.9 四条判据（六 bundle `contentDrifted:false` /
    `Package 'dsh_ros2_safety' not found` 措辞 / 命令名保持裸写 / 结果里出现 `pid`）**一条都还没在活进程见过**。
 3. **#111 的行为验收**：重启后第一次 `ros2_gui_start` 应能把 rviz2 拉起（本机 `/opt/ros/jazzy/bin/rviz2` 存在）；
