@@ -9007,10 +9007,24 @@ $ … | grep -c '^BASH_FUNC'                                               → 0
 | 两条体积预算 | **2 条红** |
 | 还原 | **534 通过 + 1 pty-skip** |
 
-#### 38.4.4 边界：**本轮无法在活进程里验收**
+#### 38.4.4 用**已构建的 lib** 做了一次真实部署的捕获实测（比单测强，比活进程弱）
 
-活进程从 11-09 起就没换过（38.3），所以新代码只在单测/构建层面被验证过。
-"`ros2_gui_start` 在本机真的能把 rviz2 拉起来"这句话**本轮不能说**——它是下一轮重启后的第一条判据。
+活进程从 11-09 起就没换过（38.3），所以 GUI 那条 spawn 路径没法在本轮验收。但**捕获这一半可以直接量**：
+用合并后 `packages/common/lib/` 的产物、对着本机真实部署的 setup 链跑一次 `captureSourcedEnv`：
+
+```text
+vars: 44        note: 2 项不是环境变量…或是 shell 会话状态，未传给子进程；1 项是显示/会话标识（DISPLAY 等）…
+ROS_DISTRO: jazzy
+AMENT_PREFIX_PATH head: /home/stvli/lite_delivery_aio/install/usb_cam:/home/stvli/lite_delivery_aio/install/bar_bringup_lite
+PATH has jazzy: true        ← 这一条就是 rviz2/rqt 能不能被找到的全部差别
+BASH_FUNC keys: 0           DISPLAY present: false        ← 三道拒绝真的在拦
+```
+
+⚠️ 一条要写准的地方：工作区的 install 前缀进的是 **`AMENT_PREFIX_PATH`**，**不是 `PATH`**；
+`ros2 run <pkg>` 靠 ament 索引解析，所以这仍然是对的，但"PATH 里出现工作区路径"这个预期本身是错的。
+
+**仍然不能说的一句话**："`ros2_gui_start` 在本机真的能把 rviz2 拉起来"——那要等重启之后的活进程
+（38.10 第 3 条）；本轮能说的是"喂给它的那份环境里，rviz2 所在的目录在 PATH 上"。
 
 ### 38.5 安全扫描（与上一轮同口径）
 
