@@ -1,7 +1,7 @@
 # dsh-ros2 日常维护文档（Maintenance Log）
 
 > 仓库：`StvLi/dsh-ros2` · 本地代码：`/home/stvli/Desktop/embody_agent_ws/dsh-ros2`（git remote `git@github.com:StvLi/dsh-ros2.git`）
-> 维护日期：2026-11-16（最近一轮：第三十二轮，§37；第三十一轮见 §36） · 维护者：DSH scheduled-run agent（StvLi 仓）
+> 维护日期：2026-11-17（最近一轮：第三十三轮，§38；第三十二轮见 §37） · 维护者：DSH scheduled-run agent（StvLi 仓）
 > 维护轮次：第一轮 2026-09-03（§0–§7）；第二轮 2026-09-04（§8）；第三轮 2026-09-05（§9，安全修复）；第四轮 2026-09-05（§10，无 open issue → 安全检查 → 两项维护卫生修复）；第五轮 2026-09-06（§11，无 open issue → 安全检查 → 落地 `ros2_install` 注入修复）；第六轮 2026-09-11（§12，无 open issue → 安全检查 → 落地 `safety_monitor` / `zero_pose_semantics` 注入修复 + vitest 4 升级 + CI 最小权限）；第七轮 2026-09-13（§13，open issue #19 → journey skills + 组合不变量）；第八轮 2026-09-14（§14，3 个 open issue → #21 修复并真机复核、#22 落地但保留 open、#19 完成验收测量）；第九轮 2026-09-21（§15）：open issue #22 → 补齐"会话技能目录对账"（其唯一未实现项）+ 修复 `ros2_env_check` 的"报告 ≠ 执行"缺陷（第八轮存疑项的真因）+ 安全复测；**第十轮 2026-09-22（§16，本轮）：补齐第九轮"在途无 PR"的缺口（PR #27，CI 首跑即抓出"本地绿、CI 红"）→ 在运行中进程里验收并关闭 issue #22 → 定位并修复线上故障真因（`rosSetup` 只校验第一段）→ 3 个 PR 全部合入 main**；第十二轮 2026-09-24（§17，收尾超时遗留的在途 PR #32 → 实测第十轮的重启请求已按硬期限落地 → 修复"配置没送到 doctor"的接线缺口 + API Key 来源语义）；第十三轮 2026-09-25（§18，0 open issue / 0 open PR → 安全扫描发现并落地 3 处真实缺陷 = PTY 会话 id 路径穿越 · 发布物携带 `__pycache__` 字节码 · 安装器选项注入，并开启 Dependabot 告警）；**第十四轮 2026-09-26（§19）：0/0 → 先闭环第十三轮唯一的未闭环观测（gen-21 重启逐字命中），再落地 3 个 PR = 明文传输的 VLM API Key 可见化 · 插件自建 IPC 对象权限收紧（PTY 会话文件 / sidecar UDS / 安装器脚本）· Dependabot 版本更新；并把跨五轮未处理的部署配置项升级为 issue #40；**第十五轮 2026-09-29（§20）：open issue #40 → step 2 评估（合理、必要，但配置在仓库外且需运维决定）→ **承接上一轮时间窗被截断留下的在途分支** `fix/workspace-path-hygiene` 并落地 `fix(common)`：自愈探针用**原始文本**比对存在性，把**存活但写成 `~/…`** 的工作区判为缺失、剔除该段、并在只剩它时**静默切换到 `/opt/ros/<distro>`** —— 恰是本轮文档新推荐的路径形式；闭环第十四轮的 gen-22 观测（逐字命中）；实测线上 **6 处**死链（issue #40 少算 1 处）；本轮**无 GitHub API token**，改用一次性 `ci/probe-*` 分支取得 CI（Node 22/24 双绿）后删除**；**第十六轮 2026-09-30（§21，本轮）：open issue #40 → step 2 复核（逐字确认**仍然准确**、更正为**实测 6 处**死链、结论仍交运维）→ **上一轮唯一的运维缺口已消失：`gh` 有了 token**，于是第一个动作就是把第十五轮卡住的在途分支**开成 PR #48、CI 双绿后合入 main**（第一次拿到**真实** PR CI，不再需要 `ci/probe-*` 代跑）；随后落地 3 个 PR = `fix(packaging)` 发布面 `__pycache__` 守卫（**此前只有"碰巧出现过"的那 3 个包有守卫**，实测 moveit 可复现泄漏 `.pyc`）+ `ci(security)` **CodeQL 代码扫描基线**（第十四/十五轮连续两次建议、本轮首次落地）+ `fix(security)` 首个基线 **29 条告警**中的**2 处真实缺陷**（`ros2_interface_create` 的 TOCTOU 可被符号链接穿出 · 自愈探针的自动探测路径未加引号）；Dependabot 积压 6 → 4（#47 合入并替掉失败的 #44）**；**第十七轮 2026-10-01（§22，本轮）：open issue #40 → step 2 第三次复核（事实逐字不变、结论仍交运维、故不再重复评论）→ 把第十六轮**有意不修**的 3 条 ReDoS 告警**先测量再修**：走真实入口实测后只有 **1 条真实可达**（`parseTopicList`，n=4000 阻塞 **14.8 s**，k=2.11；并发现**第二种**形状 `[`×n+` ]x]` 在 n=20000 阻塞 **697 ms**）、1 条被调用方的 `trim()`/`split('\n')` **消掉而不可达**、1 条**不可复现**（贪婪 `.*` 一步到 `$`，不回溯）→ 三条全部改为**可证明线性**的扫描 + `chars.ts` 逐码点字符类 + **差分等价测试**（穷举 + 10 万条随机/解析器，**0 分歧**），PR #55 CI/CodeQL **5/5 绿**后合入；**闭环第十六轮唯一的遗留观测**（gen-24：`lifecycleState: running`、无残留 `deferDeadline`、`pendingResume: false`）；Dependabot 积压 4 → 3（#43 vitest 4→5 dev-only 合入；#42/#45/#46 抬的是 **type-only peer 下界**，而 CI 装的是**该 PR 自己抬上去的 devDependency** ⇒ **结构上无法评估下界**，升级为 **issue #56**）；CodeQL open **13 → 10**；发布面用**预先种入 `.pyc` + 摘守卫正向对照**复测 9/9 CLEAN；并更正第十六轮快照表里与 §21.8 矛盾的"main 344"（实测 **347**）**。；**第十九轮 2026-10-11（§24，本轮）：open issue #40 → step 2 第五次复核（事实逐字不变、结论仍交运维）→ **把 §5「已知限制」里从第一轮躺到现在的 PTY 幻影会话修掉**：实测旧行为比原文更严重（无 pty 时 `start` 退出 0 并打印 `started session … (pid N)`，`status` **永远**报 `STATE running`，**连不存在的会话 id 也报 running**）⇒ 在父进程 fork 前探测 pty、失败写 `state=failed` 并退出 3、工具返回明确的 `PTY_UNAVAILABLE`；顺带查出**同一个 REMAINDER 解析缺陷**把 `--dir` 当参数投喂给下载来的 sudo 安装脚本（安装器 argv 实测 `["--dir", <dir>]`，修后为 `[]`），且 `--all` 名义存在却不可达 ⇒ 改为"flag 必须在 action 之前"并对 `status`/`stop` 的多余参数**报错而非静默忽略**；**安全扫描发现本地审计门禁在这台机器上根本跑不起来**（`~/.npmrc` 指向的镜像没有 advisory 端点⇒ 前几轮"本地复算供应链"实际无法复现）⇒ 把权威 registry 钉进 `pnpm run audit` / `audit:all` 并让 CI 调用同一条命令；文档计数全面漂移的修正**其中一次被仓库自己的组合不变量测试当场打回**（README 的 83 是"全家族六包"、聚合包只挂 81 ⇒ 改回 83，并在安装步骤把两个数分别说清）→ 并把它升格为 **issue #68**；2 个 PR（#66/#67）CI/CodeQL **5/5 绿**后合入，`main 66a139a → 7dc553f`**。**第二十轮 2026-10-12（§25，本轮）：2 open issue（#40 + #68）→ **issue #68 落地**（`fix(metadata)`：聚合包按"它实际挂的东西"宣称 81、家族 83 仍是家族的数）→ 顺带扫出**同一类缺陷的更大缺口**：三个**已发布**的 per-package `README.md` 从未被任何不变量读过（core 33 对 61、vision 5 对 7、聚合 51+4 对 81+9），已修并把"每个包 README 的第一个工具计数必须等于实测"写进组合不变量（**可证伪**：换回修复前文件即报 `expected 33 to be 61`）→ **issue #40 第六次复核后经运维确认、本轮真正落地**（备份 + 删 5 条死段尾 + 删第 63 行整条 `rosSetup`，YAML 校验通过，行为与自愈后的实际链逐字等价，等 gen-27 重启生效）→ 安全扫描审计/密钥/发布面/CodeQL 全不变（10 条 open 同规则同数量）、**远程已合并分支 16 → 1**（15 条全部是 main 的祖先）→ 1 个 PR（#70）CI/CodeQL **5/5 绿**后合入，`main 7dc553f → 316c142`，**open issue 归零**。**
 >
 > **第二十一轮 2026-10-13（§26，本轮）：0 open issue / 0 open PR → 走 step 5；先闭环上一轮唯一的未闭环观测（gen-27 逐字落地于 10-12 12:40:48，且 `ros2_env_check` 不再报 `missingSources` = issue #40 的最终判据达成）→ 安全扫描沿用同口径全绿（audit prod/含 dev 干净、CodeQL 10 不变、密钥 0、发布面 9/9 CLEAN、Python/TS 执行面与既有防线逐条回归）→ **但真正的高价值发现不是扫描器给的**：把"每个能执行/输入的接口"与"审批面"对照后，发现 `ros2_gui_interact` 可以在**无审批、无目标限制**下把任意按键/文本送进**任意窗口**（选中终端即宿主机命令执行），而更窄的 `ros2_run`/`ros2_service_call` 反而都要审批；且这本是仓库**自己**在 `docs/safety-todo.md` §17 / 验收 #11 决定过、却一直未落地的事（README 还反过来写着"no approval, same as other L3 tools"）→ 落地 `fix(security)`：默认应用白名单（rviz2/rqt/rqt_graph，可配 `guiAllowedApplications`）+ 按**解析后**窗口标题判定 + 白名单外（含不传 `windowTitle`）**先审批**且 fail-closed；用例 **362 → 371**（+9，且删掉 gate 块会让 3 条断言当场变红）；PR #73 CI/CodeQL **5/5 绿**后合入，`main 845f04f → 4ab647c`，并登记 gen-28 让这**真实的运行时变更**（`lib/` 变了）在跑着的 dsh 里生效。**
@@ -88,6 +88,32 @@
 
 > **第三十二轮 2026-11-16（§37，本轮）：0 open issue / 1 open PR（#108 dependabot）→ 走 step 5；开工先闭环第三十一轮留下的观测，得到一条否定结论：`ros2_env_check` 报六个 bundle `contentDrifted: true`、`stale: true` ⇒ **gen-38 的效果没有进到活进程**（第三十一轮的后台 job seam 修复不在服务本轮的进程里；本会话沙箱 `--unshare-pid` 读不到 journal，故只能说"没生效"，说不出"为何没生效"）。→ `gh` token 恢复，**告警面第一次读到真实数字**：CodeQL **2**（上一轮 401 读不到）、Dependabot **0**，而 `git blame` 把两条都钉在**第三十一轮自己的提交 `09a6ca6`** 上（`runner.ts:303/726`，`js/shell-command-constructed-from-input`，medium）→ 按 §6 第 8 条分类为**第一类真问题**：上一轮删掉了裸 `spawnJob` 原语，却新建了裸 `spawnRosShellJob(command: string)`，它把**未加引号的字符串**直接拼进 `bash -lc`，唯一调用方靠"自己记得 `shq()`"才安全 ⇒ **判据又回到了调用方**。本轮问句换成最朴素的一句「**这个字符串是数据，还是语法？**」，一次问出两处：**F1-a** 删除"预制 shell 串"入口（`buildSafetyMonitorCommand` → **`buildSafetyMonitorArgv(): string[]`**，两个 spawn 点改走 `spawnRosJob`）· **F1-b** 命令名由"原样插入"改为**校验**（`assertCommandName`，`[A-Za-z0-9_./:@+,-]`，越界抛 `INVALID_COMMAND_NAME`；**不加引号**是因为那会把每条上报命令变成全引号形式，可读性下降而安全零收益）→ 用例 **515 → 519 通过 + 1 pty-skip**（common 192 → 196），**撤门实测：撤守卫+引号 8 红、只撤守卫 1 红**；PR **#108 以 `--no-ff` 合入**（`aad7f85 → 80efd09`）、修复提交 `ea136d6` 推到 `fix/round-32-shell-string-ingress`；**api.github.com 本轮间歇不可达**（`gh pr create` HTTP 499、`check-runs` 超时），故 CodeQL 是否真的归零**留给下一轮读**，本轮**不写成 0**；并登记两个**验证装置自己踩的坑**：`pnpm run build` 会**自动先跑 `pnpm install`**，而 store 在工作区外 ⇒ `ERR_SQLITE_ERROR`（改用 `--config.verify-deps-before-run=false`，代价是本地跑的是 vitest **5.0.5** 而非 #108 的 5.1.0）；以及 `pnpm install … | tail` **退出码 0** 掩盖了失败、撤门时把备份放 `/tmp` 结果**跨调用就丢了**（`--tmpfs /tmp`）。**本轮登记 gen-39**。
 
+
+> **第三十三轮 2026-11-17（§38，本轮）：0 open issue / 0 open PR，但工作树里躺着**第三十二轮的**在途分支**
+> （`ea136d6` 已推、**无 PR、CI 一次没跑过**，因为 `ci.yml` 只监听 push→main 与 pull_request）+ 一份未提交的 §37。
+> 第一步把账收掉：**PR #109**（它的第一次 CI，5/5 绿）合入 `4192eb8` ⇒ **CodeQL 2 → 0 按原因关闭**；
+> **PR #110** 把 §37 补进仓库 `94e36f4`；`gh issue view 101` 返回
+> `Could not resolve to an issue or pull request` ⇒ **#101 是外部仓库侧消失的**，不是本仓库关的。
+> 随后按 §37.12 逐条读回来，得到本轮最重的一条（**F0**）：**自更新循环的最后一步从 11-10 起全部失败**——
+> journal 里六次重启请求，11-05/11-06 两次 `exit=0`（新 PID 落地），11-10 起四次 **`exit=1`** 并
+> `reverting to running`。根因不是 phoenix，而是**沙箱后端换了**：成功那两次经
+> `landlock-run --ro / --rw …`，失败的四次经 `bwrap … --unshare-pid …`（`dsh-sandbox-local` 的
+> `PLATFORM_CHAINS linux = ["bwrap","landlock"]`，且 `bwrapProfileArgs()` 无条件加 `--unshare-pid`）⇒
+> `systemd-run --user` 连用户管理器时在 AUTHENTICATING 阶段被关掉（`Failed to connect to bus: No data available`）。
+> **所以第三十/三十一/三十二轮的修复一个都没进活进程**，只有 `ros2_env_check` 的 `contentDrifted` 说了真话；
+> 本轮实测出**替代通道**（会话总线的 `busctl --user call … RestartUnit`，方法可派发、`GetUnit` 返回单元路径、
+> `ActiveState active` / `MainPID 1831`），并把**两条处置**写进 38.3.4。**F1** 换问句「同一个进程 spawn 出来的
+> 孩子，看到的是同一个环境吗？」⇒ 实测 `bash -lc 'command -v rviz2'` **为空**、source 之后才是
+> `/opt/ros/jazzy/bin/rviz2` ⇒ `ros2_gui_start` 在本机**根本起不来**（§5 从第三十一轮就记着这条）：落地
+> **PR #111**（`captureSourcedEnv()` 走 seam 取 `env -0`，一个 `guiChildEnv()` 供两个 spawn 点；拒绝非环境变量名
+> /bash 会话状态/**显示与会话标识**（否则窗口会被挪到另一个 DISPLAY，`wmctrl`/`xdotool` 永远找不到它）/
+> 单项 8 KiB · 总量 128 KiB，判过的 `ROS_LOG_DIR` 压过捕获值，捕获失败降级但**写进 warnings**），
+> **撤门实测：接线 4 红 · 显示标识 1 红 · 体积 2 红**；用例 **519 → 534 通过 + 1 pty-skip**（common 196→206、
+> core 166→171）；安全扫描同口径（审计 3/3 干净、**CodeQL 0**、Dependabot 0、密钥 0、Python/TS 执行面 0、
+> 发布面以 CI 的 tarball 门为准）。**step 4** 仍按规矩发 phoenix 请求（gen 39，04:11:02，
+> `lifecycleState: deferred`），但**本轮不写"已生效"**：预期仍是 `exit=1`，并留下下一轮的**一行判据**
+> （`journalctl … | grep 'restart cmd exit'`）。顺带更正第三十二轮"读不到 journal"的说法——**本轮同一沙箱读得到**。
+> `main` `80efd09 → 4192eb8 → 94e36f4 → 83b880b`。
 
 本文件记录 dsh-ros2 插件的一次完整日常维护循环：**查 issue → 评估建议 → 分支开发 → 验证 → 推送 → 交付维护文档**。每次维护在下方追加一节。
 
@@ -257,20 +283,41 @@ dsh-phoenix 已在 web profile 安装并生效：
 | **`dsh.phoenix.requestRestart()` 不返回受理凭据**（第二十八轮新增） | 服务契约写"幂等、复用同一合并路径"，实测返回 `undefined`（`ok/lifecycle/generation` 全无），因此"请求有没有被接受"只能从 `journalctl --user -u dsh-web` 的 `[dsh-phoenix] restart requested (gen N)` 行读。另：phoenix 的 `generation` 与本文档的 `gen-NN`（进程重启计数）**不是同一个计数器**，本轮实测相差 2。 | 无动作（读 journal 即可）；若要程序化判断，需 phoenix 侧返回状态对象，属该仓库的改动。 |
 | **CodeQL / Dependabot 告警面需要 token**（第二十八轮登记；第二十九轮解除；**第三十一轮又退化**） | 第 31 轮实测：`gh` 两个账号的 token 值在 `hosts.yml` 里已**为空**，匿名读 `…/code-scanning/alerts` 与
 `…/dependabot/alerts` 均 **HTTP 401**。CI 里两个 `analyze` job 绿只证明"分析跑成功"，**不等于"0 告警"**。 | 恢复 token 后补读真实告警数；在那之前，本轮相关结论一律写"读不到"，**不得**写成 0。 |
-| **GUI 子进程没有 setup 链**（第三十一轮） | 本轮把 GUI 的 `ROS_LOG_DIR` 改成逐次判定（F3），但 `GuiManager` 仍以**裸 PATH** spawn `rviz2`/`rqt`：`bash -lc 'command -v rviz2'` 在本机为空，因此 `ros2_gui_start` 在这类宿主上会 `START_FAILED`（`start()` 已经如实报错，不撒谎）。 | 要收口需"捕获 source 之后的 env"（`bash -lc 'source … && env -0'` 再合并），属新设计，单开一轮。 |
+| **~~GUI 子进程没有 setup 链~~（第三十一轮登记，第三十三轮已修）** | 第三十一轮只把 GUI 的 `ROS_LOG_DIR` 改成逐次判定；`GuiManager` 仍以**裸 PATH** spawn `rviz2`/`rqt`，本机 `bash -lc 'command -v rviz2'` 为空 ⇒ `ros2_gui_start` 必然 `START_FAILED`。**第三十三轮落地**（PR #111）：`captureSourcedEnv()` 经 seam 取 `env -0`，一个 `guiChildEnv()` 供两个 spawn 点，并对捕获内容加三道拒绝（非环境变量名 / 显示与会话标识 / 体积预算）。 | **待活进程验收**（重启后才能测，见 §38.10 第 3 条）。 |
+| **自更新循环的最后一步在 2026-11-10 之后全部失败**（第三十三轮新增，**需运维动作**） | phoenix 的 restart 命令经 agent 的 shell 服务执行；本机的沙箱后端从 `landlock-run` 换成 `bwrap --unshare-pid` 之后，`systemd-run --user` / `systemctl --user` 在 AUTHENTICATING 阶段被关掉（`Failed to connect to bus: No data available`），于是 `restart cmd exit=1`、状态回 `running`，**harness 从未重启**。⇒ 第三十/三十一/三十二轮的 `lib/` 改动一个都没进活进程。**替代通道已实测可用**：会话总线上的 `busctl --user call … RestartUnit ss dsh-web.service replace`。 | **运维**：按 §38.3.4 执行一次性重启，并给 `dsh-web.service` 加 `DSH_PHOENIX_RESTART_CMD` drop-in 修根。**在此之前，任何"已生效"的说法都只能是"已请求"。** |
+| **`ros2_env_check` 的 `contentDrifted` 是这条循环唯一说真话的信号**（第三十三轮） | 它比对"进程内已加载代码"与磁盘 `lib/` 的内容指纹；重启失败时它是唯一能看出"磁盘新、内存旧"的地方（连续两轮 6/6 `true`）。 | 无动作（设计如此）。任何"修复已落地"的结论都应以它 `false` 为前置，而不是以"我发了重启请求"为前置。 |
 | **`dsh_ros2_safety` 包在本机工作区里不存在**（第三十一轮实测，**需运维决定**） | seam 修好后，`safety_monitor` 的失败原因从 `ros2: command not found` 变成 `Package 'dsh_ros2_safety' not found`；实测 `ros2 pkg list | grep ^dsh` 只有 `dsh_ros2_vlm`。⇒ **这台机器上安全闸仍然起不来**，原因在仓库外（该 ROS 包未构建/未 source）。 | **运维**：在工作区构建 `dsh_ros2_safety` 并重新 source；插件侧已把失败报成 `MONITOR_EXITED_EARLY` + 原因。 |
 | **`settleJobStart()` 的 300 ms 是启发式，不是判据**（第三十一轮） | 它只回答"注册后 300 ms 内还活着吗"。一个在 400 ms 才失败的命令仍会被报成 `started`。真正的事实来源是 `pid`（同步存在性）与后续 `ros2_job_status`。 | 有意（不引入后台守护）。凡引用"起来了"的结论，仍以 `pid` + 任务输出为准。 |
 | **`dsh.phoenix` 的服务面与第二十八轮的记录不一致**（第二十九轮新增） | 本轮从 `ctx.get('dsh.phoenix')` 上实测：`canRestart` 是**函数**（日志逐字为 `(...args) => {`），**不是**布尔；`lifecycle` / `generation` 读出来是 **`undefined`**。第二十八轮记的是 `canRestart = true` / `generation = 32`。请求返回值仍是 `undefined`（与第二十八轮一致）。 | 无动作（两轮都靠 journal 的 `restart requested (gen N)` 行确认）。记在这里是为了让下一轮**不要**把 `canRestart` 当成布尔属性用——要调用它。 |
 | **内容指纹看着"共享库"，但它只认得声明在 `dependencies` 里的库**（第三十轮） | 指纹 = 自己的 `lib/**` + 根清单 + 声明为依赖的 `SHARED_RUNTIME_PACKAGES`（当前只有 `dsh-ros2-common`）。若将来某个 bundle 通过 peer/可选依赖引入另一份运行库，它**不会**被算进去。声明了却解析不到 ⇒ 指纹 `null`（无法判断），活进程会因此报不出陈旧而不是错报"没变"。 | 新增此类库时**同步加入 `SHARED_RUNTIME_PACKAGES`**（`bundles.ts`），否则又会出现本轮 F1 那种"改的是热点、报的是没变"。 |
 | **jobs 通道只补了字符判据，体积没有**（第三十轮 F4） | `readOutput()` 剥掉控制/方向字符并附 `ingress:` 说明，但**体积仍是 `outputLimitBytes`（8 MiB）**——构建日志本来就长，且 harness 有自己的 spill 上限。 | 有意。若哪天要做体积收口，得先在 harness 侧确认 spill 的判据，否则会在"我们能看见的最后一个位置"制造假边界。 |
 | **`envNote` 在任务 / 启动探针上下文里仍然丢失**（第三十轮 F3 的边界） | 新通道是 `AsyncLocalStorage` 的"工具调用上下文"；`spawnJob` 的 job 与启动探针不在其中，那里的说明照旧无处可去。 | 有意（不给 job 通道再造一个诊断面）。真要做，应在 jobs 通道上单独设计，而不是复用工具结果的 warnings。 |
-| **验收判据在受限 bash 沙箱里可能根本执行不了**（第三十轮新增） | 本会话的 bash 跑在 `bwrap --unshare-pid --tmpfs /tmp` 下（`/` 只读、`/tmp` 私有）⇒ 宿主 PID 与宿主 `/tmp` 都不可见，§34.11 的 F2/F3 两条（`chmod` + `ls -ld`）**无法在活进程复测**，本轮只能如实降级成"未复测 + 单测覆盖"。 | 写"实测"前先判一次**本会话能不能测**；不可测就写明边界，不要沿用上一轮"我测过"的句式。 |
+| **验收判据在受限 bash 沙箱里可能根本执行不了**（第三十轮新增，**第三十三轮补充一条反例**） | 本会话的 bash 跑在 `bwrap --unshare-pid --tmpfs /tmp` 下（`/` 只读、`/tmp` 私有）⇒ 宿主 PID 与宿主 `/tmp` 都不可见，§34.11 的 F2/F3 两条（`chmod` + `ls -ld`）**无法在活进程复测**。**但"读不到"并不总是沙箱的结论**：第三十二轮写"journalctl 返回空"，第三十三轮在**同一个沙箱**里读到了完整 journal（§38.3.1 的六行就是它给的），`/run/user/1000/bus` 也能连。 | 写"实测"前先判一次**本会话能不能测**；不可测就写明边界。反过来也成立：**判"不能测"同样要给证据**（一条空输出不等于"沙箱禁止"）。 |
 | 审计 JSONL（§18） | 仍**未做**（`docs/safety.md` §4 仍如实写着"本版未做"） | 晚批独立项，不影响边界 |
 
 ---
 
 ## 6. 下次维护建议动作
 
+0. **第三十三轮的结论改变了"落地"这件事的含义**（先读，再动手）：
+   **自更新循环的最后一步从 2026-11-10 04:20:20 起就没有成功过**（§38.3）。
+   所以下一轮**第一件事不是写代码**，而是读一行：
+
+   ```text
+   journalctl --user -u dsh-web --since "-6h" | grep -E "restart cmd exit|loaded \(graceful"
+   ```
+
+   - 出现 `restart cmd exit=1` ⇒ 循环仍然坏着：**先做 §38.3.4 的运维动作**（一次性 `busctl … RestartUnit`
+     或给 `dsh-web.service` 加 `DSH_PHOENIX_RESTART_CMD` drop-in），否则本轮任何"已落地"都是假的；
+   - 出现新的 `loaded (graceful …)` + 新 PID ⇒ 按 §38.10 第 2 条逐条复测；**验收通过之前不要写"已生效"**。
+1. **§38.10 六条未闭环观测**：gen-39 的 exit 码 · `contentDrifted` 归零 + §37.9 四条判据（一条都没在活进程
+   见过）· #111 的 `ros2_gui_start` 行为验收 · phoenix 工具面 `reason` = `[object Object]` ·
+   第三十轮 §35.11 第 4/5 条（仍被重启阻塞）· 本地 vitest 5.0.5 与锁文件 5.1.0 的不一致。
+2. **"分支已推送"不等于"被验证过"**（§38.2.1）：`ci.yml` 只听 `push→main` 与 `pull_request`，所以
+   纯分支推送的 `check-runs` 是**空**——空和全绿在输出上都不刺眼。每次推分支后要么建 PR，要么明确写"没有 CI"。
+3. **每轮固定做一次"通道清单"**（第三十轮的问法，本轮仍然有产出）：把每一类能进模型上下文的字节列出来，
+   逐条问"它过没过入口判据、过的是哪一半（大小 / 字符）"。本轮的新增项：**GUI 子进程的环境表**（§38.4）
+   ——它是"从子进程回到宿主进程、再进另一个子进程"的一条新通路。
 0. **第三十一轮登记 gen-38**：本轮把「后台子进程」整条通道接回 run seam（`packages/common/lib/{runner,toolkit}.js`
    + `core/profile/safety` 的五个 spawn 点），请求已于 **2026-11-12 15:14:00** 发出，journal 逐字为
    `[dsh-phoenix] restart requested (gen 37): round 31: make the background-job seam (setup chain + judged env
@@ -8777,3 +8824,274 @@ pnpm: unable to open database file
    `--config.verify-deps-before-run=false` 并如实标注版本。
 5. **第三十轮 §35.11 第 4/5 条**（jobs 通道字符判据、成功路径的 `envNote`）**连续两轮未复测**，
    已从"欠账"变成"陈账"，下一轮要么测要么删。
+
+---
+
+## 38. 第三十三轮维护（2026-11-17，本轮）
+
+### 38.1 起点与接手
+
+| 项 | 值 |
+| --- | --- |
+| open issue | **0**（`gh issue list --state open` 空）⇒ 按流程跳过 step 2/3 的 issue 部分，走 step 5 |
+| open PR | **0** |
+| 在途分支 | **`fix/round-32-shell-string-ingress`**（1 个提交 `ea136d6` 已在 origin，**没有 PR**、**CI 一次也没跑过**） |
+| 工作树 | **不干净**：`dsh-ros2-maintain.md` 有一份未提交的 §37（289 行）、`_maint/r32/` 未跟踪 |
+| `main` 起点 | `80efd09`（#108 dependabot 合入） |
+| `gh` 认证 | 两个账号都在（`StvLi` 活跃 / `littleZ05`），scopes 含 `repo`/`workflow`；**api.github.com 本轮可达** |
+| CodeQL open（开工） | **2**（#43/#44，`js/shell-command-constructed-from-input`，medium，`runner.ts:303/726`） |
+| Dependabot open | **0** |
+| 活进程（开工第一个 ros2 调用） | `ros2_env_check`：六 bundle **`contentDrifted: true` / `stale: true`**；`visiblePackages 451`、`totalTools 81`、`totalSkills 9` |
+
+> **顺序纪律（§6 第 0 条的警告）本轮遵守了**：`ros2_env_check` 是本会话**第一个** ros2 调用，
+> `pnpm build` 在其后。
+
+#### 38.1.1 issue #101 已经不存在了（不是"我们关掉了"）
+
+第三十/三十一轮反复复核的那个"外部收录邀约" issue #101，本轮 `gh issue view 101` 与
+`gh pr view 101` 都返回 **`GraphQL: Could not resolve to an issue or pull request with the number of 101`**
+⇒ 它是**外部仓库侧消失**的（删除或转移），不是本仓库把它 close 掉的。第三十一轮"结论不变、不再评论"
+的判断因此自然失效——**没有对象可评论了**。这也是"0 open issue"的真实来源。
+
+### 38.2 本轮唯一的"反馈"仍是上一轮自己留下的账
+
+0 issue ⇒ 本轮没有 step 2 的对象。真正要做的是把 §37.12 的五条未闭环观测逐条读回来：
+
+| §37.12 条目 | 本轮实测 | 判定 |
+| --- | --- | --- |
+| 1. 两条 CodeQL 是否真的关闭 | merge 后读 `code-scanning/alerts?state=open` → **0** | ✅ **按原因关闭**（不是压制：撤掉的是接受裸 shell 串的导出 API 本身，见 #109 的 diff） |
+| 2. gen-39 是否把 `contentDrifted` 归零 | 开工读数仍 **6/6 `contentDrifted: true`** | ❌ **没落地**；而且本轮第一次说清了**为什么**（38.4） |
+| 3. PR 是否建立/合入 | **#109** 建立，CI **5/5 绿**，`--merge` 合入 `4192eb8` | ✅ 见 38.7 |
+| 4. 本地门与 #108 的一致性 | `packages/common/node_modules/vitest/package.json` = **5.0.5**，锁文件是 **5.1.0** | ⏳ 仍不一致，原因不变（§37.8.1），本轮继续用 `--config.verify-deps-before-run=false` 并如实标注 |
+| 5. 第三十轮 §35.11 第 4/5 条 | **测不了**，原因不是"忘了"而是"活进程从 11-09 起就没换过" | ⛔ 从"陈账"改判为**被重启阻塞**（单测在 `job-output.spec.ts` 4 例 + `job-spawn-seam.spec.ts`） |
+
+#### 38.2.1 `ea136d6` 那次推送**从来没有触发过 CI**
+
+`.github/workflows/ci.yml` 的触发器是 `push: branches: [main]` + `pull_request:`。第三十二轮只
+`git push` 了分支、没建成 PR（HTTP 499），所以 `gh api .../commits/ea136d6/check-runs` 读回来是**空**——
+不是"绿"，是**没跑**。本轮的 PR #109 是它的**第一次** CI，5/5 绿。
+⇒ 登记一条判据：**"分支已推送"不等于"被验证过"**；`check-runs` 为空和全绿在输出上都不刺眼，要读 `length`。
+
+### 38.3 F0（本轮最重）：自更新循环的**最后一步**从 11-10 起全部失败，而前三轮都把它当成功了
+
+#### 38.3.1 证据：journal 里六次重启请求，四次 `exit=1`
+
+本轮**能读 journal**（第三十二轮写的是"读不到"，见 38.3.5）：
+
+```text
+Nov 05 10:10:30  dsh[2007]  restart cmd exit=0   → 10:10:41 dsh[35696]    loaded   ← gen 33 落地
+Nov 06 04:23:05  dsh[35696] restart cmd exit=0   → 04:23:17 dsh[1506303]  loaded   ← gen 34 落地
+Nov 10 04:20:20  dsh[2019]  restart cmd exit=1   → "dsh not restarted; reverting to running"  ← gen 35
+Nov 10 15:49:11  dsh[2019]  restart cmd exit=1   → 同上                                    ← gen 36
+Nov 12 15:27:51  dsh[1831]  restart cmd exit=1   → 同上                                    ← gen 37
+Nov 16 15:04:50  dsh[1831]  restart cmd exit=1   → 同上                                    ← gen 38
+```
+
+⇒ **第三十/三十一/三十二轮的修复一个都没有进入活进程**。§34.2.1、§36.10、§37.9 里所有"已登记/已落地"
+的措辞，都要读成"**请求已发出，未生效**"。唯一说真话的信号是 `ros2_env_check` 的 `contentDrifted`。
+
+#### 38.3.2 为什么 11-10 之后变了：沙箱后端从 landlock 换成了 bwrap
+
+journal 里每一次重启请求都带着它自己 spawn 的那条完整命令行，两次成功与四次失败**不是同一条**：
+
+```text
+Nov 05/06（exit=0）：… dsh-subprocess-….scope — node runner.js --
+    landlock-run --ro / --rw /dev/null --rw /tmp --rw <ws> -- bash -c "systemd-run --user …"
+
+Nov 10+（exit=1）：  … dsh-subprocess-….scope — node runner.js --
+    bwrap --ro-bind / / --dev /dev --unshare-pid --proc /proc --die-with-parent
+          --tmpfs /tmp --bind <ws> <ws> -- bash -c "systemd-run --user …"
+```
+
+`@deepseek-ai/dsh-sandbox-local` 的 `PLATFORM_CHAINS = { linux: ["bwrap", "landlock"] }`：Linux 先探
+bwrap、可用就用它；`bwrapProfileArgs()` 里 **`--unshare-pid` 是无条件的**（与 policy 无关）。所以这台
+机器上 bwrap 从不可用变成可用的那一刻起，phoenix 的 restart 命令就开始跑在**PID 命名空间里**。
+
+#### 38.3.3 机制：`systemd-run --user` 在 `--unshare-pid` 里连不上用户管理器
+
+在本会话**同一个**沙箱里实测（这就是 phoenix 那条命令所处的环境）：
+
+```text
+$ systemd-run --user --no-block --collect /bin/true
+Bus n/a: changing state UNSET → OPENING
+sd-bus: starting bus by connecting to /run/user/1000/systemd/private...
+Bus n/a: changing state OPENING → AUTHENTICATING
+Bus n/a: changing state AUTHENTICATING → CLOSED
+Failed to connect to bus: No data available        ← ENODATA，退出码 1（REAL_EXIT=1，经 PIPESTATUS 读）
+```
+
+边界要说清：**socket 本身没问题**——用 python 直接对 `/run/user/1000/systemd/private` 发
+`AUTH EXTERNAL` 能拿到 `OK <guid>`；**会话总线也没问题**——`busctl --user` 能连上并列出名字。
+失败发生在 **libsystemd 的 sd_bus 连接/鉴权路径**里（AUTHENTICATING 阶段被对端关闭 ⇒ ENODATA）。
+本轮没有把内核层原因钉死（`SO_PEERCRED` 跨 PID 命名空间不可解析是最可能的解释，但**未证实**），
+能钉死的是**效果**：`systemctl` / `systemd-run --user` 在这类沙箱里不可用。
+
+#### 38.3.4 已实测的替代通道（运维动作，本轮只验证到"可派发"）
+
+会话总线上同一个用户管理器是可达的，方法派发正常：
+
+```text
+$ busctl --user call org.freedesktop.systemd1 /org/freedesktop/systemd1 \
+    org.freedesktop.systemd1.Manager GetUnit s dsh-web.service
+o "/org/freedesktop/systemd1/unit/dsh_2dweb_2eservice"
+$ busctl --user get-property … .Unit ActiveState → s "active"      （…Service MainPID → u 1831）
+$ busctl --user call … Manager RestartUnit ss no-such-unit-for-round33.service replace
+Call failed: Unit no-such-unit-for-round33.service not found.      ← 方法已派发并作答，只是单元不存在
+$ systemctl --user restart no-such-unit-for-round33.service
+Failed to connect to bus: No data available                        ← 对照：同一条路死在这里
+```
+
+⇒ 两条可执行的处置（**本轮不代为执行**，因为生效时刻会掐掉写文档的这次会话本身）：
+
+1. **一次性**：在桌面终端（**不要**在 agent 的 bash 里）执行
+   `busctl --user call org.freedesktop.systemd1 /org/freedesktop/systemd1 org.freedesktop.systemd1.Manager RestartUnit ss dsh-web.service replace`
+   或直接 `systemctl --user restart dsh-web`。
+2. **修根**：给 `dsh-web.service` 加一个 drop-in（`systemctl --user edit dsh-web`），让 phoenix 的
+   `DSH_PHOENIX_RESTART_CMD`（源码：`buildRestartCommand()` 优先取 `cfg.restartCmd`，只在没有时才拼
+   `systemd-run`）走会话总线：
+
+   ```ini
+   [Service]
+   Environment=DSH_PHOENIX_RESTART_CMD=/usr/bin/busctl --user call org.freedesktop.systemd1 /org/freedesktop/systemd1 org.freedesktop.systemd1.Manager RestartUnit ss dsh-web.service replace
+   ```
+
+   这条**仍然是经过 agent 的 shell 服务**执行的（`shell.resolve`），所以只要它不碰私有 socket 就成立；
+   这也是唯一在"沙箱换后端"之后还活着的路子。加完需要**一次**手工重启（配置在进程启动时读）。
+
+#### 38.3.5 顺带更正第三十二轮的一句话
+
+§37.3.1 写的是"本会话的 bash 在 `bwrap --unshare-pid` 下，`journalctl --user -u dsh-web` 返回空"。
+**本轮同一个沙箱读得到**（38.3.1 的六行就是它给的）。所以那句"读不到"不是沙箱的结论，而是当时
+**没有测成**；"测不了"本身也需要先测一次再说。§5 里"要在受限沙箱里判断能不能测"的那条，本轮又添一例。
+
+### 38.4 F1：把本轮问句对准 GUI 子进程——「这个孩子和别的孩子，在同一个世界里吗？」
+
+前几轮的问句序列是"谁能执行/写/发出去" → "过没过判据" → "判据挂在哪个函数上" → "这段字符串是数据还是语法"。
+本轮换成：**同一个进程 spawn 出来的孩子，看到的是同一个环境吗？**
+
+#### 38.4.1 实测：`ros2_gui_start` 在这台机器上根本起不来
+
+```text
+$ bash -lc 'command -v rviz2; command -v rqt_graph'                 → 空（退出码 1）
+$ bash -lc 'source /home/stvli/lite_delivery_aio/install/setup.bash; command -v rviz2'
+/opt/ros/jazzy/bin/rviz2
+$ bash -lc 'source …/install/setup.bash; env -0 | tr "\0" "\n" | wc -l'   → 45
+$ … | grep -c '^BASH_FUNC'                                               → 0
+```
+
+`runCommand` 把每条命令都跑成 `bash -lc '<setup 前缀> <命令>'`，所以**只有那个 bash 里**有 source 之后的环境；
+`GuiManager` 用 `spawn(bin, args)` 直接 exec，拿到的是插件自己的 `process.env` ⇒ 在这类宿主上
+`ros2_gui_start` 必然 `START_FAILED`。§5 从第三十一轮起把它记作"GUI 子进程没有 setup 链"，
+本轮把它修掉（PR **#111**，`main` `3f6f417` → `83b880b`）。
+
+#### 38.4.2 修法：一个入口 + 四道边界
+
+| 项 | 做法 |
+| --- | --- |
+| **F1-a 走 seam** | `captureSourcedEnv()` 用 `deps.run('env', ['-0'])` 取环境 ⇒ 同一套 setup 解析、同一套 `ROS_LOG_DIR` 判定、同一个 note 通道。`guiChildEnv(deps)` **一个** helper 供两个 spawn 点使用，下一个 spawn 点没法漏 |
+| **F1-b 边界** | 拒绝：非环境变量名的项（`BASH_FUNC_x%%` = **shell 语法**，bash 会在子进程里当代码重新导入）· bash 自己的会话状态（`_`/`SHLVL`/`RANDOM`…）· 单项 > 8 KiB · 总量 > 128 KiB |
+| **F1-c 显示/会话标识** | 拒绝捕获里的 `DISPLAY`/`WAYLAND_DISPLAY`/`XAUTHORITY`/`DBUS_SESSION_BUS_ADDRESS`：`wmctrl`/`xdotool`/截图全部跑在**插件**的 DISPLAY 上，孩子被挪到另一个显示就是"窗口存在但永远找不到" |
+| **F1-d 优先级与降级** | 判过的 `ROS_LOG_DIR` **压过**捕获里那份；捕获失败退回原来的裸 PATH 行为，**但把原因写进 `warnings`**，不静默 |
+
+另外把 `execFileP`（`ros2_install` 的引导路径）**为什么不在 seam 里**写进了代码注释——它是第四个 spawn 点，
+而前三个 spawn 点各自教过一次同一个教训：判据只活在一个函数里，下一个 spawn 点就没有它。
+
+#### 38.4.3 可证伪实测（撤门必须变红，且红在对的地方）
+
+| 撤掉什么 | 结果 |
+| --- | --- |
+| 两个 spawn 点的 `env: guiEnv` | **4 条红**（正是那 4 条接线断言） |
+| 显示/会话标识过滤 | **1 条红**（`does not let the setup chain move the child to another display`） |
+| 两条体积预算 | **2 条红** |
+| 还原 | **534 通过 + 1 pty-skip** |
+
+#### 38.4.4 边界：**本轮无法在活进程里验收**
+
+活进程从 11-09 起就没换过（38.3），所以新代码只在单测/构建层面被验证过。
+"`ros2_gui_start` 在本机真的能把 rviz2 拉起来"这句话**本轮不能说**——它是下一轮重启后的第一条判据。
+
+### 38.5 安全扫描（与上一轮同口径）
+
+| 面 | 结果 | 与上一轮 |
+| --- | --- | --- |
+| 供应链审计 `pnpm run audit` / `audit:dev-high` / `audit:all` | `No known vulnerabilities found` **×3**（脚本钉 `registry.npmjs.org`） | 不变 |
+| **CodeQL open** | 开工 **2** → merge 后 **0**（#111 合入后再读仍 **0**） | **2 → 0，按原因关闭** |
+| Dependabot open | **0** | 不变 |
+| 密钥（tracked 文件，排除本文档） | **0 条**（`sk-…` / `AIza…` / `ghp_…` / `gho_…` / `-----BEGIN … PRIVATE KEY-----`） | 不变 |
+| Python 执行面 | `shell=True` / `os.system` / `create_subprocess_shell` / `subprocess.call(`：**0 处** | 不变 |
+| TS 执行面 | `execSync` / `shell: true` / `eval(`：**0 处**；`bash -lc` 的拼装点只剩 `renderCommand`（参数 `shq()` + 命令名 `assertCommandName`，第三十二轮）与 `buildRos2InstallDownloadCommand` | 本轮复核后者：**每一处插值都过 `shq()` 且带 `--`**，符合第三十二轮立下的规则 |
+| 发布面 | CI 的 tarball 门（9 个非私有包：入口存在 / 无 `__pycache__`·`.pyc` / common 带 `robot_profile.py`）三个 PR 全绿 | 不变；`npm pack` 在沙箱里跑不了（`~/.npm/_cacache` 只读，`EROFS`），所以**以 CI 为准**，本地不冒充 |
+| 审批面 | 调用点计数：core **20** / profile **3** / safety **3** / moveit **2** / vision **2** / toolkit **1**（工厂） | 不变 |
+| 未加审批的执行面（复核后仍认为合理） | `ros2_gui_start`（固定预设 + argv，参数不是 shell 串）· `ros2_image_snapshot` / `ros2_screenshot`（写面有路径门 / 目录私有）· `execFileP`（安装引导，见 38.4.2） | 不变 |
+| **本轮新代码的自审** | 捕获的三道拒绝（名字形状 / 显示标识 / 体积）+ 失败降级带 note；不写任何路径、不引入新文件名、不新增子进程类型 | — |
+
+### 38.6 开发管理（分支 + 规范提交 + PR）
+
+| 项 | 值 |
+| --- | --- |
+| 接手在途分支 | `fix/round-32-shell-string-ingress`（`ea136d6`）→ **PR #109**（它的第一次 CI） |
+| **#109** `fix(common): an exported API handed bash an unquoted string …` | CI **5/5 绿**（CodeQL · analyze js/ts · analyze python · check 22 · check 24）→ `--merge` → **`4192eb8`** |
+| **#110** `docs: record round 32 …` | 把上一轮留在工作树里的 §37 补上（内容不改）；CI 5/5 绿 → **`94e36f4`** |
+| **#111** `feat(core): a GUI child is a child like any other …` | 分支 `feat/gui-child-setup-chain`、提交 `3f6f417`；CI **5/5 绿** → **`83b880b`** |
+| 本轮文档 | 分支 `docs/round-33-maintenance`，提交 `docs: record round 33 …` |
+| `main` 轨迹 | `80efd09` →（#109）`4192eb8` →（#110）`94e36f4` →（#111）`83b880b` |
+| 远端分支收工 | `main` + `dependabot/npm_and_yarn/vitest-5.1.0`（#111 合入后已删工作分支；`docs/round-33-maintenance` 合入后删） |
+| 清理 | 第三十二轮留下的 `_maint/`（未跟踪的草稿，内容已在 §37）本轮删除；工作树收工干净 |
+
+### 38.7 step 4：dsh-phoenix —— 请求发出去了，**但这条路现在走不通**
+
+- **本轮请求**：`phoenix_restart(reason: "round 33: …")` → 返回 `{"ok": true, "returnedType": "undefined"}`
+  （与第二十八/二十九轮一致：**不返回受理凭据**）。
+- **journal 逐字**：`Nov 17 04:11:02 dsh[1831]: [dsh-phoenix] restart requested (gen 39): [object Object]`
+  ——注意 `reason` 变成了 **`[object Object]`**：工具面把 `reason` 当对象传下去，日志里丢掉人话。
+  这条会让"journal 逐字可引用"的老约定断掉（跨仓库问题，登记 38.10 第 4 条）。
+- **状态文件** `~/tmp/dsh-phoenix-state.json`：`generation: 39`、`lifecycleState: "deferred"`、
+  `deferDeadline: 1794860762156`（= 04:26:02，硬期限 15 分钟）、`pendingResume: false`。
+- **本轮实测的预期**：到点执行时仍会 `restart cmd exit=1`（38.3.3 已把机制钉死），
+  所以**本轮不写"gen-39 生效"**，只写"已请求"。
+- **下一轮的第一条动作**（一行）：
+
+  ```text
+  journalctl --user -u dsh-web --since "-6h" | grep -E "restart cmd exit|loaded \(graceful"
+  ```
+
+  - 若出现 `restart cmd exit=1` ⇒ 循环仍然坏着，**先做 38.3.4 的运维动作**，再谈任何"已落地"；
+  - 若出现新的 `loaded (graceful …)`（新 PID）⇒ 逐条复测 §37.9 的四条判据。
+
+### 38.8 用例与自检基线
+
+| 面 | 第三十二轮 | 本轮 |
+| --- | --- | --- |
+| vitest（全量） | 519 通过 + 1 pty-skip | **534 通过 + 1 pty-skip**（**+15**） |
+| 逐包 | core 166(+1 skip) / vision 64 / common 196 / dsh-ros2 29 / moveit 21 / state 19 / profile 14 / safety 10 | core **171**(+1 skip) / vision **64** / common **206** / dsh-ros2 **29** / moveit **21** / state **19** / profile **14** / safety **10** |
+| 新增用例来源 | — | common `sourced-env.spec.ts` **+10**（7 解析规则 + 3 捕获）、core `gui.spec.ts` **+5**（接线 / 显示 / 降级） |
+| Python 自检 | 101 项 | **101 项**（`pnpm run test` 内跑：robot_profile / private_paths 等 selftest 全 OK） |
+| 撤门实测（可证伪） | 8 红 / 1 红 | 本轮：**接线 4 红** · **显示标识 1 红** · **体积 2 红** |
+| 本地 vitest 版本 | 5.0.5（锁文件 5.1.0） | 同（38.2 第 4 条） |
+
+### 38.9 结论与教训
+
+- **"请求已发出"和"已落地"是两件事，而日志只有一句"requested"。** 三轮把"登记 gen-NN"当成了"生效"，
+  因为循环的最后一步**失败时不告诉任何人**（只 `console.warn` 一句 `reverting to running`）。
+  判据必须是**外部可观察**的：`contentDrifted`、新 PID、行为指纹（`pid` 字段 / `Package … not found` 措辞），
+  而不是自己刚写进日志的那一行。
+- **环境常量会自己漂移。** "这台机器用 landlock" 是一个**被测量的对象**，不是前提；宿主升级/探针结果一变，
+  同一条代码路径的语义就变了。凡"在某个环境里验证过"的结论，都要带上是**哪个后端**、**哪个版本**。
+- **"测不了"也要先测一次。** 第三十二轮写下"读不到 journal"，本轮同一沙箱读到了 ⇒ 那句话当时没被验证。
+  §5 那条"写实测前先判本会话能不能测"的规矩，反过来也成立：**判"不能测"同样要给出证据**。
+- **自己的修复也要用本轮问句审一遍。** 捕获环境这一步天然会把"显示/会话标识"一起搬过去，
+  而搬过去就等于把窗口挪到另一个显示——这与"修一处、开一处"（第三十二轮的教训）是同一个形状。
+- **`[object Object]` 这种小失真会让证据链断掉。** 下一轮要引用的"journal 逐字"如果是一条 `[object Object]`，
+  它就什么都没证明。
+
+### 38.10 未闭环观测（写给下一轮，别当"已落地"引用）
+
+1. **gen-39 是否执行、exit 码是多少**（38.7 那一行命令）。若仍 `exit=1`：先做 38.3.4 的运维动作。
+2. **`contentDrifted` 是否归零**：上一轮登记的 §37.9 四条判据（六 bundle `contentDrifted:false` /
+   `Package 'dsh_ros2_safety' not found` 措辞 / 命令名保持裸写 / 结果里出现 `pid`）**一条都还没在活进程见过**。
+3. **#111 的行为验收**：重启后第一次 `ros2_gui_start` 应能把 rviz2 拉起（本机 `/opt/ros/jazzy/bin/rviz2` 存在）；
+   若仍 `START_FAILED`，先看 `warnings` 里有没有"未能读取 setup 链导出的环境"。
+4. **phoenix 工具面的 `reason` 传参**（38.7）：`[object Object]` 让 journal 不可引用，属跨仓库问题。
+5. **第三十轮 §35.11 第 4/5 条**：仍处于"被重启阻塞"状态（38.2 第 5 条），重启落地后一次性测掉。
+6. **本地 vitest 与锁文件的一致性**（5.0.5 vs 5.1.0）：沙箱进不了 pnpm store，本轮无解，继续如实标注。
+
