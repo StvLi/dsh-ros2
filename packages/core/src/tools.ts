@@ -57,6 +57,8 @@ import {
   type PreparedChildEnv,
   childEnvFor,
   seamOptionsFor,
+  captureSourcedEnv,
+  noteEnvObservation,
 } from 'dsh-ros2-common'
 
 /** Path to a helper script shipped with THIS package (scripts/). */
@@ -73,6 +75,32 @@ function scriptPath(name: string): string {
 function guiLogDirEnv(childEnv: PreparedChildEnv): { ROS_LOG_DIR: string } | undefined {
   const dir = childEnv.env.ROS_LOG_DIR
   return dir !== undefined && dir.length > 0 ? { ROS_LOG_DIR: dir } : undefined
+}
+
+/**
+ * The environment a GUI child is spawned with. ONE definition, because there are
+ * two call sites (`ros2_gui_start`, and `ros2_gui_observe` launching a window for
+ * its capture) and the next one must not be able to miss it.
+ *
+ * A GUI child is a child like any other, and it was the last one that was not:
+ * round 31 judged its `ROS_LOG_DIR` but left it on the plugin's own `process.env`,
+ * so `rviz2` / `rqt_graph` were exec'd against a PATH that does not contain them
+ * whenever the host's ROS lives behind a workspace setup (measured on the
+ * maintenance host: `bash -lc 'command -v rviz2'` empty, `/opt/ros/jazzy/bin/rviz2`
+ * after sourcing the deployment's `install/setup.bash`).
+ *
+ * Precedence is deliberate: the sourced environment first, then the judged
+ * `ROS_LOG_DIR` over it. The capture came out of a shell whose ROS_LOG_DIR was
+ * already judged by the same seam, but the judgement that is in force for THIS
+ * invocation is the one from `prepareChildEnv`, and it gets the last word.
+ */
+async function guiChildEnv(deps: CoreToolDeps): Promise<Record<string, string>> {
+  const childEnv = await childEnvFor(deps)
+  if (childEnv.note !== undefined) noteEnvObservation(childEnv.note)
+  const sourced = await captureSourcedEnv(deps)
+  if (sourced.note !== undefined) noteEnvObservation(sourced.note)
+  const judged = guiLogDirEnv(childEnv)
+  return { ...sourced.env, ...(judged ?? {}) }
 }
 
 import type { GuiManager } from './gui.js'
@@ -192,6 +220,20 @@ function toJobJson(job: JobSnapshot): JsonValue {
   }
 }
 
+/**
+ * Run a helper for the `ros2_install` bootstrap path, OUTSIDE the run seam — and
+ * the reason is written down here because it is the fourth spawn point, and the
+ * previous three each taught the same lesson: a criterion that lives in one
+ * function is a criterion the next spawn point does not have.
+ *
+ * This one is deliberately unseamed: the tool exists for the case where ROS2 is
+ * missing, so a `<workspace>/install/setup.bash` prefix cannot be the thing that
+ * makes the helper work. It also must not inherit a judged `ROS_LOG_DIR` — it
+ * runs `python3` and `bash`, not ROS. What it does take from the plugin is
+ * `TMPDIR` (with `/tmp` only as the last resort, matching the installer's own
+ * default), because the PTY helper and the fetched installer both need a
+ * writable temporary root on a host that has no ROS yet.
+ */
 function execFileP(bin: string, args: string[]): Promise<{ ok: boolean; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
     execFile(bin, args, { timeout: 20000, env: { ...process.env, TMPDIR: process.env.TMPDIR ?? '/tmp' } }, (error, stdout, stderr) => {
@@ -934,16 +976,16 @@ function makeGuiStartTool(deps: CoreToolDeps) {
       const configFile = strOrUndefined(params.configFile)
       const extra = strOrUndefined(params.args)?.split(/\s+/).filter(Boolean) ?? []
       const label = strOrUndefined(params.label) ?? app
-      // A GUI child is a child like any other: its ROS_LOG_DIR is judged here
-      // (round 31 — the manager used to receive `config.rosLogDir` verbatim, so
-      // rviz2 was handed exactly the 0775 path `runCommand` refuses).
-      const guiEnv = guiLogDirEnv(await childEnvFor(deps))
+      // A GUI child is a child like any other: it gets the setup chain the run
+      // seam applies plus the judged ROS_LOG_DIR (rounds 31/33 — the manager used
+      // to receive `config.rosLogDir` verbatim and to be exec'd on bare PATH).
+      const guiEnv = await guiChildEnv(deps)
       const result = deps.gui.start({
         label,
         bin: preset.bin,
         args: preset.args(configFile, extra),
         windowTitle: preset.windowTitle,
-        ...(guiEnv !== undefined ? { env: guiEnv } : {}),
+        env: guiEnv,
       })
       if (!result.ok) return toolError('ros2_gui_start', command, 'START_FAILED', result.error)
       const value: ToolResult = {
@@ -1085,13 +1127,13 @@ function makeGuiObserveTool(deps: CoreToolDeps) {
       )
       if (!gate.ok) return gate.result
       if (deps.gui.list().every((s) => s.label !== label)) {
-        const guiEnv = guiLogDirEnv(await childEnvFor(deps))
+        const guiEnv = await guiChildEnv(deps)
         const started = deps.gui.start({
           label,
           bin: preset.bin,
           args: preset.args(undefined, []),
           windowTitle: preset.windowTitle,
-          ...(guiEnv !== undefined ? { env: guiEnv } : {}),
+          env: guiEnv,
         })
         if (!started.ok) return toolError('ros2_gui_observe', command, 'START_FAILED', started.error)
       }
