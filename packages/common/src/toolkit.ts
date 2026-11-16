@@ -231,6 +231,169 @@ export function seamOptionsFor(deps: ToolDeps): { rosSetup?: string; workspaceRo
   }
 }
 
+/**
+ * An environment NAME, and nothing else.
+ *
+ * `BASH_FUNC_<name>%%` fails this on purpose: an exported bash function arrives
+ * in `env -0` as `BASH_FUNC_<name>%%=() { … }`, i.e. as **shell syntax**, and
+ * bash re-imports those bytes as code in any child that spawns a shell. A
+ * detached GUI child is not where that belongs.
+ */
+const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/
+
+/**
+ * bash's own session state (`_`, `SHLVL`, `PIPESTATUS`, `RANDOM`, …). These mean
+ * something to a live shell and nothing to a child we exec directly, so they are
+ * dropped instead of forwarded.
+ */
+const BASH_SESSION_VARS = new Set([
+  '_', 'SHLVL', 'PIPESTATUS', 'FUNCNAME', 'BASH_SOURCE', 'BASH_LINENO', 'BASH_SUBSHELL',
+  'BASH_ARGV0', 'BASH_ARGC', 'BASH_ARGV', 'LINENO', 'RANDOM', 'SRANDOM', 'SECONDS',
+  'EPOCHSECONDS', 'EPOCHREALTIME',
+])
+
+/**
+ * Which display / session the caller is talking to.
+ *
+ * These are the one class of variable a captured environment must NOT be allowed
+ * to change. `wmctrl`, `xdotool` and the screenshot commands all run through the
+ * run seam, i.e. on the PLUGIN's environment; if a setup script exported a
+ * different DISPLAY, the GUI child would be started on one display while
+ * `ros2_gui_list` inspected and `ros2_screenshot` captured another — a window
+ * that exists and can never be found, which is worse than not starting it. The
+ * plugin's own `process.env` already carries the real values, so dropping the
+ * captured copies loses nothing.
+ */
+const SESSION_IDENTITY_VARS = new Set([
+  'DISPLAY', 'WAYLAND_DISPLAY', 'XAUTHORITY', 'DBUS_SESSION_BUS_ADDRESS',
+])
+
+/** One value's byte budget. A ROS setup exports small values; a hostile one need not. */
+const MAX_ENV_VALUE_BYTES = 8 * 1024
+
+/** Whole-capture budget: how many bytes may cross from the shell into a child. */
+const MAX_ENV_TOTAL_BYTES = 128 * 1024
+
+/** The environment a sourced shell exported, plus what was left out and why. */
+export interface SourcedEnv {
+  env: Record<string, string>
+  note?: string
+}
+
+/**
+ * Parse the output of `env -0` into an environment, bounding what it may contain.
+ *
+ * Four things are refused, each for a stated reason:
+ *
+ *   - **names that are not environment names** — in practice exported bash
+ *     functions (`BASH_FUNC_x%%`), which are shell syntax, not data;
+ *   - **the shell's own session variables**, which are stale by construction
+ *     outside the shell that produced them;
+ *   - **the display / session identity** ({@link SESSION_IDENTITY_VARS}): the
+ *     window must live on the display the inspecting tools look at, and that is
+ *     the plugin's, not the setup script's;
+ *   - **values over {@link MAX_ENV_VALUE_BYTES} and captures over
+ *     {@link MAX_ENV_TOTAL_BYTES}**. Same rule the plugin applies to every other
+ *     byte that crosses a boundary into the agent: bound it first, then say what
+ *     was bound. A setup file is operator-authored, but how much it exports is
+ *     not something a tool call should learn by exhausting memory.
+ */
+export function parseSourcedEnv(stdout: string): SourcedEnv {
+  const env: Record<string, string> = {}
+  let total = 0
+  let skippedName = 0
+  let skippedSession = 0
+  let skippedSize = 0
+  let truncated = false
+  for (const entry of stdout.split('\u0000')) {
+    if (entry.length === 0) continue
+    const eq = entry.indexOf('=')
+    if (eq <= 0) {
+      skippedName += 1
+      continue
+    }
+    const name = entry.slice(0, eq)
+    if (!ENV_NAME.test(name) || BASH_SESSION_VARS.has(name)) {
+      skippedName += 1
+      continue
+    }
+    if (SESSION_IDENTITY_VARS.has(name)) {
+      skippedSession += 1
+      continue
+    }
+    const value = entry.slice(eq + 1)
+    const bytes = Buffer.byteLength(value, 'utf8')
+    if (bytes > MAX_ENV_VALUE_BYTES) {
+      skippedSize += 1
+      continue
+    }
+    if (total + bytes > MAX_ENV_TOTAL_BYTES) {
+      truncated = true
+      break
+    }
+    total += bytes
+    env[name] = value
+  }
+  const notes: string[] = []
+  if (skippedName > 0) {
+    notes.push(`${skippedName} 项不是环境变量（如导出的 bash 函数）或是 shell 会话状态，未传给子进程`)
+  }
+  if (skippedSession > 0) {
+    notes.push(
+      `${skippedSession} 项是显示/会话标识（DISPLAY 等），未传给子进程：`
+      + 'GUI 窗口必须与 wmctrl / xdotool / 截图所在的显示保持一致，否则窗口会“存在但永远找不到”',
+    )
+  }
+  if (skippedSize > 0) {
+    notes.push(`${skippedSize} 项环境变量超过单项 ${MAX_ENV_VALUE_BYTES} 字节预算，未传给子进程`)
+  }
+  if (truncated) {
+    notes.push(`setup 链导出的环境超过 ${MAX_ENV_TOTAL_BYTES} 字节总预算，其余未传给子进程`)
+  }
+  return notes.length > 0 ? { env, note: notes.join('；') } : { env }
+}
+
+/**
+ * Read the environment the configured setup chain exports, through the run seam.
+ *
+ * `runCommand` runs every command as `bash -lc '<setup prefix> <command>'`, so a
+ * sourced environment exists — but only *inside that bash*. A child we exec
+ * directly (rviz2, rqt) sees the plugin's own `process.env` instead, which on a
+ * host whose ROS lives behind a workspace setup means `command -v rviz2` is empty
+ * and `ros2_gui_start` cannot work at all. Round 31 seamed every background job
+ * and left the GUI spawner on bare PATH; this is that edge.
+ *
+ * Taking `env -0` through the seam (rather than sourcing the file a second way)
+ * keeps ONE code path deciding what a child's environment is: the same setup
+ * resolution, the same `ROS_LOG_DIR` judgement, the same notes.
+ *
+ * A failed capture returns an EMPTY environment plus a note instead of throwing:
+ * a GUI that starts without the setup chain is exactly the old behaviour, and
+ * losing the diagnosis would be worse than losing the feature.
+ */
+export async function captureSourcedEnv(
+  deps: ToolDeps,
+  opts: { timeoutMs?: number } = {},
+): Promise<SourcedEnv> {
+  const res = await deps.run('env', ['-0'], {
+    timeoutMs: opts.timeoutMs ?? 15000,
+    ...seamOptionsFor(deps),
+    ...(deps.rosLogDir !== undefined ? { rosLogDir: deps.rosLogDir } : {}),
+  })
+  if (!res.ok || res.exitCode !== 0) {
+    const why = res.error !== undefined && res.error !== ''
+      ? res.error
+      : res.timedOut
+        ? `超时（${res.durationMs} ms）`
+        : `退出码 ${String(res.exitCode)}`
+    return {
+      env: {},
+      note: `未能读取 setup 链导出的环境（${why}）；GUI 子进程退回裸 PATH，与其它子进程不同`,
+    }
+  }
+  return parseSourcedEnv(res.stdout)
+}
+
 /** Optional value helpers (legacy ToolDeps params are loose). */
 export function strOrUndefined(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined

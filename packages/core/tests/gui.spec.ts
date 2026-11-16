@@ -550,3 +550,102 @@ describe('L3 visualization tools', () => {
     expect(out.error?.code).toBe('APPROVAL_DENIED')
   })
 })
+
+// ── the GUI child's environment (round 33) ───────────────────────────────
+//
+// Measured on the maintenance host: `command -v rviz2` in a bare login shell is
+// EMPTY, and `/opt/ros/jazzy/bin/rviz2` only exists after sourcing the
+// deployment's `install/setup.bash`. `ros2_gui_start` exec'd the preset on the
+// plugin's own `process.env`, so on that host it could never have started a
+// window. These cases assert the child receives the SOURCED environment, and
+// that the judged ROS_LOG_DIR still outranks whatever the setup exported.
+
+describe('GUI child environment', () => {
+  function guiDeps(opts: { envStdout: string; rosLogDir?: string; runError?: Partial<{ ok: boolean; error: string; exitCode: number | null }> } = { envStdout: '' }) {
+    const spawnLog: Array<{ bin: string; args: string[]; env: Record<string, string> }> = []
+    const manager = new GuiManager({
+      spawn: fakeSpawn(spawnLog),
+      windowCmd: fakeWindowCmd(),
+      screenshot: fakeScreenshot([]),
+      interact: fakeInteract([]),
+      screenshotDir: '/tmp/dsh-ros2-test',
+    })
+    const deps: ToolDeps = {
+      run: async (bin, args) => ({
+        ok: opts.runError?.ok ?? true,
+        command: `${bin} ${args.join(' ')}`,
+        stdout: opts.runError !== undefined ? '' : opts.envStdout,
+        stderr: '',
+        exitCode: opts.runError?.exitCode ?? 0,
+        timedOut: false,
+        durationMs: 1,
+        ...(opts.runError?.error !== undefined ? { error: opts.runError.error } : {}),
+      }),
+      gui: manager,
+      ...(opts.rosLogDir !== undefined ? { rosLogDir: opts.rosLogDir } : {}),
+    }
+    return { deps, spawnLog }
+  }
+
+  it('starts rviz2 with the environment the setup chain exports, not the plugin PATH', async () => {
+    const { deps, spawnLog } = guiDeps({
+      envStdout: 'PATH=/opt/ros/jazzy/bin:/usr/bin\u0000ROS_DISTRO=jazzy\u0000MARKER=from-setup\u0000',
+    })
+    const out = (await tool(deps, 'ros2_gui_start').execute({ app: 'rviz2' }, execStub)) as ToolResult
+    expect(out.ok).toBe(true)
+    expect(spawnLog[0]?.bin).toBe('ros2')
+    expect(spawnLog[0]?.args).toContain('rviz2')
+    expect(spawnLog[0]?.env.PATH).toBe('/opt/ros/jazzy/bin:/usr/bin')
+    expect(spawnLog[0]?.env.MARKER).toBe('from-setup')
+    expect(spawnLog[0]?.env.ROS_DISTRO).toBe('jazzy')
+  })
+
+  it('the judged ROS_LOG_DIR outranks the one the setup exported', async () => {
+    const judged = await mkdtemp(path.join(os.tmpdir(), 'dsh-ros2-judged-log-'))
+    try {
+      const { deps, spawnLog } = guiDeps({
+        envStdout: 'ROS_LOG_DIR=/tmp/wide-open\u0000MARKER=1\u0000',
+        rosLogDir: judged,
+      })
+      const out = (await tool(deps, 'ros2_gui_start').execute({ app: 'rqt_graph' }, execStub)) as ToolResult
+      expect(out.ok).toBe(true)
+      expect(spawnLog[0]?.env.MARKER).toBe('1')
+      // The value in force is the judged one, never the stale copy from the shell.
+      expect(spawnLog[0]?.env.ROS_LOG_DIR).toBe(judged)
+    } finally {
+      await rm(judged, { recursive: true, force: true })
+    }
+  })
+
+  it('still starts the app when the capture fails, and says the child is on bare PATH', async () => {
+    const { deps, spawnLog } = guiDeps({ envStdout: '', runError: { ok: false, exitCode: null, error: 'ENOENT' } })
+    const out = (await tool(deps, 'ros2_gui_start').execute({ app: 'rviz2' }, execStub)) as ToolResult
+    expect(out.ok).toBe(true)
+    expect(spawnLog[0]?.env.PATH).toBeDefined()
+    expect((out.warnings ?? []).join(' ')).toContain('裸 PATH')
+  })
+
+  it('ros2_gui_observe launches its window through the same environment', async () => {
+    const { deps, spawnLog } = guiDeps({ envStdout: 'MARKER=observe-path\u0000PATH=/opt/ros/jazzy/bin\u0000' })
+    await tool(deps, 'ros2_gui_observe').execute({ app: 'rqt_graph' }, execStub)
+    expect(spawnLog[0]?.env.MARKER).toBe('observe-path')
+  })
+
+  it('keeps the window on the display the inspecting tools look at', async () => {
+    // The setup script exporting a DISPLAY must not move the child off the
+    // display that `wmctrl` / `xdotool` / screenshot (all on the plugin's env)
+    // inspect — otherwise the session is listed and can never be found.
+    const before = process.env.DISPLAY
+    process.env.DISPLAY = ':77'
+    try {
+      const { deps, spawnLog } = guiDeps({ envStdout: 'DISPLAY=:99\u0000MARKER=1\u0000' })
+      const out = (await tool(deps, 'ros2_gui_start').execute({ app: 'rqt_graph' }, execStub)) as ToolResult
+      expect(out.ok).toBe(true)
+      expect(spawnLog[0]?.env.DISPLAY).toBe(':77')
+      expect(spawnLog[0]?.env.MARKER).toBe('1')
+    } finally {
+      if (before === undefined) delete process.env.DISPLAY
+      else process.env.DISPLAY = before
+    }
+  })
+})
