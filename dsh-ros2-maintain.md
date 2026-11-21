@@ -9516,7 +9516,7 @@ Environment=DSH_PHOENIX_RESTART_CMD=/usr/bin/busctl --user call org.freedesktop.
 
 **本轮仍然不代为执行**：它会掐掉写这份文档的会话，而两处修复需要先合入 `main`（39.8 已完成）。
 
-### 39.9.3 gen-40 的**过程**已逐字观测，结局按设计落在本轮之后
+#### 39.9.3 gen-40 的**过程**已逐字观测，结局按设计落在本轮之后
 
 journal 逐字（本轮在会话内等到了 **soft 期限**，没有等到 hard 期限——理由见最后一段）：
 
