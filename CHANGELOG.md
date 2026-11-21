@@ -635,6 +635,32 @@ All notable changes to **dsh-ros2** are documented here. Format follows
   `pnpm audit` / `pnpm install` 会以 `ERR_SQLITE_ERROR` 失败，且 `pnpm run` 会**自动**先跑 `pnpm install`。
   本轮的验收线因此用 `pnpm --config.verify-deps-before-run=false run build|test` 跑（依赖已安装）。
 
+### Fixed
+
+- **点名了机器人、却读不到它的档案时，限位校验整条消失**（第三十轮开的分支，第三十四轮合入）：
+  `loadRobotProfile` 用一个裸 `null` 同时表示两种互不相同的处境——「调用方没传 `robot`」
+  （profile 驱动的限位按文档**有意**不启用）与「调用方**点名**了机器人、但档案读不出来」
+  （它携带的限位 / 工作空间 / 新鲜度 / `require_limits` **悄悄停止生效**）。两者都以
+  `limits: {}` + `require_limits: false` 进入 `buildMotionValidationConfig`，即「没有限位要检查」。
+  **实测**（同一个 Python 校验器、同一条越界轨迹 `j0 = 99 rad`、限位 `±2.0`）：
+
+  | 档案状态 | 校验器结论 |
+  | --- | --- |
+  | 可读 | `safe: false` · `status: fail` · `关节 j0 点 0 位置 99.0000 超出 [-2, 2]` |
+  | 读不出来 | **`safe: true`** · **`status: pass`** · `joint_limits: unknown` |
+
+  这个控制救不了自己：`require_limits` 本身就写在**读不出来的那个档案里**；而
+  `robot_profile.py load` 对 `0600 → 0000` 的档案返回 `{"ok": false, "error": "Permission denied"}`，
+  旧加载器把它折成 `null`，于是「读到空」与「没要求读」在工具面无法区分。
+  - **common**：新增 `loadRequestedProfile()`，保留失败原因
+    （`PROFILE_UNREADABLE` / `PROFILE_NAME_UNSAFE`）；`loadRobotProfile()` 改为委托它，
+    并**保持原有返回形状**（老调用方行为不变）。
+  - **moveit**：`moveit_move` 在**规划 / 校验 / 审批之前**拒绝执行模式（`planOnly` 仍可规划用于诊断，
+    但结果带明确告警）；`motion_validate` 拒绝给出它没能建立的「已校验」结论。
+  - 用例 **+4**（moveit 21 → 25）；撤掉守卫 **3 红**，「不传 robot」的 opt-out 对照仍绿。
+    顺带修掉两个**因为写错而一直是绿的**旧桩：`args.includes('file.py')` 对**完整路径**做精确比较，
+    永远不匹配。
+
 ## [dsh-ros2-vision 0.1.3] - 2026-09-02
 
 ### Fixed

@@ -673,14 +673,50 @@ export interface ProfileSafetyView {
   moveit?: { groups?: Record<string, { joints?: string[] }> }
 }
 
+/** A requested profile that failed to load, with the reason kept (never silent). */
+export interface ProfileLoadFailure {
+  ok: false
+  code: 'PROFILE_UNREADABLE' | 'PROFILE_NAME_UNSAFE'
+  reason: string
+}
+
+/**
+ * Load the profile the CALLER named, preserving WHY it failed.
+ *
+ * `loadRobotProfile` returns bare `null`, which collapses two very different
+ * situations into one: "the caller passed no `robot`, so profile-driven limits
+ * are intentionally off" and "the caller named a robot but we could not read
+ * its profile, so the safety controls it carries silently stopped applying".
+ * Callers that gate motion must tell them apart — otherwise an unreadable
+ * profile degrades to no validation at all (docs/safety.md §3).
+ */
+export async function loadRequestedProfile(
+  deps: ToolDeps,
+  robot: string,
+): Promise<{ ok: true; robot: ProfileSafetyView; profile_path?: string } | ProfileLoadFailure> {
+  if (!isSafeProfileName(robot)) {
+    return { ok: false, code: 'PROFILE_NAME_UNSAFE', reason: `机器人名「${robot}」不是合法的档案名（不可含路径分隔符/控制字符）` }
+  }
+  const res = await deps.run('python3', [commonScriptPath('robot_profile.py'), 'load', '--name', robot], { timeoutMs: 30000 })
+  if (!res.ok || !res.stdout.trim()) {
+    return {
+      ok: false,
+      code: 'PROFILE_UNREADABLE',
+      reason: res.stderr.trim() || `robot_profile.py load 失败（exit ${res.exitCode ?? 'unknown'}）`,
+    }
+  }
+  const data = parseJsonOrRaw(res.stdout) as { ok?: boolean; robot?: ProfileSafetyView; profile_path?: string; error?: string }
+  if (!data?.ok || !data.robot) {
+    return { ok: false, code: 'PROFILE_UNREADABLE', reason: data?.error ?? '档案内容无法解析（缺 robot 段）' }
+  }
+  return { ok: true, robot: data.robot, ...(data.profile_path ? { profile_path: data.profile_path } : {}) }
+}
+
 /** Load a registered robot profile (structured JSON, fast path). */
 export async function loadRobotProfile(deps: ToolDeps, robot: string): Promise<{ robot: ProfileSafetyView; profile_path?: string } | null> {
-  if (!isSafeProfileName(robot)) return null
-  const res = await deps.run('python3', [commonScriptPath('robot_profile.py'), 'load', '--name', robot], { timeoutMs: 30000 })
-  if (!res.ok || !res.stdout.trim()) return null
-  const data = parseJsonOrRaw(res.stdout) as { ok?: boolean; robot?: ProfileSafetyView; profile_path?: string }
-  if (!data?.ok || !data.robot) return null
-  return { robot: data.robot, ...(data.profile_path ? { profile_path: data.profile_path } : {}) }
+  const loaded = await loadRequestedProfile(deps, robot)
+  if (!loaded.ok) return null
+  return { robot: loaded.robot, ...(loaded.profile_path ? { profile_path: loaded.profile_path } : {}) }
 }
 
 // ── ros2Tool adapter (read-only CLI tools built from one spec) ───────────
