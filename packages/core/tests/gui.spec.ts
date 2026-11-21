@@ -18,6 +18,10 @@ function fakeSpawn(recorder: Array<{ bin: string; args: string[]; env: Record<st
       unref() {},
       on() {},
       kill() { return true },
+      // A child that never exits: the fake has no process behind it, so the
+      // start window is disabled in makeManager() rather than faked here.
+      done: new Promise(() => {}),
+      readOutput: () => '',
     }
     return proc
   }
@@ -65,6 +69,9 @@ function makeManager(overrides: { spawn?: SpawnFn; windowCmd?: WindowCmdFn; scre
     interact: overrides.interact ?? fakeInteract(interactLog),
     kill: overrides.kill ?? ((pid, signal) => { killed.push({ pid, signal }); return true }),
     screenshotDir: '/tmp/dsh-ros2-test',
+    // No real process behind the fake spawn: settle immediately instead of
+    // waiting out a window nothing can answer.
+    startGraceMs: 0,
     ...(overrides.allowedApplications ? { allowedApplications: overrides.allowedApplications } : {}),
   })
   return { manager, spawnLog, shotLog, interactLog, killed }
@@ -73,9 +80,9 @@ function makeManager(overrides: { spawn?: SpawnFn; windowCmd?: WindowCmdFn; scre
 // ── GuiManager ───────────────────────────────────────────────────────────
 
 describe('GuiManager', () => {
-  it('starts a tracked session and lists it', () => {
+  it('starts a tracked session and lists it', async () => {
     const { manager, spawnLog } = makeManager()
-    const result = manager.start({ label: 'rviz2', bin: 'ros2', args: ['run', 'rviz2', 'rviz2'], windowTitle: 'rviz2' })
+    const result = await manager.start({ label: 'rviz2', bin: 'ros2', args: ['run', 'rviz2', 'rviz2'], windowTitle: 'rviz2' })
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.session.pid).toBeGreaterThan(0)
@@ -83,31 +90,31 @@ describe('GuiManager', () => {
     expect(spawnLog[0]).toMatchObject({ bin: 'ros2', args: ['run', 'rviz2', 'rviz2'] })
   })
 
-  it('injects the configured DISPLAY into the spawned env', () => {
+  it('injects the configured DISPLAY into the spawned env', async () => {
     const spawnLog: Array<{ bin: string; args: string[]; env: Record<string, string> }> = []
     const manager = new GuiManager({ spawn: fakeSpawn(spawnLog), display: ':99' })
-    manager.start({ label: 'rv', bin: 'x', args: [] })
+    await manager.start({ label: 'rv', bin: 'x', args: [] })
     expect(spawnLog[0]?.env.DISPLAY).toBe(':99')
   })
 
-  it('merges extra env (e.g. ROS_LOG_DIR) into the spawned env', () => {
+  it('merges extra env (e.g. ROS_LOG_DIR) into the spawned env', async () => {
     const spawnLog: Array<{ bin: string; args: string[]; env: Record<string, string> }> = []
     const manager = new GuiManager({ spawn: fakeSpawn(spawnLog), env: { ROS_LOG_DIR: '/tmp/roslog' } })
-    manager.start({ label: 'rv', bin: 'x', args: [] })
+    await manager.start({ label: 'rv', bin: 'x', args: [] })
     expect(spawnLog[0]?.env.ROS_LOG_DIR).toBe('/tmp/roslog')
     expect(spawnLog[0]?.env.PATH).toBeDefined()
   })
 
-  it('rejects a duplicate label', () => {
+  it('rejects a duplicate label', async () => {
     const { manager } = makeManager()
-    manager.start({ label: 'rviz2', bin: 'ros2', args: [] })
-    const second = manager.start({ label: 'rviz2', bin: 'ros2', args: [] })
+    await manager.start({ label: 'rviz2', bin: 'ros2', args: [] })
+    const second = await manager.start({ label: 'rviz2', bin: 'ros2', args: [] })
     expect(second.ok).toBe(false)
   })
 
   it('closes a session via process-group SIGTERM', async () => {
     const { manager, killed } = makeManager()
-    manager.start({ label: 'rviz2', bin: 'ros2', args: [] })
+    await manager.start({ label: 'rviz2', bin: 'ros2', args: [] })
     const session = manager.list()[0]
     await expect(manager.close('rviz2')).resolves.toBe(true)
     // Fake pid does not exist, so the group is already gone — SIGTERM only.
@@ -129,11 +136,111 @@ describe('GuiManager', () => {
       },
       groupAlive: () => groupAlive,
     })
-    manager.start({ label: 'stubborn', bin: 'app', args: [] })
+    await manager.start({ label: 'stubborn', bin: 'app', args: [] })
     await manager.close('stubborn', { graceMs: 50 })
     expect(killed).toContainEqual({ pid: -pid, signal: 'SIGTERM' })
     expect(killed).toContainEqual({ pid: -pid, signal: 'SIGKILL' })
     expect(manager.list()).toHaveLength(0)
+  })
+
+  // A pid only proves `spawn()` succeeded. `ros2 run` dies in under a second on
+  // a host where the package is missing, the `-d` config is unreadable, or the
+  // display is unreachable — and the old code reported every one of those as a
+  // running session (measured: `args: "--help"` → rviz2 printed usage, exited
+  // 0.37 s, tool said `started: true`).
+  describe('the start window', () => {
+    /**
+     * A child whose exit this test controls. Each spawn gets its OWN promise:
+     * reusing one would make the second `start()` look already-finished.
+     */
+    function controlledSpawn(recorded: { output: string }): { spawn: SpawnFn; exit: (exit: { code: number | null; signal: NodeJS.Signals | null }) => void } {
+      let pids = 7330
+      const settlers: Array<(value: { code: number | null; signal: NodeJS.Signals | null }) => void> = []
+      const spawn: SpawnFn = () => {
+        pids += 1
+        const pid = pids
+        const done = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => { settlers.push(resolve) })
+        return { pid, unref() {}, on() {}, kill() { return true }, done, readOutput: () => recorded.output }
+      }
+      return { spawn, exit: (exit) => { for (const settle of settlers.splice(0)) settle(exit) } }
+    }
+
+    it('does not report a session whose child exited inside the window', async () => {
+      const child = controlledSpawn({ output: "Package 'rqt_graph' not found" })
+      const manager = new GuiManager({ spawn: child.spawn, startGraceMs: 50 })
+      const started = manager.start({ label: 'rqt_graph', bin: 'ros2', args: ['run', 'rqt_graph', 'rqt_graph'] })
+      child.exit({ code: 1, signal: null })
+      const result = await started
+      expect(result.ok).toBe(false)
+      if (result.ok) return
+      expect(result.error).toContain('exit 1')
+      // The reason has to travel with the refusal: this is the only moment it exists.
+      expect(result.error).toContain("Package 'rqt_graph' not found")
+      // And the label must not be burned by a session that never ran.
+      expect(manager.list()).toHaveLength(0)
+    })
+
+    it('names the signal when the child was killed instead of exiting', async () => {
+      const child = controlledSpawn({ output: '' })
+      const manager = new GuiManager({ spawn: child.spawn, startGraceMs: 50 })
+      const started = manager.start({ label: 'rviz2', bin: 'rviz2', args: [] })
+      child.exit({ code: null, signal: 'SIGSEGV' })
+      const result = await started
+      expect(result.ok).toBe(false)
+      if (result.ok) return
+      expect(result.error).toContain('SIGSEGV')
+      // No output → no dangling "captured output:" clause.
+      expect(result.error).not.toContain('已捕获输出')
+    })
+
+    it('reports the session when the child outlives the window', async () => {
+      const child = controlledSpawn({ output: '' })
+      const manager = new GuiManager({ spawn: child.spawn, startGraceMs: 20 })
+      const result = await manager.start({ label: 'rviz2', bin: 'rviz2', args: [], windowTitle: 'rviz2' })
+      expect(result.ok).toBe(true)
+      expect(manager.list()).toHaveLength(1)
+    })
+
+    it('keeps reporting the session when the spawner cannot observe an exit', async () => {
+      // `done` absent = no evidence either way. Inventing a verdict from no
+      // evidence is what this round is fixing; saying nothing is not.
+      const manager = new GuiManager({
+        spawn: () => ({ pid: 99, unref() {}, on() {}, kill() { return true } }),
+        startGraceMs: 20,
+      })
+      const result = await manager.start({ label: 'rviz2', bin: 'rviz2', args: [] })
+      expect(result.ok).toBe(true)
+      expect(manager.list()).toHaveLength(1)
+    })
+
+    it('forgets a session whose child exits after the window', async () => {
+      const handlers: Array<() => void> = []
+      const spawn: SpawnFn = () => ({
+        pid: 4242,
+        unref() {},
+        on(event: 'error' | 'exit', cb: () => void) { if (event === 'exit') handlers.push(cb) },
+        kill() { return true },
+        done: undefined,
+        readOutput: () => '',
+      })
+      const manager = new GuiManager({ spawn, startGraceMs: 0 })
+      await manager.start({ label: 'rviz2', bin: 'rviz2', args: [] })
+      expect(manager.list()).toHaveLength(1)
+      // The GUI crashed five minutes later: `started` was true then, not now.
+      for (const cb of handlers) cb()
+      expect(manager.list()).toHaveLength(0)
+    })
+
+    it('does not let a dead session block its own label', async () => {
+      const child = controlledSpawn({ output: 'boom' })
+      const manager = new GuiManager({ spawn: child.spawn, startGraceMs: 50 })
+      const first = manager.start({ label: 'rviz2', bin: 'rviz2', args: [] })
+      child.exit({ code: 2, signal: null })
+      expect((await first).ok).toBe(false)
+      // Retrying the same label is legitimate: nothing is running under it.
+      const second = await manager.start({ label: 'rviz2', bin: 'rviz2', args: [] })
+      expect(second.ok).toBe(true)
+    })
   })
 
   it('lists and finds X11 windows', async () => {
@@ -286,6 +393,7 @@ function visualDeps2(opts: { approval?: () => Promise<string> } = {}) {
     screenshot: fakeScreenshot(shotLog),
     interact: fakeInteract([]),
     screenshotDir: '/tmp/dsh-ros2-test',
+    startGraceMs: 0,
   })
   const deps: ToolDeps = {
     run: async () => ({ ok: true, command: '', stdout: '', stderr: '', exitCode: 0, timedOut: false, durationMs: 0 }),

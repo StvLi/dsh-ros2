@@ -12,11 +12,26 @@ export interface GuiSession {
   windowTitle?: string
 }
 
+/** How a GUI child exited, when the spawner can observe it. */
+export interface GuiChildExit {
+  code: number | null
+  signal: NodeJS.Signals | null
+}
+
 export interface SpawnedProcess {
   pid?: number
   unref(): void
   on(event: 'error', cb: (error: Error) => void): void
+  on(event: 'exit', cb: (code: number | null, signal: NodeJS.Signals | null) => void): void
   kill(signal?: string): boolean
+  /**
+   * Resolves when the child exits. ABSENT means the spawner cannot observe an
+   * exit — in that case `start()` has no evidence either way and says so by
+   * reporting the session (the old behaviour), instead of inventing a verdict.
+   */
+  done?: Promise<GuiChildExit>
+  /** Bounded tail of what the child already printed — why it died. */
+  readOutput?(): string
 }
 
 export type SpawnFn = (
@@ -51,6 +66,23 @@ export interface GuiManagerOptions {
   env?: Record<string, string>
   screenshotDir?: string
   screenshotCommand?: string
+  /**
+   * How long `start()` waits before it is willing to call a spawned child a
+   * running session (default 800 ms). A 0 disables the window (tests only).
+   *
+   * The number comes from measuring this host, not from taste:
+   *
+   *   `rviz2 --help`                      135 ms
+   *   `ros2 run no_such_package_xyz exe`  210 ms
+   *   `ros2 run rviz2 rviz2 --help`       351 ms
+   *
+   * `ros2 run` pays python startup before the executable exists at all, so a
+   * window shorter than that cannot see the failure it exists to catch: with the
+   * 300 ms the job seam uses, the measured 351 ms case came back `started: true`
+   * (this round's first live probe of the fix). 800 ms covers all three with
+   * margin and is still invisible next to a GUI start.
+   */
+  startGraceMs?: number
   /**
    * Application names whose windows `ros2_gui_interact` may drive WITHOUT
    * approval. Empty/omitted = `DEFAULT_ALLOWED_APPLICATIONS`.
@@ -161,13 +193,30 @@ export class GuiManager {
       : DEFAULT_ALLOWED_APPLICATIONS
   }
 
-  start(spec: {
+  /**
+   * Spawn a GUI child and report a session only if it is still alive after
+   * `startGraceMs`.
+   *
+   * `pid !== undefined` only proves `spawn()` succeeded — it is the same fact
+   * the background-job seam had to stop trusting in round 31 (`status:
+   * 'started'` about a child that exited 127 in ~40 ms). The GUI spawner is the
+   * last one that still trusted it, so a `ros2 run` that dies at once (package
+   * absent, `-d` config unreadable, display unreachable) came back as
+   * `started: true` with a session listed and the label burned: measured on the
+   * maintenance host as `ros2_gui_start {args: "--help"}` → rviz2 printing usage
+   * and exiting in 0.37 s, reported as a running session.
+   *
+   * A refusal carries the bounded tail of what the child printed, because
+   * "it exited" without "why" is the next question and the only moment the
+   * answer exists is here.
+   */
+  async start(spec: {
     label: string
     bin: string
     args: string[]
     windowTitle?: string
     env?: Record<string, string>
-  }): { ok: true; session: GuiSession } | { ok: false; error: string } {
+  }): Promise<{ ok: true; session: GuiSession } | { ok: false; error: string }> {
     const existing = this.sessions.get(spec.label)
     if (existing) {
       return { ok: false, error: `label "${spec.label}" 已存在（pid ${existing.pid}）；先 ros2_gui_close 或换 label` }
@@ -184,6 +233,16 @@ export class GuiManager {
     if (child.pid === undefined) {
       return { ok: false, error: '启动失败：子进程未获得 pid' }
     }
+    const early = await settleGuiStart(child, Math.max(0, this.options.startGraceMs ?? 800))
+    if (early !== undefined) {
+      const tail = child.readOutput?.().trim() ?? ''
+      const how = early.signal !== null ? `被信号 ${early.signal} 终止` : `exit ${early.code ?? 'unknown'}`
+      return {
+        ok: false,
+        error: `GUI 进程在启动窗口内已退出（${how}）——没有窗口可以观察`
+          + (tail.length > 0 ? `；已捕获输出（已净化控制/方向字符）：\n${tail.slice(-600)}` : ''),
+      }
+    }
     const session: GuiSession = {
       label: spec.label,
       pid: child.pid,
@@ -192,10 +251,15 @@ export class GuiManager {
       ...(spec.windowTitle ? { windowTitle: spec.windowTitle } : {}),
     }
     this.sessions.set(spec.label, session)
-    // A late spawn error (e.g. ENOENT) removes the session so list stays honest.
-    child.on('error', () => {
-      this.sessions.delete(spec.label)
-    })
+    // "Started" is a claim about NOW: a child that dies later must leave the
+    // list, otherwise `ros2_gui_list` keeps advertising a window that is gone
+    // and `ros2_gui_start` refuses a label nobody is using.
+    const forget = () => {
+      // Guard on the pid: a later session may legitimately reuse the label.
+      if (this.sessions.get(spec.label)?.pid === child.pid) this.sessions.delete(spec.label)
+    }
+    child.on('error', forget)
+    child.on('exit', forget)
     return { ok: true, session }
   }
 
@@ -462,15 +526,57 @@ export class GuiManager {
   }
 }
 
+/** Largest tail of GUI child output kept for a failure message. */
+const GUI_OUTPUT_TAIL_BYTES = 8 * 1024
+
 function defaultSpawn(bin: string, args: string[], opts: { env: Record<string, string>; detached: boolean }): SpawnedProcess {
-  const child = spawn(bin, args, { env: opts.env, detached: opts.detached, stdio: 'ignore' })
+  // stdout/stderr are PIPES, not 'ignore': without them the only thing a dead
+  // child leaves behind is a pid that no longer exists. They are also always
+  // drained — an undrained pipe fills and blocks the GUI child mid-startup.
+  const child = spawn(bin, args, { env: opts.env, detached: opts.detached, stdio: ['ignore', 'pipe', 'pipe'] })
+  let tail = ''
+  const append = (chunk: Buffer) => {
+    // Keep the LAST bytes: the reason a GUI dies is at the end of its output.
+    tail = (tail + chunk.toString()).slice(-GUI_OUTPUT_TAIL_BYTES)
+  }
+  child.stdout?.on('data', append)
+  child.stderr?.on('data', append)
+  const done = new Promise<GuiChildExit>((resolve) => {
+    child.on('exit', (code, signal) => resolve({ code, signal }))
+    // A spawn error means the child never existed; race it like an exit so a
+    // caller waiting on the window never hangs on the ENOENT path.
+    child.on('error', () => resolve({ code: null, signal: null }))
+  })
   return {
     pid: child.pid,
     unref: () => child.unref(),
-    on: (event, cb) => {
-      child.on(event, cb)
+    on: (event: 'error' | 'exit', cb: (...cbArgs: never[]) => void) => {
+      child.on(event, cb as (...a: unknown[]) => void)
     },
     kill: (signal?: string) => child.kill(signal as NodeJS.Signals),
+    done,
+    readOutput: () => tail,
+  }
+}
+
+/**
+ * Race a GUI child's exit against the start window.
+ *
+ * `undefined` = the child outlived the window (a session); an exit = it did not.
+ * A spawner that cannot report exits (`done` absent) yields `undefined`, which
+ * keeps the old "report the session" behaviour rather than inventing a verdict
+ * from no evidence.
+ */
+async function settleGuiStart(child: SpawnedProcess, graceMs: number): Promise<GuiChildExit | undefined> {
+  if (child.done === undefined) return undefined
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      child.done,
+      new Promise<undefined>((resolve) => { timer = setTimeout(() => resolve(undefined), graceMs) }),
+    ])
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
   }
 }
 
