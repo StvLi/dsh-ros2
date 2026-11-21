@@ -9417,7 +9417,41 @@ ros2 run rviz2 rviz2
 | 本轮文档 | 分支 `docs/round-34-maintenance`，提交 `docs: record round 34 …` |
 | `main` 轨迹 | `704e35f` →（#113）`e327ba4` →（#114）`ef09598` |
 | 遗留本地分支 | `local-maintain-log`（**故意本地**，第二十轮记过"Kept local (not pushed)"）：本轮**不动**，只登记 |
-| 远端陈旧分支 | **8 条**（9 月/10 月）。`git cherry main <branch>` 给出：**6 条全部 `-`**（patch 已在上游 = squash 合入）：`feat/topic-sample`、`feat/topology-snapshot`、`feat/topology-liveness`、`docs/round-26-maintenance`、`ci/dependabot-version-updates`、`chore/remove-pre-split-monolith`；**2 条有 `+`**：`fix/private-write-surfaces`(3)、`feat/ros2-toolchain-prompt-guidance`(6)——它们的内容看起来已在 `main`（`ensurePrivateRuntimeDir`、`ros2_topology` 引导都在），但 **patch 同一性证明不了**，所以本轮**只登记不删**（下一轮逐文件核一遍再删） |
+| 分支清理 | 见 §39.8.1（**开工时以为的"8 条远端陈旧分支"其实是本地残留**，本轮删掉 9 条本地分支，远端本来就只剩 2 条） |
+
+#### 39.8.1 分支清理，以及一条**本轮自己写错又自己改回来**的判据
+
+开工时 `git branch -a` 里有一串 9 月/10 月的分支，我把它写成了"**远端**陈旧分支 8 条"。合入三个 PR
+之后再核对远端，发现**远端只有 2 条**：
+
+```text
+$ git ls-remote --heads origin
+5e9dcd7…  refs/heads/dependabot/npm_and_yarn/vitest-5.1.0
+5976be5…  refs/heads/main
+$ gh api 'repos/StvLi/dsh-ros2/branches?per_page=100' --jq '.[].name'   → 同样两条
+$ git for-each-ref refs/heads --format='%(refname:short)|%(upstream:short)|%(upstream:track)'
+chore/remove-pre-split-monolith|origin/chore/remove-pre-split-monolith|[gone]      ← 上游早已删除
+ci/dependabot-version-updates |origin/ci/dependabot-version-updates |[gone]
+docs/round-26-maintenance     |origin/docs/round-26-maintenance     |[gone]
+feat/ros2-toolchain-prompt-guidance|origin/…                       |[gone]
+feat/topic-sample / feat/topology-liveness / feat/topology-snapshot |[gone]
+fix/private-write-surfaces    |origin/fix/private-write-surfaces    |[gone]
+```
+
+⇒ **`git branch -a` 会把"上游已被删除、本地 tracking 还在"的分支显示得像远端分支。**
+判据不是"`-a` 里有没有那一行"，而是 **`%(upstream:track)` = `[gone]`**，以及远端自己说了什么
+（`git ls-remote` / `gh api branches`）。这一条与 §39.6 那两条是同一族错误：**把本地的影子当成远端的实体。**
+
+清理动作（本轮实际执行，本地）：
+
+| 类别 | 分支 | 依据 |
+| --- | --- | --- |
+| 本轮三个 PR 合入后残留 | `docs/round-34-maintenance`、`fix/round-30-profile-fail-closed`、`fix/round-34-gui-start-settle` | `git branch --merged main` 三条都在里面 |
+| patch 已在上游 | `feat/topic-sample`、`feat/topology-snapshot`、`feat/topology-liveness`、`docs/round-26-maintenance`、`ci/dependabot-version-updates`、`chore/remove-pre-split-monolith` | `git cherry main <b>` **全 `-`**（squash 合入的等价判据） |
+| **留下**（待逐文件核） | `fix/private-write-surfaces`(3)、`feat/ros2-toolchain-prompt-guidance`(6) | `git cherry` 有 `+`：patch 不同不代表内容不同，但**也不代表相同** ⇒ 下一轮 `git diff main <b> -- <file>` 逐文件核 |
+| **故意留下** | `local-maintain-log` | 第二十轮记过"Kept local (not pushed)" |
+
+收工状态：本地 **4 条**（`main` / 上面两条待核 / `local-maintain-log`），远端 **2 条**，工作树干净。
 
 ### 39.9 step 4：dsh-phoenix —— 请求被合并进 `plugin-change` 那一代（**gen-40**），而本轮真正让代码生效的是一次外部重启
 
@@ -9564,9 +9598,10 @@ journalctl --user -u dsh-web --since "-12h" | grep -E "restart cmd exit|loaded \
 5. **F3 的判据要重新表述**：失败路径里 `[env] 宿主环境：AMENT_PREFIX_PATH= COLCON_PREFIX_PATH=`
    两条**恒为空**（那是插件进程的 env，setup 只在子进程里生效），诊断价值有限——
    下一轮要么给它加"这是插件进程，不是子进程"的措辞，要么换成有意义的值。
-6. **8 条远端陈旧分支**：6 条 `git cherry` 全 `-`（可删）；`fix/private-write-surfaces`(3)、
-   `feat/ros2-toolchain-prompt-guidance`(6) 有 `+`，**内容看起来已在 `main`** 但 patch 同一性证明不了
-   ⇒ 删之前要逐文件核一遍（`git diff main <branch> -- <file>`）。
+6. **两条留下待核的本地分支**：`fix/private-write-surfaces`(3)、`feat/ros2-toolchain-prompt-guidance`(6)。
+   `git cherry` 给的是 `+`，而内容看起来已在 `main`（`ensurePrivateRuntimeDir`、`ros2_topology` 引导都在）
+   ⇒ 删之前 `git diff main <branch> -- <file>` 逐文件核一遍。**远端已只有 `main` + dependabot 一条**，
+   不要再把 `git branch -a` 里的 `[gone]` 行当远端分支（§39.8.1）。
 7. **本地 vitest 与锁文件不一致**（5.0.5 vs 5.1.0）：沙箱进不了 pnpm store，仍无解，继续如实标注。
 8. **agent 的 bash 沙箱没有可用 GLX**（39.5.4 的 `BadValue`）：GUI 渲染这半条只能用**活进程**验收，
    别再用 `node probe` 冒充。
