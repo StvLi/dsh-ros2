@@ -9222,7 +9222,7 @@ Nov 22 00:32:53 dsh[173561]: dsh web: http://127.0.0.1:3080/?token=…
 ⇒ 这次重启来自**沙箱之外**（桌面终端 / 上一个会话 / 操作员）。**这一条必须写准**：本轮能真测，
 靠的是**一次外部重启**，不是 phoenix 循环修好了。
 
-#### 39.3.1 同一个沙箱里的两条路：`systemctl` 死、`busctl` 活（本轮第三次复核，仍是这个分界）
+#### 39.3.1 同一个沙箱里的两条路：`systemctl` 死、`busctl` 活（本轮又一次复核，仍是这个分界）
 
 ```text
 $ systemctl --user is-active dsh-web
@@ -9482,9 +9482,39 @@ Environment=DSH_PHOENIX_RESTART_CMD=/usr/bin/busctl --user call org.freedesktop.
 
 **本轮仍然不代为执行**：它会掐掉写这份文档的会话，而两处修复需要先合入 `main`（39.8 已完成）。
 
-### 39.9.3 gen-40 的结局（硬期限 01:01:04 之后补记）
+### 39.9.3 gen-40 的**过程**已逐字观测，结局按设计落在本轮之后
 
-> 本节由本轮在硬期限之后读 journal 补写；若为空，说明会话在硬期限前结束（见 §39.12 第 1 条）。
+journal 逐字（本轮在会话内等到了 **soft 期限**，没有等到 hard 期限——理由见最后一段）：
+
+```text
+00:46:01  [dsh-phoenix] cordis tool: cordis_run
+00:46:04  [dsh-phoenix] restart requested (gen 40): plugin-change      ← 动态插件自己的请求
+00:46:13  [dsh-phoenix] restart already in-flight; coalesced plugin-change
+00:46:19  [dsh-phoenix] restart already in-flight; coalesced round 34: land PR 113 …
+00:51:04  [dsh-phoenix] soft defer deadline reached; agent still busy — restart will be forced
+          at the hard deadline (policy=auto)                            ← soft = 请求 + 5 min，准时
+```
+
+状态文件在 00:46 时：`generation 40 / lifecycleState "deferred" / coalesced true /
+deferDeadline 1795280464866 = 01:01:04.866`（请求 + 15 min）。
+
+**本轮没有等到 01:01:04，这是设计而不是省略**：phoenix 的 defer 是 **idle-aware** 的——
+它等的两个事件是"会话空闲"或"硬期限"，而**本会话在写这份文档时既不空闲、也不会在硬期限前结束**。
+硬期限一到，`systemd-run --user …` 会在**这一轮之后**执行；它跑的是与 11-10 起五次失败**同一条**命令
+（39.3.1：本会话沙箱里 `systemctl` 仍然连不上总线），所以**预期仍是 `restart cmd exit=1`**。
+
+⇒ 下一轮的第一条动作（一行，别当结论引用）：
+
+```bash
+journalctl --user -u dsh-web --since "-12h" | grep -E "restart cmd exit|loaded \(graceful|HARD defer"
+```
+
+- 出现 `restart cmd exit=1` ⇒ 第**六**次连续失败，循环仍坏着 ⇒ 先做 39.9.2 的 `busctl` 那一条；
+- 出现新的 `loaded (graceful …)` + 新 PID ⇒ 这一次成功了，逐条复测 §39.12 第 2 条的行为指纹。
+
+> 本轮能确认的是**请求链路本身是通的**（请求 → 合并 → soft 期限 → 硬期限排定），
+> 与能力边界：**phoenix 无法在一个繁忙会话里重启它自己所在的进程**，而它用来重启的命令
+> 在这台机器的沙箱里执行不了。这两件事合起来，就是"循环的最后一步失败"的完整解释。
 
 ### 39.10 用例与自检基线
 
