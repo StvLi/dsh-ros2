@@ -980,7 +980,7 @@ function makeGuiStartTool(deps: CoreToolDeps) {
       // seam applies plus the judged ROS_LOG_DIR (rounds 31/33 — the manager used
       // to receive `config.rosLogDir` verbatim and to be exec'd on bare PATH).
       const guiEnv = await guiChildEnv(deps)
-      const result = deps.gui.start({
+      const result = await deps.gui.start({
         label,
         bin: preset.bin,
         args: preset.args(configFile, extra),
@@ -1128,7 +1128,7 @@ function makeGuiObserveTool(deps: CoreToolDeps) {
       if (!gate.ok) return gate.result
       if (deps.gui.list().every((s) => s.label !== label)) {
         const guiEnv = await guiChildEnv(deps)
-        const started = deps.gui.start({
+        const started = await deps.gui.start({
           label,
           bin: preset.bin,
           args: preset.args(undefined, []),

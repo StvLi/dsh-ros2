@@ -660,6 +660,23 @@ All notable changes to **dsh-ros2** are documented here. Format follows
   - 用例 **+4**（moveit 21 → 25）；撤掉守卫 **3 红**，「不传 robot」的 opt-out 对照仍绿。
     顺带修掉两个**因为写错而一直是绿的**旧桩：`args.includes('file.py')` 对**完整路径**做精确比较，
     永远不匹配。
+- **GUI 会话的「已启动」只凭一个 pid**（第三十四轮）：`GuiManager.start()` 过去只检查 `spawn()`
+  是否给出了 pid，于是一个**立刻退出的子进程**也会被报成 `started: true` 并登记为活跃会话。
+  这与第三十一轮修掉的后台任务谎话是同一句，只是换了一个 spawn 点——而 GUI 是**最后一个**
+  没有「等一会儿再说话」的 spawn 点。**本机实测**：`ros2_gui_start {app: rviz2, args: "--help"}`
+  → rviz2 打印 usage、**0.35 s** 后退出，工具返回 `started: true`，`ros2_gui_list` 继续列出那个 pid，
+  label 也被占了。
+  - `start()` 现在是 **async**，并有一个**可测的启动窗口**（默认 **800 ms**）：窗口内退出 → 拒绝，
+    并附**已净化**的输出尾巴（「为什么死」只在那一刻存在）；存活 → 登记会话。
+  - 窗口长度来自实测而不是喜好：`rviz2 --help` **135 ms**、`ros2 run no_such_package_xyz exe`
+    **210 ms**、`ros2 run rviz2 rviz2 --help` **351 ms**。`ros2 run` 要先付 Python 启动成本，
+    **短于这个成本的窗口看不见它要抓的失败**——第一版写 300 ms 时，351 ms 那一例仍然是
+    `started: true`（本轮实测记录在案）。
+  - 子进程改为 `stdio: ['ignore', 'pipe', 'pipe']` 并有界排空（保留最后 8 KiB）：不排空会把
+    子进程阻塞在写满的管道上，这是「为了让失败可解释」顺手开出来的新洞。
+  - 子进程在窗口**之后**退出时，会话会被移除：`ros2_gui_list` 不再广告已经不存在的窗口，
+    死 label 也不再挡住重试。
+  - 用例 **+6**（core 171 → 177）；撤掉启动窗口与退出处理 → **4 红**，正是那 4 条断言。
 
 ## [dsh-ros2-vision 0.1.3] - 2026-09-02
 
