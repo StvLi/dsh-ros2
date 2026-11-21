@@ -218,7 +218,9 @@ describe('GuiManager', () => {
       const spawn: SpawnFn = () => ({
         pid: 4242,
         unref() {},
-        on(event: 'error' | 'exit', cb: () => void) { if (event === 'exit') handlers.push(cb) },
+        on(event: 'error' | 'exit', cb: (...cbArgs: never[]) => void) {
+          if (event === 'exit') handlers.push(cb as () => void)
+        },
         kill() { return true },
         done: undefined,
         readOutput: () => '',
